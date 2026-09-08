@@ -1,0 +1,61 @@
+# OpenDDE Harness TUI protein-design quickstart using a validated CRLF2-VHH complex.
+#
+# Copy the quickstart TUI prompt from this directory's README.md after compute is ready.
+# Outputs are task-scoped automatically under ~/.opendde_harness/protein_design/<task_id>/.
+# Long-term cases and learned skills use protein-design/CRLF2 because target.name
+# below is CRLF2. The target name is used exactly as written.
+
+# Optional remote placement. Omit this block to use the plugin's default
+# compute URL, or uncomment it to pin the complete task to one Docker service.
+# compute:
+#   url: http://127.0.0.1:8080
+
+design:
+  n_cycles: 10
+  num_sequences: 8
+  reflection_interval: 5
+  num_mutations: 1-10
+  # Zero disables forced bootstrap redesign because this seed is materialized.
+  bootstrap_full_redesign_cycles: 0
+
+  optimization_metric: loss
+  # Omit loss_weights to use the built-in default coefficients.
+
+  cdr_contact_fraction_threshold: 0.5
+  hotspot_contact_cutoff_a: 5.0
+
+  router_skill_probabilities:
+    cdr-point-mutation: 0.65
+    cdr-full-redesign: 0.10
+    antibody-inverse-folding: 0.15  # SolubleMPNN; prepare its checkpoint in the compute image.
+    esm2-guided-mutation: 0.10
+
+  esm_device: cuda:0
+  post_refold_filter:
+    enabled: false
+
+fold:
+  # All bundled design examples use OpenDDE for the primary search fold.
+  model: opendde
+  gpus: "0,1,2,3,4,5,6,7"
+  enable_batch_inference: true
+  seeds: [973520]
+  use_msa: false
+  enable_msa_search: false
+
+target:
+  name: CRLF2
+  chains:
+    A:
+      sequence: QGGAAEGVQIQIIYFNLETVQVTWNASKYSRTNLTFHYRFNGDEAYDQCTNYLLQEGHTSGCLLDAEQRDDILYFSIRNGTHPVFTASRWMVYYLKPSSPKHVRFSWHQDAVTVTCSDLSYGDLLYEVQYRSPFDTEWQSKQENTCNVTIEGLDAEKCYSFWVRVKAMEDVYGPDTYPSDWSEVTCWQRGEIRDACAETPTPPKPKLSK
+      hotspots: []
+
+initial_binders:
+  - name: init_CRLF2_validated_VHH
+    chains:
+      D:
+        sequence: EVQLVESGGGLVQPGGSLRLSCAASPAPSGPLYLHWFRQAPGQEREFVASINSSSTSTYYADSVRGRFTNSRDNSKNTLYLQMNSLRAEDTAVYYCAAYPYPPPPPEGPPPPGPFGQGTLVTVSS
+        # Position ranges are zero-based and inclusive at both ends.
+        cdr_regions: 25:34,49:58,98:114
+        fixed_residues: 0:24,35:48,59:97,115:124
+        chain_type: VHH

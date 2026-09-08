@@ -1,0 +1,4 @@
+interface:
+  display_name: "Antibody Inverse Folding"
+  short_description: "Generate backbone-conditioned antibody sequences"
+  default_prompt: "Use $antibody-inverse-folding to design antibody sequences for a fixed backbone."

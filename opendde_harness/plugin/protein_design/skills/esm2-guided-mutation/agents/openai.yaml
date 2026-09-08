@@ -1,0 +1,4 @@
+interface:
+  display_name: "ESM-2 Guided Mutation"
+  short_description: "Propose CDR substitutions from ESM-2 DMS LLRs"
+  default_prompt: "Use $esm2-guided-mutation when a materialized CDR needs sequence-plausibility-guided one-step mutations."

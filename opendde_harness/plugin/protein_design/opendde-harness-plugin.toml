@@ -1,0 +1,52 @@
+[plugin]
+id = "protein-design"
+version = "1.0.0"
+display_name = "Protein Design"
+opendde_harness = ">=0.1"
+bundled = true
+enabled_by_default = true
+
+[plugin.contributes]
+skills_dirs = ["skills"]
+readiness = "opendde_harness.plugin.protein_design.readiness:compute_configured"
+
+[plugin.contributes.tool_description_notes]
+exec = "Protein Design models run through their configured compute service; this shell does not enter that container. Use protein_design_context and the Protein Design tools for model execution."
+
+[[plugin.contributes.prompt_segments]]
+name = "identity"
+slot = "identity"
+factory = "opendde_harness.plugin.protein_design.prompts.identity:identity_line"
+
+[[plugin.contributes.prompt_segments]]
+name = "antibody_scope"
+slot = "scope"
+factory = "opendde_harness.plugin.protein_design.prompts.identity:antibody_scope"
+
+[[plugin.contributes.tools]]
+name = "protein_design_context"
+factory = "opendde_harness.plugin.protein_design.tools.control:make_context_tool"
+
+[[plugin.contributes.tools]]
+name = "protein_design_start"
+factory = "opendde_harness.plugin.protein_design.tools.control:make_start_tool"
+
+[[plugin.contributes.tools]]
+name = "protein_design_status"
+factory = "opendde_harness.plugin.protein_design.tools.control:make_status_tool"
+
+[[plugin.contributes.tools]]
+name = "protein_design_adjust"
+factory = "opendde_harness.plugin.protein_design.tools.control:make_adjust_tool"
+
+[[plugin.contributes.tools]]
+name = "protein_design_stop"
+factory = "opendde_harness.plugin.protein_design.tools.control:make_stop_tool"
+
+[[plugin.contributes.tools]]
+name = "protein_design_candidates"
+factory = "opendde_harness.plugin.protein_design.tools.control:make_candidates_tool"
+
+[[plugin.contributes.tools]]
+name = "protein_design_search_target_msa"
+factory = "opendde_harness.plugin.protein_design.tools.control:make_target_msa_search_tool"

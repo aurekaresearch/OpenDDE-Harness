@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem in OpenDDE Harness.
+title: "fix: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve OpenDDE Harness. Please include enough detail for maintainers to reproduce the issue.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest sequence of commands or actions that reproduces the issue.
+      placeholder: |
+        1. Run `ddeharness ...`
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, shell, Python, Node, installation method, and OpenDDE Harness version or commit (`ddeharness --version`); attach `ddeharness doctor --json` for setup problems.
+      placeholder: |
+        OS:
+        Shell:
+        Python:
+        Node:
+        OpenDDE Harness:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant logs. Redact secrets, tokens, and private data.
+      render: text
+    validations:
+      required: false

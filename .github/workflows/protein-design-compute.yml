@@ -1,0 +1,59 @@
+name: Protein design tool environment
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "env-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-compute-image
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/env-')
+    runs-on: [self-hosted, linux, x64, opendde-build]
+    timeout-minutes: 180
+    environment: dockerhub
+    env:
+      IMAGE: farmertao/opendde-harness
+      DOCKER_CONFIG: ${{ runner.temp }}/opendde-docker-auth
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check publisher configuration
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          test -n "$DOCKERHUB_USERNAME" && test -n "$DOCKERHUB_TOKEN" || {
+            echo "Configure DOCKERHUB_USERNAME and DOCKERHUB_TOKEN in the dockerhub environment." >&2
+            exit 1
+          }
+          command -v timeout
+          command -v python3
+          docker buildx version
+          docker info > /dev/null
+          environment_id=$(python3 -c 'import json; print(json.load(open("docker/environment.json"))["id"])')
+          if [[ "$GITHUB_REF" == refs/tags/env-* && "$GITHUB_REF_NAME" != "env-$environment_id" ]]; then
+            echo "Environment tag must match docker/environment.json: env-$environment_id" >&2
+            exit 1
+          fi
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          chmod 700 "$DOCKER_CONFIG"
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+      - name: Build and publish runtime image
+        run: |
+          environment_image=$(python3 -c 'import json; print(json.load(open("docker/environment.json"))["image"])')
+          bash docker/build.sh --push "$environment_image" "$IMAGE:env-sha-$GITHUB_SHA"
+      - name: Log out
+        if: always()
+        run: docker logout

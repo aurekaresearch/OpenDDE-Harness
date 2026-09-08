@@ -1,0 +1,1934 @@
+body.app-view-protein-design {
+
+& {
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --surface-1: #ffffff;
+  --surface-2: #f7f7f8;
+  --surface-3: #f0edf9;
+  --surface-inset: #fafafa;
+  --border: #d9dbe0;
+  --border-strong: #b8bcc5;
+  --text: #16171a;
+  --text-soft: #34373d;
+  --text-muted: #717680;
+  --text-faint: #969ba4;
+  --accent: #8d6cff;
+  --accent-ink: #6d4ad8;
+  --accent-bg: rgb(141 108 255 / 10%);
+  --accent-border: rgb(141 108 255 / 42%);
+  --success: #45c88a;
+  --success-ink: #1d8656;
+  --success-bg: rgb(69 200 138 / 12%);
+  --error: #ed6671;
+  --error-ink: #b52937;
+  --error-bg: rgb(237 102 113 / 12%);
+  --shadow-control: 0 8px 24px -18px rgb(20 22 28 / 22%);
+  --shadow-card: 0 18px 38px -30px rgb(20 22 28 / 24%);
+  --shadow-panel: 0 24px 62px -34px rgb(20 22 28 / 28%);
+  --focus-ring: 0 0 0 3px rgb(141 108 255 / 22%);
+  --header-h: 54px;
+  --tabs-h: 0px;
+}
+
+& {
+  background: var(--bg);
+}
+
+.app-header {
+  height: var(--header-h);
+  padding: 0 14px;
+  background: var(--theme-surface-1, #ffffff);
+  border-color: var(--border);
+}
+
+.app-logo {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent-bg);
+  box-shadow: none;
+  font-size: 18px;
+}
+
+.app-brand {
+  gap: 9px;
+}
+
+.app-brand h1 {
+  display: inline;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.app-brand > div:last-child {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.app-brand > div:last-child > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.status-pill,
+.status-text,
+.ghost-button {
+  font-size: 11px;
+}
+
+.ghost-button {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+
+.scene-protein-design,
+& .scene-protein-design {
+  height: calc(100vh - var(--header-h));
+  padding: 0;
+  overflow: hidden;
+}
+
+.protein-dashboard {
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+  background: var(--bg);
+}
+
+.protein-dashboard-header {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 72px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--theme-surface-1, #ffffff);
+}
+
+.protein-page-title,
+.protein-page-title > div:first-child,
+.protein-run-progress,
+.protein-run-picker summary,
+.protein-run-option span {
+  display: flex;
+  align-items: center;
+}
+
+.protein-page-title {
+  min-width: 0;
+  gap: 18px;
+}
+
+.protein-page-title > div:first-child {
+  min-width: 0;
+  gap: 11px;
+}
+
+.protein-target-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  font-size: 20px;
+}
+
+.protein-page-title h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.protein-page-title p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.protein-page-title code {
+  color: var(--text-soft);
+  font-family: var(--mono);
+}
+
+.protein-overview-metrics {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.protein-overview-metrics > span {
+  min-width: 66px;
+  display: grid;
+  gap: 1px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--theme-surface-2, #faf9fc);
+}
+
+.protein-overview-metrics small {
+  color: var(--text-faint);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.protein-overview-metrics strong {
+  color: var(--text);
+  font: 650 11px var(--mono);
+}
+
+.protein-run-progress {
+  gap: 7px;
+  padding-left: 22px;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.protein-run-progress strong {
+  color: var(--success-ink);
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.protein-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-bg);
+}
+
+.protein-run-picker {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.protein-run-picker summary {
+  gap: 8px;
+  min-width: 210px;
+  padding: 8px 11px;
+  cursor: pointer;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.protein-run-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.protein-run-picker summary strong {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.protein-run-picker summary > span:nth-of-type(2) {
+  color: var(--success-ink);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.protein-run-icon {
+  color: var(--accent);
+}
+
+.protein-run-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  width: 100%;
+  box-sizing: border-box;
+  max-height: 340px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--theme-surface-1, #ffffff);
+  box-shadow: var(--shadow-modal);
+}
+
+.protein-run-option {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+}
+
+.protein-run-option:hover,
+.protein-run-option.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.protein-run-option span {
+  gap: 8px;
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.protein-run-option code,
+.protein-run-option small {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.protein-candidate-workspace {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) minmax(620px, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.protein-candidate-panel,
+.protein-inspector-panel,
+.protein-structure-pane,
+.protein-properties-pane {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.protein-candidate-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.protein-panel-toolbar,
+.protein-inspector-toolbar,
+.protein-properties-pane > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.protein-panel-toolbar {
+  position: relative;
+  z-index: 35;
+}
+
+.protein-panel-toolbar > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.protein-panel-toolbar span,
+.protein-inspector-toolbar small,
+.protein-properties-pane header small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.protein-panel-toolbar > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+}
+
+.protein-table-controls {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px !important;
+}
+
+.protein-table-controls > label,
+.protein-table-controls > button,
+.protein-candidate-filters > summary {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: var(--theme-surface-1, #ffffff);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.protein-table-controls select {
+  max-width: 104px;
+  border: 0;
+  outline: 0;
+  color: var(--text-soft);
+  background: transparent;
+  font: 650 9px var(--sans);
+}
+
+.protein-table-controls > button,
+.protein-candidate-filters > summary {
+  cursor: pointer;
+}
+
+.protein-table-controls > button:hover,
+.protein-candidate-filters > summary:hover,
+.protein-candidate-filters[open] > summary {
+  border-color: var(--accent-border);
+  color: var(--accent-ink);
+  background: var(--accent-bg);
+}
+
+.protein-candidate-filters {
+  position: relative;
+}
+
+.protein-candidate-filters > summary {
+  list-style: none;
+  cursor: default;
+}
+
+.protein-candidate-filters > summary::-webkit-details-marker {
+  display: none;
+}
+
+.protein-candidate-filters > summary b {
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: var(--accent);
+  font-size: 8px;
+  text-align: center;
+}
+
+.protein-filter-menu {
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(570px, calc(100vh - 150px));
+  display: grid;
+  gap: 10px;
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--theme-surface-1, #ffffff);
+  box-shadow: var(--shadow-modal);
+}
+
+.protein-filter-menu header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.protein-filter-menu header button {
+  padding: 3px 6px;
+  cursor: pointer;
+  border: 0;
+  color: var(--accent-ink);
+  background: transparent;
+  font-size: 9px;
+}
+
+.protein-filter-menu > input {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  outline: 0;
+  color: var(--text-soft);
+  background: var(--surface-inset);
+  font-size: 10px;
+}
+
+.protein-filter-menu > input:focus {
+  border-color: var(--accent-border);
+  box-shadow: var(--focus-ring);
+}
+
+.protein-filter-menu > p {
+  margin: -4px 0 0;
+  color: var(--text-faint);
+  font-size: 9px;
+  text-align: right;
+}
+
+.protein-filter-range {
+  display: grid;
+  gap: 4px;
+}
+
+.protein-filter-range > span,
+.protein-filter-range > small {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.protein-filter-range output,
+.protein-filter-range small {
+  color: var(--text-faint);
+  font: 8px var(--mono);
+}
+
+.protein-filter-range > div {
+  height: 16px;
+  position: relative;
+  background: linear-gradient(var(--accent), var(--accent)) center / 100% 2px no-repeat;
+}
+
+.protein-filter-range input[type="range"] {
+  width: 100%;
+  height: 16px;
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  appearance: none;
+  pointer-events: none;
+  background: transparent;
+}
+
+.protein-filter-range input[type="range"]::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  appearance: none;
+  pointer-events: auto;
+  cursor: ew-resize;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--theme-surface-1, #ffffff);
+  box-shadow: 0 1px 4px rgba(42, 35, 57, 0.18);
+  transition: transform 140ms var(--ease-out), box-shadow 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+
+.protein-filter-range input[type="range"]:hover::-webkit-slider-thumb {
+  border-color: var(--accent);
+  box-shadow: 0 2px 7px rgba(75, 49, 136, 0.22);
+}
+
+.protein-filter-range input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.12);
+  box-shadow: 0 2px 9px rgba(75, 49, 136, 0.27);
+}
+
+.protein-filter-range input[type="range"]::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  pointer-events: auto;
+  cursor: ew-resize;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--theme-surface-1, #ffffff);
+  box-shadow: 0 1px 4px rgba(42, 35, 57, 0.18);
+  transition: transform 140ms var(--ease-out), box-shadow 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+
+.protein-filter-range input[type="range"]:hover::-moz-range-thumb {
+  border-color: var(--accent);
+  box-shadow: 0 2px 7px rgba(75, 49, 136, 0.22);
+}
+
+.protein-filter-range input[type="range"]:active::-moz-range-thumb {
+  transform: scale(1.12);
+  box-shadow: 0 2px 9px rgba(75, 49, 136, 0.27);
+}
+
+.protein-sort-label {
+  color: var(--text-muted);
+}
+
+.protein-candidate-table {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+}
+
+.protein-candidate-head,
+.protein-candidate-row {
+  display: grid;
+  grid-template-columns: 28px 42px minmax(100px, 180px) minmax(70px, 105px) minmax(180px, 1fr) 72px 72px 62px;
+  align-items: center;
+}
+
+.protein-candidate-head {
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface-inset);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.protein-candidate-head > span {
+  padding: 0 9px;
+  border-left: 1px solid transparent;
+}
+
+.protein-candidate-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.protein-cycle-group {
+  border-bottom: 1px solid var(--border);
+}
+
+.protein-candidate-row {
+  min-height: 112px;
+  padding: 8px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  background: var(--theme-surface-1, #ffffff);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.protein-candidate-row:hover {
+  background: var(--theme-surface-inset, #fafafa);
+}
+
+.protein-candidate-row.is-active {
+  border-left-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-bg), var(--theme-surface-1, #ffffff) 38%);
+}
+
+.protein-candidate-row.is-compared {
+  background: color-mix(in srgb, var(--accent-bg) 48%, var(--theme-surface-1, #ffffff));
+}
+
+.protein-candidate-row.is-active.is-compared {
+  background: linear-gradient(90deg, var(--accent-bg), color-mix(in srgb, var(--accent-bg) 36%, var(--theme-surface-1, #ffffff)));
+}
+
+.protein-candidate-row > div {
+  min-width: 0;
+  padding: 0 9px;
+}
+
+.protein-candidate-sequence {
+  display: grid;
+  gap: 7px;
+}
+
+.protein-candidate-sequence-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  position: relative;
+}
+
+.protein-sequence-summary {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1;
+  display: block;
+  cursor: default;
+  outline: none;
+}
+
+.protein-candidate-sequence code {
+  min-width: 0;
+  width: 100%;
+  display: block;
+  overflow: hidden;
+  color: var(--text-soft);
+  font: 11px/1.8 var(--mono);
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.protein-candidate-sequence code.protein-annotated-sequence {
+  min-height: 38px;
+  height: auto;
+  flex-wrap: wrap;
+  row-gap: 22px;
+  display: flex;
+  align-items: flex-end;
+  line-height: 18px;
+  text-overflow: clip;
+}
+
+.protein-sequence-summary:focus-visible {
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px var(--accent-border);
+}
+
+.protein-sequence-preview {
+  --protein-sequence-cell-width: 13px;
+  width: min(620px, calc(100vw - 24px));
+  display: none;
+  position: fixed;
+  z-index: 1100;
+  padding: 12px 14px 14px;
+  pointer-events: none;
+  border: 1px solid rgba(108, 67, 201, 0.24);
+  border-radius: 8px;
+  color: var(--text-soft);
+  background: var(--theme-overlay, rgba(255, 255, 255, 0.98));
+  box-shadow: 0 14px 40px rgba(42, 31, 68, 0.18);
+}
+
+.protein-sequence-preview.is-open {
+  display: block;
+  animation: protein-sequence-preview-enter 160ms var(--ease-out) both;
+}
+
+.protein-sequence-preview header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.protein-sequence-preview header strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.protein-sequence-preview header span {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.protein-sequence-preview > div {
+  display: grid;
+  gap: 7px;
+}
+
+.protein-full-sequence-line {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.protein-full-sequence-labels,
+.protein-full-sequence-residues {
+  display: grid;
+  justify-content: start;
+}
+
+.protein-full-sequence-labels {
+  height: 12px;
+}
+
+.protein-full-cdr-label {
+  overflow: hidden;
+  border-radius: 3px 3px 0 0;
+  color: #ffffff;
+  background: #6c43c9;
+  font: 650 8px/12px var(--sans);
+  text-align: center;
+}
+
+.protein-full-cdr-label.protein-full-cdr-2 {
+  background: #4d71bd;
+}
+
+.protein-full-cdr-label.protein-full-cdr-3 {
+  background: #8752ab;
+}
+
+.protein-full-sequence-residues span {
+  min-width: 0;
+  color: var(--theme-text-soft, #5a5267);
+  font: 10px/17px var(--mono);
+  text-align: center;
+}
+
+.protein-full-sequence-residues span.is-cdr {
+  color: #ffffff;
+  background: #d86f19;
+  font-weight: 650;
+}
+
+.protein-full-sequence-residues span.protein-full-cdr-2 {
+  background: #b7621e;
+}
+
+.protein-full-sequence-residues span.protein-full-cdr-3 {
+  background: #c0522f;
+}
+
+.protein-sequence-plain {
+  flex: none;
+  padding-bottom: 1px;
+}
+
+.protein-cdr-region {
+  flex: none;
+  display: inline-grid;
+  grid-template-rows: 14px 19px;
+  align-items: end;
+  overflow: hidden;
+  border-radius: 3px;
+  color: #ffffff;
+  letter-spacing: 0.18em;
+  text-align: center;
+  vertical-align: bottom;
+}
+
+.protein-cdr-label {
+  min-width: 100%;
+  padding: 1px 4px;
+  color: #ffffff;
+  background: #6c43c9;
+  font: 650 8px/12px var(--sans);
+  letter-spacing: 0;
+}
+
+.protein-cdr-residues {
+  min-width: 100%;
+  padding: 0 2px 1px 4px;
+  background: #d86f19;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.protein-cdr-region-2 .protein-cdr-label {
+  background: #4d71bd;
+}
+
+.protein-cdr-region-2 .protein-cdr-residues {
+  background: #b7621e;
+}
+
+.protein-cdr-region-3 .protein-cdr-label {
+  background: #8752ab;
+}
+
+.protein-cdr-region-3 .protein-cdr-residues {
+  background: #c0522f;
+}
+
+.protein-candidate-sequence button {
+  flex: none;
+  height: 24px;
+  padding: 0 7px;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--theme-surface-1, #ffffff);
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.protein-candidate-sequence button:hover {
+  border-color: var(--accent-border);
+  color: var(--accent-ink);
+  background: var(--accent-bg);
+}
+
+.protein-candidate-sequence small {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.protein-candidate-sequence small span {
+  color: #b7651c;
+}
+
+.protein-candidate-id code {
+  display: block;
+  overflow: hidden;
+  color: var(--text-soft);
+  font: 10px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.protein-candidate-target {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.protein-candidate-score strong,
+.protein-candidate-metric strong {
+  color: var(--text);
+  font: 600 12px var(--mono);
+}
+
+.protein-candidate-cycle span {
+  display: inline-grid;
+  min-width: 28px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font: 10px var(--mono);
+}
+
+.protein-candidate-check {
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.protein-candidate-check input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.protein-candidate-check span {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--theme-surface-1, #ffffff);
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.protein-candidate-check input:checked + span {
+  border-color: var(--accent);
+  background: var(--accent);
+  transform: scale(1.04);
+}
+
+.protein-candidate-check input:checked + span::after {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border-bottom: 2px solid white;
+  border-left: 2px solid white;
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.protein-cycle-more {
+  background: var(--theme-surface-inset, #fafafa);
+}
+
+.protein-cycle-more summary {
+  display: grid;
+  grid-template-columns: var(--candidate-columns);
+  align-items: center;
+  padding: 7px 8px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  list-style: none;
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.protein-cycle-more-label {
+  grid-column: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+}
+
+.protein-cycle-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.protein-cycle-more summary span {
+  min-width: 20px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  color: var(--accent-ink);
+  text-align: center;
+}
+
+.protein-cycle-more .protein-candidate-row {
+  min-height: 94px;
+  border-top: 1px solid var(--border);
+  background: var(--theme-surface-2, #fcfcfd);
+}
+
+.protein-inspector-panel {
+  display: grid;
+  grid-template-rows: minmax(280px, 1.15fr) minmax(220px, 0.85fr);
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.protein-structure-pane {
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  background: var(--theme-surface-2, #fbfbfc);
+}
+
+.protein-structure-pane .protein-inspector-toolbar {
+  min-height: 70px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  border-bottom-color: var(--theme-border, #e7e5eb);
+  background: var(--theme-surface-1, #ffffff);
+}
+
+.protein-inspector-toolbar > div:first-child,
+.protein-properties-pane > header > div,
+.protein-structure-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.protein-inspector-identity {
+  flex: 1;
+  flex-wrap: wrap;
+  row-gap: 5px !important;
+  min-width: 0;
+}
+
+.protein-inspector-identity > strong {
+  flex: none;
+}
+
+.protein-inspector-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px rgb(141 108 255 / 65%);
+}
+
+.protein-structure-actions label {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.protein-structure-actions select,
+.protein-structure-actions button,
+.protein-structure-color-menu summary {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--theme-surface-1, #ffffff);
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.protein-structure-actions button:hover,
+.protein-structure-actions button.is-active,
+.protein-structure-color-menu summary:hover,
+.protein-structure-color-menu[open] summary {
+  border-color: var(--accent-border);
+  color: var(--accent-ink);
+  background: var(--accent-bg);
+}
+
+.protein-structure-color-menu {
+  position: relative;
+}
+
+.protein-structure-color-menu summary {
+  list-style: none;
+  white-space: nowrap;
+}
+
+.protein-structure-color-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.protein-structure-color-menu summary strong {
+  font-weight: 650;
+}
+
+.protein-structure-color-menu summary i {
+  color: var(--text-faint);
+  font-style: normal;
+}
+
+.protein-structure-color-menu > div {
+  width: 140px;
+  display: grid;
+  gap: 2px;
+  padding: 5px;
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 40;
+  border: 1px solid rgba(108, 67, 201, 0.2);
+  border-radius: 7px;
+  background: var(--theme-surface-1, #ffffff);
+  box-shadow: 0 10px 28px rgba(55, 37, 91, 0.14);
+}
+
+.protein-structure-actions .protein-structure-color-menu button {
+  width: 100%;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.protein-structure-actions .protein-structure-color-menu button:hover,
+.protein-structure-actions .protein-structure-color-menu button.is-active {
+  background: rgba(108, 67, 201, 0.09);
+}
+
+#proteinStructureViewer {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  margin: 10px 12px 12px;
+  border: 1px solid var(--theme-border, #dedbe5);
+  border-radius: 8px;
+  background: var(--theme-surface-1, #ffffff);
+  box-shadow: 0 3px 12px rgba(42, 35, 57, 0.055);
+}
+
+#proteinStructureViewer > .msp-plugin {
+  position: absolute;
+  inset: 0;
+}
+
+#proteinStructureViewer .msp-layout-standard {
+  border: 0;
+}
+
+#proteinStructureViewer .msp-layout-top,
+#proteinStructureViewer .msp-sequence,
+#proteinStructureViewer .msp-sequence-wrapper-non-empty {
+  background: var(--theme-surface-2, #f6f5f8);
+}
+
+#proteinStructureViewer .msp-layout-top {
+  border-bottom: 1px solid var(--theme-border, #ded9e8);
+}
+
+#proteinStructureViewer .msp-sequence-select {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--theme-surface-2, #f6f5f8);
+  border-bottom: 1px solid var(--theme-border, #ebe8ef);
+}
+
+#proteinStructureViewer .msp-sequence-select .protein-unified-picker {
+  vertical-align: middle;
+  margin: 0;
+  flex: 0 1 auto;
+  max-width: 150px;
+}
+
+#proteinStructureViewer .msp-sequence-select .protein-unified-picker > summary {
+  display: block;
+  box-sizing: border-box;
+  min-height: 20px;
+  height: 20px;
+  padding: 1px 7px;
+  font: 500 11px/16px var(--sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#proteinStructureViewer .msp-sequence-select > span:first-child,
+#proteinStructureViewer .msp-sequence-select > select:first-of-type {
+  display: none;
+}
+
+#proteinStructureViewer .msp-sequence-select > select {
+  height: 22px;
+  margin: 2px 7px 2px 0;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(108, 67, 201, 0.22) !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background-color: transparent !important;
+}
+
+#proteinStructureViewer .msp-sequence-wrapper-non-empty {
+  color: var(--theme-text, #30293d);
+}
+
+#proteinStructureViewer .msp-sequence-wrapper .msp-sequence-present {
+  color: var(--theme-text-soft, #3d3451);
+}
+
+#proteinStructureViewer .msp-sequence-chain-label,
+#proteinStructureViewer .msp-sequence-wrapper .msp-sequence-label,
+#proteinStructureViewer .msp-sequence-wrapper .msp-sequence-number {
+  color: var(--theme-accent, #7354b6);
+}
+
+#proteinStructureViewer.has-message::after {
+  content: attr(data-message);
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--text-muted);
+  background: var(--theme-overlay, rgb(255 255 255 / 88%));
+  font-size: 11px;
+  text-align: center;
+  animation: protein-message-enter 180ms ease both;
+}
+
+#proteinStructureViewer.protein-error::after {
+  color: var(--error-ink);
+}
+
+.protein-structure-legend {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.protein-structure-legend span {
+  max-width: 240px;
+  color: var(--theme-text-muted, #625879);
+  font: 600 9px var(--mono);
+  overflow-wrap: anywhere;
+  animation: protein-chip-enter 220ms var(--ease-out) both;
+}
+
+#proteinStructureViewer button[title*="Augmented/Virtual Reality"],
+#proteinStructureViewer button[title="Enter XR"],
+#proteinStructureViewer button[title="Exit XR"] {
+  display: none !important;
+}
+
+.protein-structure-legend span + span::before {
+  content: "·";
+  margin-right: 5px;
+  color: var(--theme-text-faint, #aaa2b6);
+}
+
+.protein-plddt-legend {
+  display: none;
+  align-items: center;
+  flex: none;
+  gap: 0;
+  padding: 3px 6px;
+  border: 1px solid rgba(108, 67, 201, 0.14);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--theme-overlay, rgba(255, 255, 255, 0.72));
+  font-size: 9px;
+}
+
+.protein-structure-pane.is-colored-by-plddt .protein-plddt-legend {
+  display: flex;
+  animation: protein-chip-enter 220ms var(--ease-out) both;
+}
+
+.protein-plddt-legend strong {
+  margin-right: 5px;
+  font-weight: 650;
+}
+
+.protein-plddt-legend i {
+  width: 8px;
+  height: 8px;
+}
+
+.protein-plddt-legend i:first-of-type {
+  border-radius: 4px 0 0 4px;
+  background: #ff7d45;
+}
+
+.protein-plddt-legend i:nth-of-type(2) {
+  background: #ffdb13;
+}
+
+.protein-plddt-legend i:nth-of-type(3) {
+  background: #65cbf3;
+}
+
+.protein-plddt-legend i:last-of-type {
+  border-radius: 0 4px 4px 0;
+  background: #0053d6;
+}
+
+.protein-structure-message {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.protein-structure-pane.is-expanded {
+  position: fixed;
+  inset: 14px;
+  z-index: 1000;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-modal);
+}
+
+.protein-properties-pane {
+  display: flex;
+  flex-direction: column;
+  border: 0;
+}
+
+.protein-properties-pane > header {
+  min-height: 42px;
+}
+
+.protein-properties-icon {
+  color: var(--accent-ink);
+}
+
+.protein-property-picker {
+  position: relative;
+  z-index: 30;
+}
+
+.protein-property-picker summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  cursor: pointer;
+  list-style: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.protein-property-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+.protein-property-picker summary:hover,
+.protein-property-picker[open] summary {
+  border-color: var(--border-strong);
+  background: var(--theme-surface-1, #ffffff);
+}
+
+.protein-property-picker summary > span:nth-of-type(2),
+.protein-property-picker summary i {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.protein-property-picker[open] summary i {
+  transform: rotate(180deg);
+}
+
+.protein-property-menu {
+  max-height: min(360px, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  width: 230px;
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--theme-surface-1, #ffffff);
+  box-shadow: var(--shadow-modal);
+  animation: protein-menu-enter 170ms var(--ease-out) both;
+}
+
+.protein-property-menu p,
+.protein-property-menu small {
+  margin: 3px 7px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.protein-property-menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  cursor: pointer;
+  border-radius: 5px;
+  color: var(--text-soft);
+  font-size: 10px;
+  transition: background 130ms ease;
+}
+
+.protein-property-menu label:hover {
+  background: var(--accent-bg);
+}
+
+.protein-property-menu input {
+  accent-color: var(--accent);
+}
+
+#proteinPropertiesChart {
+  min-height: 0;
+  flex: 1;
+  padding: 8px 10px 6px;
+  overflow: hidden;
+  background: var(--theme-surface-1, #ffffff);
+}
+
+.protein-properties-chart {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.protein-properties-chart.is-expanding {
+  transform-origin: center;
+  animation: protein-chart-expand 420ms var(--ease-out) both;
+}
+
+.protein-properties-chart.is-compressing {
+  transform-origin: center;
+  animation: protein-chart-compress 420ms var(--ease-out) both;
+}
+
+.protein-properties-chart svg {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.protein-property-spine,
+.protein-property-tick line {
+  stroke: var(--theme-text-soft, #24262b);
+  stroke-width: 1;
+}
+
+.protein-property-label {
+  fill: var(--theme-text, #151619);
+  font: 600 12px var(--sans);
+}
+
+.protein-property-limit {
+  fill: var(--text-faint);
+  font: 10px var(--mono);
+}
+
+.protein-property-tick text,
+.protein-property-color-scale text {
+  fill: var(--theme-text-muted, #5f636b);
+  font: 9px var(--mono);
+}
+
+.protein-property-color-scale > text:first-child {
+  fill: var(--theme-text-soft, #303238);
+  font: 600 9px var(--sans);
+}
+
+.protein-property-axis.is-reflowing {
+  animation: protein-axis-reflow 340ms var(--ease-out) both;
+}
+
+.protein-candidate-line {
+  fill: none;
+  stroke: var(--candidate-color);
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  cursor: pointer;
+  pointer-events: stroke;
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+  transition: opacity 220ms ease, stroke-width 220ms ease, stroke 220ms ease;
+}
+
+.protein-candidate-line-control {
+  outline: none;
+}
+
+.protein-candidate-line-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  cursor: pointer;
+  pointer-events: stroke;
+  vector-effect: non-scaling-stroke;
+}
+
+.protein-candidate-line.is-selected {
+  stroke-width: 2.7;
+  opacity: 1;
+}
+
+.protein-candidate-line.is-muted {
+  stroke: var(--theme-border-strong, #c5c8ce);
+  stroke-width: 0.9;
+  opacity: 0.48;
+}
+
+.protein-candidate-line.has-missing-values:not(.is-entering) {
+  stroke-dasharray: 4 3;
+}
+
+.protein-candidate-line.is-reflowing {
+  animation: protein-line-reflow 340ms var(--ease-out) both;
+}
+
+.protein-candidate-line:hover {
+  stroke-width: 3;
+  opacity: 1;
+}
+
+.protein-candidate-line-control:hover .protein-candidate-line {
+  stroke-width: 3;
+  opacity: 1;
+}
+
+.protein-candidate-line:focus-visible {
+  outline: none;
+  filter: drop-shadow(0 0 3px var(--candidate-color));
+  stroke-width: 3.2;
+  opacity: 1;
+}
+
+.protein-candidate-line-control:focus-visible .protein-candidate-line {
+  filter: drop-shadow(0 0 3px var(--candidate-color));
+  stroke-width: 3.2;
+  opacity: 1;
+}
+
+.protein-candidate-line.is-entering {
+  stroke-dasharray: none;
+}
+
+.protein-property-summary {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 2px 8px 10px;
+  color: var(--theme-text-muted, #555a63);
+  font-size: 10px;
+}
+
+.protein-property-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.protein-property-summary-item i {
+  width: 22px;
+  height: 7px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ff7a1a, #913de0);
+}
+
+.protein-property-summary-item.is-muted i {
+  background: var(--theme-border-strong, #bfc2c8);
+}
+
+.protein-property-empty {
+  padding: 0 0 14px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+@keyframes protein-axis-reflow {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes protein-chart-expand {
+  from {
+    transform: scaleX(0.92);
+  }
+}
+
+@keyframes protein-chart-compress {
+  from {
+    transform: scaleX(1.08);
+  }
+}
+
+@keyframes protein-line-reflow {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes protein-message-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes protein-chip-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes protein-menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes protein-sequence-preview-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+}
+
+.protein-loading,
+.protein-empty {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.protein-candidate-body::-webkit-scrollbar,
+#proteinPropertiesChart::-webkit-scrollbar,
+.protein-run-menu::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.protein-candidate-body::-webkit-scrollbar-thumb,
+#proteinPropertiesChart::-webkit-scrollbar-thumb,
+.protein-run-menu::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+
+@media (max-width: 1180px) {
+  html,
+  body {
+    overflow: hidden;
+  }
+
+  .protein-candidate-workspace {
+    grid-template-columns: minmax(430px, 0.9fr) minmax(520px, 1.1fr);
+  }
+
+  .protein-candidate-head,
+  .protein-candidate-row {
+    grid-template-columns: 28px 38px minmax(58px, 0.65fr) 54px minmax(160px, 1.4fr) 58px 58px 52px;
+  }
+
+  .protein-table-controls > label {
+    font-size: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    height: var(--header-h);
+    flex-direction: row;
+    align-items: center;
+    padding-block: 0;
+  }
+
+  .status-text {
+    display: none;
+  }
+
+  .protein-dashboard-header {
+    min-height: 94px;
+    align-items: flex-start;
+  }
+
+  .protein-run-progress {
+    display: none;
+  }
+
+  .protein-overview-metrics {
+    display: none;
+  }
+
+  .protein-candidate-workspace {
+    overflow: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .protein-candidate-panel {
+    min-height: 620px;
+    border-radius: 7px;
+  }
+
+  .protein-inspector-panel {
+    min-height: 720px;
+    border-radius: 7px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+}
+
+body.app-view-protein-design .scene-protein-design {
+  height: calc(100vh - var(--header-h));
+  overflow: auto;
+}
+body.app-view-protein-design .workspace-tabs {
+  display: flex;
+  position: absolute;
+  top: 0;
+  left: 240px;
+  height: var(--header-h);
+  background: transparent;
+  border: 0;
+}
+body.app-view-protein-design #proteinCandidateWorkspace {
+  height: max(720px, calc(100vh - var(--header-h)));
+}
+body.app-view-protein-design .protein-design-details {
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+body.app-view-protein-design .protein-design-details .protein-thinking-state { margin: 0; }
+body.app-view-protein-design .protein-design-details .protein-section { background: var(--surface-1); }
+body.app-view-protein-design .protein-design-details .protein-activity-list { max-height: 460px; }
+body.app-view-protein-design .protein-design-details #proteinSelectedEvidence { padding: 14px; }
+body.app-view-protein-design .protein-design-results { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+body.app-view-protein-design .protein-post-filter-results { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+body.app-view-protein-design [hidden] { display: none !important; }
+body.app-view-protein-design .protein-metric-explorer { display: block; }
+body.app-view-protein-design .protein-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-height: none; overflow: visible; }
+body.app-view-protein-design .protein-metric-card { cursor: default; }
+body.app-view-protein-design .protein-process-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+body.app-view-protein-design .protein-process-grid > section { min-width: 0; height: 720px; display: flex; flex-direction: column; }
+body.app-view-protein-design { --cdr-background: #e8ddff; --cdr-foreground: #6334b0; }
+body.app-view-protein-design :is(.protein-molstar-cdr-1, .protein-molstar-cdr-2, .protein-molstar-cdr-3) { background: var(--cdr-background) !important; color: var(--cdr-foreground) !important; }
+body.app-view-protein-design .protein-node-preview { position: fixed; width: 300px; padding: 12px; z-index: 1000; background: var(--theme-surface-1, white); border: 1px solid var(--accent-border); border-radius: 10px; box-shadow: var(--shadow-modal); pointer-events: none; }
+body.app-view-protein-design .protein-node-preview code { display: block; overflow-wrap: anywhere; white-space: normal; max-height: 80px; overflow: hidden; font-size: 10px; }
+body.app-view-protein-design .protein-node-preview-structure { height: 170px; position: relative; }
+body.app-view-protein-design .protein-node-preview { width: 360px; max-width: calc(100vw - 24px); padding: 0; overflow: hidden; border-radius: 14px; box-shadow: 0 12px 38px #24144426; }
+body.app-view-protein-design .protein-node-preview.is-pinned { pointer-events: auto; }
+body.app-view-protein-design .protein-node-preview header { display: flex; justify-content: space-between; padding: 12px; background: var(--theme-surface-3, #f7f4ff); }
+body.app-view-protein-design .protein-node-preview header strong { display: block; font-size: 12px; overflow-wrap: anywhere; }
+body.app-view-protein-design .protein-node-preview small, body.app-view-protein-design .protein-node-preview footer { color: var(--text-muted); font-size: 10px; }
+body.app-view-protein-design .protein-node-preview button { border: 0; background: transparent; cursor: pointer; font-size: 22px; }
+body.app-view-protein-design .protein-node-preview-structure { height: 210px; }
+body.app-view-protein-design .protein-node-preview-metrics { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
+body.app-view-protein-design .protein-node-preview-metrics strong { display: block; font: 12px var(--mono); }
+body.app-view-protein-design .protein-node-preview details { padding: 8px 12px; font-size: 11px; }
+body.app-view-protein-design .protein-node-preview code { max-height: 65px; overflow-y: auto; }
+body.app-view-protein-design .protein-node-preview footer { padding: 8px 12px; border-top: 1px solid var(--border); }
+body.app-view-protein-design .protein-tree-scroll { position: relative; }
+body.app-view-protein-design .protein-node-preview { position: absolute; overflow-y: auto; overscroll-behavior: contain; }
+body.app-view-protein-design .protein-node-sequence { padding: 10px 12px; --protein-sequence-cell-width: 7px; font-size: 10px; }
+body.app-view-protein-design .protein-node-sequence > strong { display: block; margin-bottom: 8px; }
+body.app-view-protein-design .protein-candidate-table { display: block; overflow: auto; }
+body.app-view-protein-design .protein-candidate-head,
+body.app-view-protein-design .protein-candidate-row { grid-template-columns: var(--candidate-columns); }
+body.app-view-protein-design .protein-candidate-head,
+body.app-view-protein-design .protein-candidate-body { width: var(--candidate-table-width); min-width: 100%; }
+body.app-view-protein-design .protein-candidate-head { position: sticky; top: 0; z-index: 3; min-height: 44px; }
+body.app-view-protein-design .protein-candidate-body { overflow: visible; }
+body.app-view-protein-design .protein-sequence-summary { flex: 0 1 auto; }
+body.app-view-protein-design .protein-inline-cdr-sequence { padding-top: 14px; line-height: 22px; }
+body.app-view-protein-design .protein-inline-cdr { display: inline-block; position: relative; border-radius: 3px; }
+body.app-view-protein-design :is(.protein-inline-cdr, .protein-full-sequence-residues span.is-cdr, .protein-cdr-residues) { background: var(--cdr-background); color: var(--cdr-foreground); }
+body.app-view-protein-design :is(.protein-full-cdr-label, .protein-cdr-label) { background: var(--cdr-foreground); color: var(--theme-surface-1, white); }
+body.app-view-protein-design .protein-inline-cdr small { position: absolute; top: -13px; left: 0; width: 100%; text-align: center; font: 8px/12px var(--font); color: var(--accent); }
+body.app-view-protein-design .protein-design-loop { zoom: 0.75; flex-shrink: 0; }
+body.app-view-protein-design .protein-loop-io { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+body.app-view-protein-design .protein-loop-io .protein-activity-list { min-height: 0; flex: 1; overflow: auto; }
+body.app-view-protein-design .protein-loop-io .protein-empty-inline { min-height: 0; padding: 20px; }
+body.app-view-protein-design .protein-tree-stage { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+body.app-view-protein-design .protein-tree-scroll { min-height: 0; flex: 1; overflow: auto; }
+body.app-view-protein-design .protein-tree-cycle-axis text { font-size: 12px; fill: var(--text-muted); }
+body.app-view-protein-design .protein-tree-toolbar, body.app-view-protein-design .protein-tree-detail { flex-shrink: 0; }
+body.app-view-protein-design .protein-tree-stage { background: radial-gradient(circle, var(--theme-border, #e8e4f1) 1px, transparent 1px); background-size: 18px 18px; }
+body.app-view-protein-design .protein-tree-edges path { stroke: var(--theme-border-strong, #d7d2e4); stroke-width: 1.3; opacity: 0.7; }
+body.app-view-protein-design .protein-tree-edges path.is-highlighted { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
+body.app-view-protein-design .protein-tree-node circle { stroke: white; stroke-width: 1.5; }
+body.app-view-protein-design .protein-tree-node.is-highlighted circle { stroke: var(--accent); stroke-width: 3; filter: drop-shadow(0 0 3px #a194f366); }
+body.app-view-protein-design .protein-tree-detail { min-height: 42px; padding: 12px; border-top: 1px solid var(--border); background: var(--surface-1); font-size: 11px; overflow-wrap: anywhere; color: var(--text-muted); }
+body.app-view-protein-design .protein-chart-tooltip { left: auto; right: 10px; top: 10px; white-space: pre-line; pointer-events: none; font-size: 11px; }
+body.app-view-protein-design .protein-chart-crosshair { stroke: var(--text-muted); stroke-dasharray: 4 4; pointer-events: none; }
+body.app-view-protein-design .protein-metric-svg circle[data-cycle] { r: 3.6; stroke: var(--surface-1); stroke-width: 0.8; }
+body.app-view-protein-design .protein-metric-svg circle.is-hovered { r: 5; stroke: var(--surface-1); stroke-width: 1.2; }
+@media (max-width: 1200px) {
+  body.app-view-protein-design .protein-process-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  body.app-view-protein-design .protein-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  body.app-view-protein-design .protein-metric-grid { grid-template-columns: 1fr; }
+}
+body.app-view-protein-design .protein-metric-card .protein-chart-wrap { height: auto; }
+body.app-view-protein-design .protein-chart-legend-compact { flex-wrap: wrap; }
+body.app-view-protein-design .protein-loop-connectors { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--accent); pointer-events: none; }
+body.app-view-protein-design .protein-native-select { display: none !important; }
+body.app-view-protein-design .protein-unified-picker { display: inline-block; position: relative; }
+body.app-view-protein-design :is(.protein-unified-picker, .protein-cycle-picker, .protein-property-picker, .protein-candidate-filters, .protein-structure-color-menu, .protein-run-picker) > summary {
+  box-sizing: border-box; min-height: 34px; height: auto; padding: 7px 10px;
+  border: 1px solid var(--border-strong); border-radius: 8px; background: var(--theme-surface-1, white);
+  color: var(--text); font: 500 12px/18px var(--sans); cursor: pointer; list-style: none;
+}
+body.app-view-protein-design :is(.protein-unified-picker, .protein-cycle-picker, .protein-property-picker, .protein-candidate-filters, .protein-structure-color-menu, .protein-run-picker) > summary::-webkit-details-marker { display: none; }
+body.app-view-protein-design :is(.protein-unified-picker, .protein-cycle-picker, .protein-property-picker, .protein-candidate-filters, .protein-structure-color-menu, .protein-run-picker)[open] > summary {
+  border-color: var(--accent); box-shadow: var(--focus-ring);
+}
+body.app-view-protein-design .protein-table-controls > label { height: auto; border: 0; background: transparent; padding: 0; gap: 6px; }
+body.app-view-protein-design :is(.protein-unified-menu, .protein-cycle-picker > div, .protein-property-menu, .protein-filter-menu, .protein-structure-color-menu > div, .protein-run-menu) {
+  box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 8px;
+  background: var(--theme-surface-1, white); padding: 6px; box-shadow: 0 8px 24px #24144420;
+  max-height: min(360px, 55vh); overflow-y: auto; overscroll-behavior: contain;
+}
+body.app-view-protein-design .protein-unified-menu { position: fixed; inset: auto; margin: 0; z-index: 2000; }
+body.app-view-protein-design :is(.protein-unified-menu, .protein-cycle-picker > div, .protein-structure-color-menu > div) button {
+  display: block; width: 100%; min-height: 32px; height: auto; padding: 7px 10px;
+  border: 0; border-radius: 6px; background: var(--theme-surface-1, white); text-align: left;
+  font: 500 12px/18px var(--sans); color: var(--text); cursor: pointer;
+}
+body.app-view-protein-design :is(.protein-unified-menu, .protein-cycle-picker > div, .protein-structure-color-menu > div) button:is(:hover, :focus-visible, .is-active, [aria-selected="true"]) { color: var(--accent); background: var(--accent-bg); }
+body.app-view-protein-design .protein-unified-menu button:disabled { opacity: 0.45; cursor: not-allowed; }
+body.app-view-protein-design .protein-loop-stage { cursor: pointer; }
+body.app-view-protein-design .protein-loop-stage[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--focus-ring); }
+@keyframes protein-step-glow {
+  0%, 100% { box-shadow: 0 0 0 3px #a78bfa25, 0 0 12px #a78bfa30; }
+  50% { box-shadow: 0 0 0 5px #a78bfa40, 0 0 24px #a78bfa65; }
+}
+body.app-view-protein-design .protein-loop-stage.is-executing { border-color: var(--accent); animation: protein-step-glow 2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  body.app-view-protein-design .protein-loop-stage.is-executing { animation: none; box-shadow: 0 0 12px #a78bfa55; }
+}
+body.app-view-protein-design .protein-loop-io-toolbar { display: flex; justify-content: space-between; padding: 12px; border-top: 1px solid var(--border); }
+body.app-view-protein-design .protein-loop-io-toolbar select { margin-left: 8px; padding: 5px; }
+body.app-view-protein-design .protein-loop-io-toolbar label { display: flex; align-items: center; gap: 8px; }
+body.app-view-protein-design .protein-cycle-picker { position: relative; min-width: 112px; }
+body.app-view-protein-design .protein-cycle-picker summary { cursor: pointer; list-style: none; background: var(--theme-surface-1, white); padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 8px; }
+body.app-view-protein-design .protein-cycle-picker > div { position: absolute; z-index: 20; top: calc(100% + 6px); width: 100%; max-height: 180px; overflow: auto; background: var(--theme-surface-1, white); padding: 5px; border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--shadow-modal); }
+body.app-view-protein-design .protein-cycle-picker button { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 7px; border-radius: 5px; cursor: pointer; }
+body.app-view-protein-design .protein-cycle-picker button:hover { background: var(--accent-bg); color: var(--accent); }
+
+html[data-theme="dark"],
+html[data-theme="dark"] body {
+  color-scheme: dark;
+  --bg: #111318;
+  --surface-1: #191c24;
+  --surface-2: #20242e;
+  --surface-3: #2b2440;
+  --surface-inset: #15181f;
+  --border: #343947;
+  --border-strong: #525b6d;
+  --text: #edf0f7;
+  --text-soft: #cbd2df;
+  --text-muted: #a1aabd;
+  --text-faint: #8993a7;
+  --accent: #b39aff;
+  --accent-ink: #c4afff;
+  --accent-bg: rgb(179 154 255 / 15%);
+  --accent-border: rgb(179 154 255 / 48%);
+  --success: #6cdda8;
+  --success-ink: #85e7bb;
+  --success-bg: rgb(108 221 168 / 13%);
+  --error: #ff8795;
+  --error-ink: #ffabb4;
+  --error-bg: rgb(255 135 149 / 13%);
+  --warning: #efb96c;
+  --warning-ink: #f6cd94;
+  --warning-bg: rgb(239 185 108 / 13%);
+  --teal: #75c6d5;
+  --purple: #b39aff;
+  --cdr-background: #403059;
+  --cdr-foreground: #decaff;
+  --shadow-control: 0 8px 24px -18px #000a;
+  --shadow-card: 0 18px 38px -30px #000c;
+  --shadow-panel: 0 24px 62px -34px #000c;
+  --shadow-modal: 0 28px 80px -34px #000e;
+  --focus-ring: 0 0 0 3px rgb(179 154 255 / 28%);
+  --theme-surface-1: var(--surface-1);
+  --theme-surface-2: var(--surface-2);
+  --theme-surface-3: var(--surface-3);
+  --theme-surface-inset: var(--surface-inset);
+  --theme-overlay: rgb(25 28 36 / 92%);
+  --theme-border: var(--border);
+  --theme-border-strong: var(--border-strong);
+  --theme-text: var(--text);
+  --theme-text-soft: var(--text-soft);
+  --theme-text-muted: var(--text-muted);
+  --theme-text-faint: var(--text-faint);
+  --theme-accent: var(--accent);
+  scrollbar-color: var(--border-strong) var(--surface-inset);
+}
+
+html[data-theme="dark"] ::selection { background: #58427f; color: #fff; }
+html[data-theme="dark"] :is(button, input, select, summary):focus-visible { outline-color: var(--accent); }
+html[data-theme="dark"] .msp-plugin { color: var(--text); background: var(--surface-1); }
+html[data-theme="dark"] .msp-plugin :is(.msp-btn, .msp-form-control, .msp-control-group-header, .msp-sequence-wrapper, .msp-viewport-controls, .msp-control-row) {
+  color: var(--text-soft); background-color: var(--surface-2); border-color: var(--border);
+}
+@media(max-width: 680px) { body.app-view-protein-design .protein-loop-connectors { display: none; } }
+
+@media (max-width: 1000px) {
+  body.app-view-protein-design .workspace-tabs {
+    position: relative;
+    left: auto;
+    height: 40px;
+  }
+  body.app-view-protein-design .scene-protein-design {
+    height: calc(100vh - var(--header-h) - 40px);
+  }
+}

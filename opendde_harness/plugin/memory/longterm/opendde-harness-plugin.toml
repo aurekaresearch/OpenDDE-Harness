@@ -1,0 +1,29 @@
+[plugin]
+id                 = "long-term-memory"
+version            = "1.1.0"
+display_name       = "Long-term memory"
+opendde_harness   = ">=0.1"
+bundled            = true
+enabled_by_default = true
+
+[[plugin.contributes.memory_backends]]
+name    = "longterm"
+factory = "opendde_harness.plugin.memory.longterm.backend:make_backend"
+
+# Multimodal understanding exposed as an agent tool: the LLM calls
+# ``understand_media(paths=[...])`` to read attachments it can't consume
+# natively (PDF / audio / Office / scanned images), reusing the memory
+# library's ingest-time multimodal parser. Requires the library's multimodal
+# extra + its multimodal settings at call time.
+[[plugin.contributes.tools]]
+name    = "understand_media"
+factory = "opendde_harness.plugin.memory.longterm.tools:make_understand_media_tool"
+
+# No config_schema block: the registry passes the user's
+# ``plugins.config["long-term-memory"]`` dict to ``make_backend(ctx)`` verbatim
+# and never validates it, so a schema declared here would be inert and its
+# defaults would not apply. The factory owns its defaults in code instead.
+# The backend reads ``base_url`` plus optional ``app_id`` / ``project_id``
+# overrides from that dict. Without overrides, ordinary OpenDDE Harness memory uses
+# ``opendde_harness/general``. Domain integrations such as protein design pass an explicit
+# per-call scope. Identity comes from the host via ``ServiceLocator``.

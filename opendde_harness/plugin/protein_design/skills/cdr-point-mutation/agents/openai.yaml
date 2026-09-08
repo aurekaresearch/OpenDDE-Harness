@@ -1,0 +1,4 @@
+interface:
+  display_name: "CDR Point Mutation"
+  short_description: "Design targeted antibody CDR mutations safely"
+  default_prompt: "Use $cdr-point-mutation to propose targeted antibody CDR mutations."

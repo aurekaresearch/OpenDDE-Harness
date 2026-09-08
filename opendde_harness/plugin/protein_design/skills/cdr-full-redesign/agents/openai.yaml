@@ -1,0 +1,4 @@
+interface:
+  display_name: "CDR Full Redesign"
+  short_description: "Redesign complete mutable antibody CDR regions"
+  default_prompt: "Use $cdr-full-redesign to generate complete antibody CDR region designs."
