@@ -185,7 +185,10 @@ python3 -m opendde_harness.plugin.protein_design.servers.backends.epitope_analys
 ### After Structure Prediction
 
 ```python
-from opendde_harness.plugin.protein_design.servers.backends.epitope_analysis import analyze_epitope, load_cdr_regions_from_yaml
+from opendde_harness.plugin.protein_design.servers.backends.epitope_analysis import (
+    analyze_epitope,
+    load_cdr_regions_from_yaml,
+)
 
 # After folding
 structure_file = f"outputs/{run_id}/structures/{candidate.name}_complex.pdb"
@@ -199,7 +202,7 @@ epitope_result = analyze_epitope(
 )
 
 # Check hotspot coverage
-if epitope_result['hotspot_analysis']['hotspot_coverage'] < 0.6:
+if epitope_result["hotspot_analysis"]["hotspot_coverage"] < 0.6:
     print(f"⚠️  Low hotspot coverage: {epitope_result['hotspot_analysis']['hotspot_coverage']:.1%}")
 ```
 
@@ -215,7 +218,7 @@ Agent can use this skill to:
 epitope_result = run_epitope_analysis(structure_file)
 
 # Agent interprets results
-if epitope_result['cdr_contributions']['CDR3_H']['total_contacts'] < 30:
+if epitope_result["cdr_contributions"]["CDR3_H"]["total_contacts"] < 30:
     # Flag: CDR3_H should be the major contributor
     warning = "CDR3_H shows weak binding contribution"
 ```

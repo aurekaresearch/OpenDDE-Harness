@@ -772,8 +772,7 @@ def _select_model_id(
     models = list(dict.fromkeys(model.strip() for model in models if model.strip()))
     selected_default = default_model if default_model in models else next(iter(models), _MANUAL_MODEL)
     listed = [
-        questionary.Choice(display_model_id(provider, model) if provider else model, value=model)
-        for model in models
+        questionary.Choice(display_model_id(provider, model) if provider else model, value=model) for model in models
     ]
     manual = questionary.Choice(_t("Enter a model name", "手动输入模型名称"), value=_MANUAL_MODEL)
     choices: list[Any] = [manual, *listed] if manual_first else [*listed, manual]
@@ -1250,7 +1249,9 @@ def _run_test_probe(
     try:
         text, tokens, elapsed = send_probe()
     except Exception as exc:
-        console.print(_t(f"  [red]✗ Test failed:[/red] {_probe_failure(exc)}", f"  [red]✗ 测试失败:[/red] {_probe_failure(exc)}"))
+        console.print(
+            _t(f"  [red]✗ Test failed:[/red] {_probe_failure(exc)}", f"  [red]✗ 测试失败:[/red] {_probe_failure(exc)}")
+        )
         console.print(
             _t(
                 "  [dim]Run 'ddeharness provider test' to re-check, or confirm the model is served by this provider.[/dim]",

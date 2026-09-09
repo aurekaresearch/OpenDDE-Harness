@@ -81,7 +81,9 @@ def test_responses_wire_kwargs(clean_env):
     assert kwargs["stream"] is True
     assert kwargs["max_output_tokens"] == 1
     assert kwargs["reasoning"] == {"effort": "high"}
-    assert kwargs["tools"] == [{"type": "function", "name": "read_file", "parameters": {"type": "object", "properties": {}}}]
+    assert kwargs["tools"] == [
+        {"type": "function", "name": "read_file", "parameters": {"type": "object", "properties": {}}}
+    ]
     assert kwargs["tool_choice"] == "auto"
     assert "messages" not in kwargs and "stream_options" not in kwargs
 
@@ -196,13 +198,25 @@ def test_deepseek_always_gets_the_reasoning_key(clean_env):
         {"role": "user", "content": "status?"},
         # Recorded before the fix, and after a tool result the model returns no
         # reasoning of its own: the key was simply absent.
-        {"role": "assistant", "content": "checking", "tool_calls": [{"id": "c1", "function": {"name": "s", "arguments": "{}"}}]},
+        {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "s", "arguments": "{}"}}],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "running"},
     ]
 
     kwargs, _ = provider._request_kwargs(
-        provider.default_model, provider._resolve_model(provider.default_model), history, None,
-        max_tokens=100, temperature=0.2, reasoning_effort=None, tool_choice=None, responses=False, stream=False,
+        provider.default_model,
+        provider._resolve_model(provider.default_model),
+        history,
+        None,
+        max_tokens=100,
+        temperature=0.2,
+        reasoning_effort=None,
+        tool_choice=None,
+        responses=False,
+        stream=False,
     )
     assistant = [m for m in kwargs["messages"] if m["role"] == "assistant"]
 
@@ -214,8 +228,16 @@ def test_other_vendors_keep_their_messages_untouched(clean_env):
     history = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
 
     kwargs, _ = provider._request_kwargs(
-        provider.default_model, provider._resolve_model(provider.default_model), history, None,
-        max_tokens=100, temperature=0.2, reasoning_effort=None, tool_choice=None, responses=False, stream=False,
+        provider.default_model,
+        provider._resolve_model(provider.default_model),
+        history,
+        None,
+        max_tokens=100,
+        temperature=0.2,
+        reasoning_effort=None,
+        tool_choice=None,
+        responses=False,
+        stream=False,
     )
 
     assert all("reasoning_content" not in m for m in kwargs["messages"])

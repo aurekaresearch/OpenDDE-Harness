@@ -19,7 +19,9 @@ def test_with_mirrors_adds_hf_mirror_after_each_origin_url(monkeypatch):
     monkeypatch.delenv("HF_ENDPOINT", raising=False)
     urls = ["https://huggingface.co/a/b/resolve/x/f.pt", "https://example.invalid/f.pt"]
     assert with_mirrors(urls) == [
-        "https://huggingface.co/a/b/resolve/x/f.pt", "https://hf-mirror.com/a/b/resolve/x/f.pt", "https://example.invalid/f.pt",
+        "https://huggingface.co/a/b/resolve/x/f.pt",
+        "https://hf-mirror.com/a/b/resolve/x/f.pt",
+        "https://example.invalid/f.pt",
     ]
     monkeypatch.setenv("HF_ENDPOINT", "https://hf.internal/")
     assert with_mirrors(urls)[1] == "https://hf.internal/a/b/resolve/x/f.pt"
@@ -37,7 +39,9 @@ def test_download_resumes_a_partial_file_with_a_range_request(tmp_path, monkeypa
     _serve(monkeypatch, handler)
     with (tmp_path / "log").open("w") as log:
         console = Console(file=log, force_terminal=False)
-        assert download_file(["https://example.invalid/f"], target, sha256=SHA, size=len(DATA), console=console) == target
+        assert (
+            download_file(["https://example.invalid/f"], target, sha256=SHA, size=len(DATA), console=console) == target
+        )
     assert target.read_bytes() == DATA and seen == ["bytes=4000-"]
     assert capsys.readouterr().out.strip() == "Source: https://example.invalid/f"
     assert (tmp_path / "log").read_text() == ""
@@ -72,7 +76,10 @@ def test_download_falls_back_to_the_mirror_on_connection_error(tmp_path, monkeyp
     sources = with_mirrors(["https://huggingface.co/org/repo/resolve/rev/f.pt"])
     download_file(sources, tmp_path / "f.part", sha256=SHA)
     assert attempts == sources
-    assert "Source failed (ConnectError): https://huggingface.co/org/repo/resolve/rev/f.pt; trying the next source" in capsys.readouterr().out
+    assert (
+        "Source failed (ConnectError): https://huggingface.co/org/repo/resolve/rev/f.pt; trying the next source"
+        in capsys.readouterr().out
+    )
 
 
 def test_download_rejects_a_digest_mismatch_and_removes_the_file(tmp_path, monkeypatch):

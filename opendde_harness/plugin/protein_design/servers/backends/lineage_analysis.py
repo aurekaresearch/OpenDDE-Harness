@@ -36,18 +36,12 @@ def _record(raw: dict[str, Any], metric: str) -> dict[str, Any] | None:
     value = raw.get("objective") if metric == "objective" else metrics.get(metric)
     score = (
         float(value)
-        if isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(float(value))
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
         else None
     )
     return {
         "candidate_id": candidate_id,
-        "parent_id": str(
-            raw.get("parent_id")
-            or metadata.get("parent_id")
-            or ""
-        ).strip() or None,
+        "parent_id": str(raw.get("parent_id") or metadata.get("parent_id") or "").strip() or None,
         "cycle": raw.get("cycle", metadata.get("cycle")),
         "score": score,
         "mutations": list(raw.get("mutations") or metadata.get("mutations") or []),
@@ -97,8 +91,7 @@ def analyze_lineages(
         if len(chain) < min_lineage_length or len(scored) < 2:
             continue
         step_improvements = [
-            _improvement(child["score"], parent["score"], minimize)
-            for parent, child in zip(scored, scored[1:])
+            _improvement(child["score"], parent["score"], minimize) for parent, child in zip(scored, scored[1:])
         ]
         net = _improvement(scored[-1]["score"], scored[0]["score"], minimize)
         paths.append(
@@ -108,16 +101,13 @@ def analyze_lineages(
                 "net_improvement": net,
                 "improving_steps": sum(value > 0 for value in step_improvements),
                 "declining_steps": sum(value < 0 for value in step_improvements),
-                "consistent_improvement": bool(step_improvements)
-                and all(value >= 0 for value in step_improvements),
+                "consistent_improvement": bool(step_improvements) and all(value >= 0 for value in step_improvements),
                 "leaf_id": leaf,
             }
         )
     paths.sort(key=lambda item: item["net_improvement"], reverse=True)
     root_ids = sorted(
-        record["candidate_id"]
-        for record in records
-        if not record["parent_id"] or record["parent_id"] not in by_id
+        record["candidate_id"] for record in records if not record["parent_id"] or record["parent_id"] not in by_id
     )
     return {
         "metric": metric,
@@ -132,8 +122,7 @@ def analyze_lineages(
         )[:top_k],
         "cycle_errors": cycles,
         "unresolved_parent_count": sum(
-            bool(record["parent_id"] and record["parent_id"] not in by_id)
-            for record in records
+            bool(record["parent_id"] and record["parent_id"] not in by_id) for record in records
         ),
     }
 

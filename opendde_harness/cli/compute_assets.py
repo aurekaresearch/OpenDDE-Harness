@@ -146,7 +146,9 @@ def shared_asset_plan() -> list[Asset]:
             raise ValueError(f"Invalid shared model manifest entry: {name}")
         expected.remove(name)
         if name.startswith(prefix):
-            assets.append(Asset(name, f"{HF_ORIGIN}/facebook/esm2_t33_650M_UR50D/resolve/{revision}/{Path(name).name}", digest))
+            assets.append(
+                Asset(name, f"{HF_ORIGIN}/facebook/esm2_t33_650M_UR50D/resolve/{revision}/{Path(name).name}", digest)
+            )
         else:
             assets.append(Asset(name, SOLUBLE_MPNN_SOURCES[0], digest, mirrors=SOLUBLE_MPNN_SOURCES[1:]))
     if expected:
@@ -175,7 +177,9 @@ def _prepare_shared_models(root: Path) -> dict[str, str]:
     revision = source_revisions()["ESM_REV"]
     reference = root / "huggingface/models--facebook--esm2_t33_650M_UR50D/refs/main"
     if reference.is_symlink() or (reference.exists() and reference.read_text().strip() != revision):
-        raise ValueError("This weights directory selects another ESM revision; choose a new directory instead of changing running models.")
+        raise ValueError(
+            "This weights directory selects another ESM revision; choose a new directory instead of changing running models."
+        )
     # A verified copy in an older root (the OpenDDE data root, which once held
     # these too) is copied in instead of downloaded again.
     previous = []
@@ -240,7 +244,9 @@ def inspect_assets(
         matches = reference.read_text().strip() == source_revisions()["ESM_REV"]
     except OSError:
         matches = False
-    checks.append({"path": str(reference), "ok": matches, "error": None if matches else "ESM revision mismatch or missing"})
+    checks.append(
+        {"path": str(reference), "ok": matches, "error": None if matches else "ESM revision mismatch or missing"}
+    )
     return {
         "ready": all(item["ok"] for item in checks),
         "root": str(root),
@@ -252,15 +258,24 @@ def inspect_assets(
 
 
 def weights_layout(
-    root: Path, opendde_root: Path | None = None, *, with_opendde: bool, checkpoint: str = DEFAULT_CHECKPOINT, translate=None
+    root: Path,
+    opendde_root: Path | None = None,
+    *,
+    with_opendde: bool,
+    checkpoint: str = DEFAULT_CHECKPOINT,
+    translate=None,
 ) -> str:
     """Which root holds what: OpenDDE data (local fold mode only) and the Harness tool weights."""
     t = translate or (lambda en, zh: en)
     lines = []
     if with_opendde:
-        lines.append(f"{t('OpenDDE data (OPENDDE_ROOT_DIR):', 'OpenDDE 数据（OPENDDE_ROOT_DIR）：')} {opendde_root or root}")
+        lines.append(
+            f"{t('OpenDDE data (OPENDDE_ROOT_DIR):', 'OpenDDE 数据（OPENDDE_ROOT_DIR）：')} {opendde_root or root}"
+        )
         lines.append(f"  checkpoint/{checkpoint}, common/")
-    lines.append(f"{t('Harness tool weights (OPENDDE_HARNESS_WEIGHTS_DIR):', 'Harness 工具权重（OPENDDE_HARNESS_WEIGHTS_DIR）：')} {root}")
+    lines.append(
+        f"{t('Harness tool weights (OPENDDE_HARNESS_WEIGHTS_DIR):', 'Harness 工具权重（OPENDDE_HARNESS_WEIGHTS_DIR）：')} {root}"
+    )
     lines.append(f"  SolubleMPNN: {SOLUBLE_MPNN_WEIGHTS}")
     lines.append(f"  ESM2: {ESM_SNAPSHOT_DIR}")
     return "\n".join(lines)
@@ -315,8 +330,17 @@ def clone_repository(url: str, revision: str, destination: Path) -> None:
     with tempfile.TemporaryDirectory(prefix=".clone-", dir=destination.parent) as temporary:
         checkout = Path(temporary) / "code"
         git(
-            "clone", "-c", "http.version=HTTP/1.1", "--filter=blob:none", "--no-checkout", "--depth", "1",
-            url, str(checkout), cwd=Path(temporary), timeout=300,
+            "clone",
+            "-c",
+            "http.version=HTTP/1.1",
+            "--filter=blob:none",
+            "--no-checkout",
+            "--depth",
+            "1",
+            url,
+            str(checkout),
+            cwd=Path(temporary),
+            timeout=300,
         )
         git("fetch", "--depth", "1", "origin", revision, cwd=checkout, timeout=300)
         git("checkout", "--detach", revision, cwd=checkout, timeout=300)
@@ -478,7 +502,11 @@ def prepare(
         # the manifests can be rebuilt from the plan without rereading gigabytes.
         for base, plan in manifests.items():
             (base / "SHA256SUMS").write_text(
-                "".join(f"{asset.sha256}  {asset.relative_path}\n" for asset in plan if (base / asset.relative_path).is_file())
+                "".join(
+                    f"{asset.sha256}  {asset.relative_path}\n"
+                    for asset in plan
+                    if (base / asset.relative_path).is_file()
+                )
             )
         state = {
             "schema_version": 2,

@@ -38,7 +38,9 @@ jobs:
           node-version: "22"
 
       - name: Install dependencies
-        run: make install-deps
+        run: |
+          npm ci --prefix ui-tui
+          make install-deps
 
       - name: Run pre-commit on changed files
         run: |

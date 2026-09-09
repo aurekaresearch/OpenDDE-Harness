@@ -393,8 +393,6 @@ def search_protrek_sequence(
     return _cached_search_protrek_sequence(seq_str, query_type, subsection_type, db, int(nprobe), topk)
 
 
-
-
 @lru_cache(maxsize=128)
 def _cached_search_protrek_sequence(
     seq_str: str,
@@ -490,8 +488,6 @@ def search_protrek_structure(
     finally:
         if search_path != structure_path:
             search_path.unlink(missing_ok=True)
-
-
 
 
 @lru_cache(maxsize=64)

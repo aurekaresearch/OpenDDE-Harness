@@ -531,7 +531,9 @@ def _handoff_upgrade(
         if sys.platform == "win32":
             argv.append(str(os.getppid()))
             subprocess.Popen(argv, env=env)
-            print("OpenDDE Harness upgrade started. Wait for the completion message before running OpenDDE Harness again.")
+            print(
+                "OpenDDE Harness upgrade started. Wait for the completion message before running OpenDDE Harness again."
+            )
             return
         os.execve(str(base_python), argv, env)
     except OSError as exc:

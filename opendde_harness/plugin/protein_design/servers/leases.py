@@ -84,8 +84,7 @@ class GpuLeaseTable:
             unknown = sorted(set(requested) - set(self._devices))
             if unknown:
                 raise ValueError(
-                    "requested GPU placement is not available on this compute worker: "
-                    + ", ".join(map(str, unknown))
+                    "requested GPU placement is not available on this compute worker: " + ", ".join(map(str, unknown))
                 )
         request = _Request(kind=kind, job_id=job_id, count=max(0, int(count)), devices=requested)
         free = self._free_memory() if requested is None and self._devices else {}
@@ -122,9 +121,7 @@ class GpuLeaseTable:
             return [] if not self._held else None
         if request.devices is None and request.count == 0:
             return []
-        holders = {
-            index: [held for held in self._held if index in held.granted] for index in self._devices
-        }
+        holders = {index: [held for held in self._held if index in held.granted] for index in self._devices}
 
         def usable(index: int) -> bool:
             running = holders[index]

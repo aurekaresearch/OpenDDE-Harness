@@ -144,9 +144,7 @@ class ReflectOutput(BaseModel):
         if structure.available and structure.interface_residues:
             for item in structure.interface_residues[:8]:
                 contacts = f" | contacts={','.join(item.target_contacts)}" if item.target_contacts else ""
-                lines.append(
-                    f"- {item.action.upper()} {item.residue_anchor}{contacts} | {item.reason}"
-                )
+                lines.append(f"- {item.action.upper()} {item.residue_anchor}{contacts} | {item.reason}")
         else:
             lines.append("- unavailable")
 
@@ -160,16 +158,9 @@ class ReflectOutput(BaseModel):
 
         lines.append("PATTERN_EVIDENCE:")
         for item in self.successful_patterns[:3]:
-            lines.append(
-                f"- SUCCESS {item.cdr}/{item.mechanism} | "
-                f"{item.reusable_lesson or item.rationale}"
-            )
+            lines.append(f"- SUCCESS {item.cdr}/{item.mechanism} | {item.reusable_lesson or item.rationale}")
         for item in self.failure_patterns[:3]:
-            constraint = (
-                "; ".join(item.future_constraints)
-                or item.reusable_lesson
-                or item.rationale
-            )
+            constraint = "; ".join(item.future_constraints) or item.reusable_lesson or item.rationale
             lines.append(f"- AVOID {item.cdr}/{item.mechanism} | {constraint}")
 
         lines.append("SEARCH_HISTORY:")
@@ -183,9 +174,7 @@ class ReflectOutput(BaseModel):
             lines.append(f"- CONSTRAINT {item}")
 
         lines.append("NEXT_PRIORITY:")
-        for item in sorted(
-            self.next_cycle_recommendations, key=lambda value: value.priority
-        )[:6]:
+        for item in sorted(self.next_cycle_recommendations, key=lambda value: value.priority)[:6]:
             budget = f" | budget={item.mutation_budget}" if item.mutation_budget else ""
             constraints = f" | constraints={'; '.join(item.constraints)}" if item.constraints else ""
             lines.append(

@@ -100,8 +100,7 @@ class ProposalExecutor:
         if skill_id == POINT_MUTATION_SKILL and not mutations:
             raise ProposalValidationError("point mutation requires at least one mutation")
         if skill_id == POINT_MUTATION_SKILL and not any(
-            context.parent_sequences.get(item.chain_id, "")[item.position].upper()
-            != item.to_aa.upper()
+            context.parent_sequences.get(item.chain_id, "")[item.position].upper() != item.to_aa.upper()
             for item in mutations
             if item.chain_id in context.parent_sequences
             and 0 <= item.position < len(context.parent_sequences[item.chain_id])
@@ -115,9 +114,7 @@ class ProposalExecutor:
                 for position in positions
             }
             if actual != expected or len(actual) != len(mutations):
-                raise ProposalValidationError(
-                    "full redesign requires complete mutable CDR coverage exactly once"
-                )
+                raise ProposalValidationError("full redesign requires complete mutable CDR coverage exactly once")
         chains = self._apply_mutations(context.parent_sequences, mutations, context)
         return CandidateProposal(
             candidate_id=str(raw.get("candidate_id") or raw.get("id") or "").strip(),
@@ -169,10 +166,7 @@ class ProposalExecutor:
             }
         if raw_positions is not None:
             parameters["design_positions"] = selected_positions
-        anchor_mutations = [
-            self._parse_mutation(item).model_dump(mode="json")
-            for item in first.get("mutations", [])
-        ]
+        anchor_mutations = [self._parse_mutation(item).model_dump(mode="json") for item in first.get("mutations", [])]
         result = await self._compute.generate_soluble_mpnn(
             SolubleMPNNRequest(
                 structure_path=context.parent_structure_path,
@@ -209,9 +203,7 @@ class ProposalExecutor:
             )
         )
         if not getattr(response, "available", False):
-            raise ProposalValidationError(
-                f"ESM2-guided proposal unavailable: {getattr(response, 'error', None)}"
-            )
+            raise ProposalValidationError(f"ESM2-guided proposal unavailable: {getattr(response, 'error', None)}")
         return self._parse_backend_candidates(
             getattr(response, "result", None) or {},
             skill_id=ESM2_GUIDED_MUTATION_SKILL,
@@ -254,9 +246,7 @@ class ProposalExecutor:
         return proposals
 
     @staticmethod
-    def _read_backend_chains(
-        raw: Mapping[str, Any], context: ProposalContext
-    ) -> dict[str, str]:
+    def _read_backend_chains(raw: Mapping[str, Any], context: ProposalContext) -> dict[str, str]:
         if isinstance(raw.get("chains"), Mapping):
             return {str(key): str(value).upper() for key, value in raw["chains"].items()}
         sequence = raw.get("sequence")
@@ -321,9 +311,7 @@ class ProposalExecutor:
         return {chain_id: "".join(sequence) for chain_id, sequence in result.items()}
 
     @staticmethod
-    def _derive_substitutions(
-        parents: Mapping[str, str], chains: Mapping[str, str]
-    ) -> list[Mutation]:
+    def _derive_substitutions(parents: Mapping[str, str], chains: Mapping[str, str]) -> list[Mutation]:
         mutations: list[Mutation] = []
         for chain_id, parent in parents.items():
             sequence = chains.get(chain_id)

@@ -69,19 +69,15 @@ def build_cycle_artifact(
     }
     if population_candidate_ids is not None:
         payload["population_candidate_ids"] = sorted(
-            _bounded_text(value, _MAX_IDENTIFIER_LENGTH)
-            for value in population_candidate_ids
+            _bounded_text(value, _MAX_IDENTIFIER_LENGTH) for value in population_candidate_ids
         )
     if admitted_candidate_ids is not None:
         payload["admitted_candidate_ids"] = sorted(
-            _bounded_text(value, _MAX_IDENTIFIER_LENGTH)
-            for value in admitted_candidate_ids
+            _bounded_text(value, _MAX_IDENTIFIER_LENGTH) for value in admitted_candidate_ids
         )
     if population_actions is not None:
         payload["population_actions"] = {
-            _bounded_text(str(candidate_id), _MAX_IDENTIFIER_LENGTH): _bounded_text(
-                str(action), 128
-            )
+            _bounded_text(str(candidate_id), _MAX_IDENTIFIER_LENGTH): _bounded_text(str(action), 128)
             for candidate_id, action in population_actions.items()
         }
     return payload

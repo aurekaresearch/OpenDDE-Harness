@@ -186,9 +186,7 @@ class DesignOrchestrator:
         working_parent = WorkingParentTracker(config)
         recurring_offenders: dict[str, int] = {}
         failed_cycles: list[dict[str, Any]] = []
-        known_candidate_ids = {
-            str(item.get("candidate_id")) for item in run_state.parents if item.get("candidate_id")
-        }
+        known_candidate_ids = {str(item.get("candidate_id")) for item in run_state.parents if item.get("candidate_id")}
         run_state.snapshot = run_state.snapshot.model_copy(update={"failed_cycles": failed_cycles})
         with trace.span(
             "protein_design.run",
@@ -197,9 +195,7 @@ class DesignOrchestrator:
         ) as run_span:
             # Publish the run before analysis or folding starts so the tracing
             # dashboard can render the task's cycle-0 empty state immediately.
-            run_span.set(
-                run_span_attributes(snapshot=run_state.snapshot, config=config, phase="setup")
-            ).checkpoint()
+            run_span.set(run_span_attributes(snapshot=run_state.snapshot, config=config, phase="setup")).checkpoint()
             await self._notify(run_state.snapshot, on_progress)
             try:
                 self._event("analyze")
@@ -208,9 +204,7 @@ class DesignOrchestrator:
                 run_state.snapshot = run_state.snapshot.model_copy(
                     update={"status": TaskState.FAILED, "error": str(exc)}
                 )
-                run_span.set(
-                    run_span_attributes(snapshot=run_state.snapshot, config=config)
-                ).error(exc).checkpoint()
+                run_span.set(run_span_attributes(snapshot=run_state.snapshot, config=config)).error(exc).checkpoint()
                 await self._notify(run_state.snapshot, on_progress)
                 raise
             try:
@@ -259,28 +253,20 @@ class DesignOrchestrator:
                         "selected_skill": None,
                     }
                 )
-                run_span.set(
-                    run_span_attributes(snapshot=run_state.snapshot, config=config)
-                ).checkpoint()
+                run_span.set(run_span_attributes(snapshot=run_state.snapshot, config=config)).checkpoint()
                 await self._notify(run_state.snapshot, on_progress)
                 return run_state.snapshot
             except Exception as exc:
                 self._flush_event(failed=True, error=str(exc))
                 if stop_event.is_set():
-                    run_state.snapshot = run_state.snapshot.model_copy(
-                        update={"status": TaskState.STOPPED}
-                    )
-                    run_span.set(
-                        run_span_attributes(snapshot=run_state.snapshot, config=config)
-                    ).checkpoint()
+                    run_state.snapshot = run_state.snapshot.model_copy(update={"status": TaskState.STOPPED})
+                    run_span.set(run_span_attributes(snapshot=run_state.snapshot, config=config)).checkpoint()
                     await self._notify(run_state.snapshot, on_progress)
                     return run_state.snapshot
                 run_state.snapshot = run_state.snapshot.model_copy(
                     update={"status": TaskState.FAILED, "error": str(exc)}
                 )
-                run_span.set(
-                    run_span_attributes(snapshot=run_state.snapshot, config=config)
-                ).error(exc).checkpoint()
+                run_span.set(run_span_attributes(snapshot=run_state.snapshot, config=config)).error(exc).checkpoint()
                 await self._notify(run_state.snapshot, on_progress)
                 raise
 
@@ -294,9 +280,7 @@ class DesignOrchestrator:
         population: ConstrainedElitePopulation,
         working_parent: WorkingParentTracker,
     ) -> None:
-        initial_payloads = [
-            item for item in config.initial_candidates if is_materialized(item)
-        ]
+        initial_payloads = [item for item in config.initial_candidates if is_materialized(item)]
         if initial_payloads:
             self._event("initial_fold")
             initial_scored = await self._fold_cycle(
@@ -305,7 +289,9 @@ class DesignOrchestrator:
                 initial_payloads,
                 stop_event=stop_event,
             )
-            run_state.total_scored_candidates += sum(self._is_scored_candidate(candidate) for candidate in initial_scored)
+            run_state.total_scored_candidates += sum(
+                self._is_scored_candidate(candidate) for candidate in initial_scored
+            )
             materialized = [
                 candidate
                 for candidate in initial_scored
@@ -453,7 +439,9 @@ class DesignOrchestrator:
             )
             if design is None:
                 self._event("design")
-                design = await self._phases.design_cycle(config, run_state.cycle, analysis, run_state.parents, run_state.best)
+                design = await self._phases.design_cycle(
+                    config, run_state.cycle, analysis, run_state.parents, run_state.best
+                )
             state.selected_skill = design.selected_skill_id
             self._event("fold")
             fold_task = asyncio.create_task(
@@ -489,8 +477,7 @@ class DesignOrchestrator:
                         # The next cycle restores sampler state and
                         # falls back to the normal Design path.
                         logger.warning(
-                            "design speculation failed for cycle %s; "
-                            "falling back to synchronous design: %s",
+                            "design speculation failed for cycle %s; falling back to synchronous design: %s",
                             run_state.cycle + 1,
                             exc,
                             exc_info=True,
@@ -534,8 +521,7 @@ class DesignOrchestrator:
             admitted = automatic + [
                 item
                 for item in quality_targets
-                if quality.results.get(item.candidate_id) is not None
-                and quality.results[item.candidate_id].pass_check
+                if quality.results.get(item.candidate_id) is not None and quality.results[item.candidate_id].pass_check
             ]
             # Population mutation is the commit point for a cycle.
             # Retrying after this point could insert the same batch twice.
@@ -558,8 +544,7 @@ class DesignOrchestrator:
             config.metadata["no_improvement_streak"] = run_state.no_improvement_streak
             config.metadata["recurring_offenders"] = dict(recurring_offenders)
             config.metadata["stagnation_guidance"] = (
-                "Use the gate evidence and historical skill outcomes to choose "
-                "a legal basin-changing proposal."
+                "Use the gate evidence and historical skill outcomes to choose a legal basin-changing proposal."
                 if run_state.no_improvement_streak
                 else "Continue refining the improved lineage."
             )
@@ -765,9 +750,7 @@ class DesignOrchestrator:
                 "protein_design.quality.passed": len(admitted),
                 "protein_design.reflection.scheduled": should_reflect,
                 "protein_design.memory.retrieved": (len(design.memories) if design is not None else 0),
-                "protein_design.memory.skills_retrieved": (
-                    len(design.learned_skill_ids) if design is not None else 0
-                ),
+                "protein_design.memory.skills_retrieved": (len(design.learned_skill_ids) if design is not None else 0),
                 "protein_design.memory.skills_applied": (
                     list(design.applied_learned_skill_ids) if design is not None else []
                 ),
@@ -841,9 +824,7 @@ class DesignOrchestrator:
                     terminal = self._read_candidates({"candidates": raw}, config)
                     terminal = await prepare_post_mpnn(self._compute, terminal, config, task_id, stop_event)
                     foldable = [
-                        item.model_dump(mode="json")
-                        for item in terminal
-                        if item.metadata.get("post_mpnn_selected")
+                        item.model_dump(mode="json") for item in terminal if item.metadata.get("post_mpnn_selected")
                     ]
                     if not foldable:
                         raise ValueError("SolubleMPNN produced no eligible groups to refold")
@@ -854,9 +835,7 @@ class DesignOrchestrator:
                             backend="opendde",
                             options={
                                 **config.fold_options,
-                                "target_chains": (
-                                    config.target_chains or config.fold_options.get("target_chains", {})
-                                ),
+                                "target_chains": (config.target_chains or config.fold_options.get("target_chains", {})),
                                 "objective_key": config.objective_key,
                                 "post_refold": True,
                             },
@@ -1522,9 +1501,7 @@ class DesignOrchestrator:
         sequences = chains if isinstance(chains, dict) else {"": candidate.sequence}
         unresolved = {
             str(chain): [
-                index
-                for index, residue in enumerate(str(sequence).upper())
-                if residue not in CANONICAL_AMINO_ACIDS
+                index for index, residue in enumerate(str(sequence).upper()) if residue not in CANONICAL_AMINO_ACIDS
             ]
             for chain, sequence in sequences.items()
         }

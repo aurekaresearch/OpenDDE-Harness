@@ -104,10 +104,7 @@ class TargetMsaSearchResponse(ContractModel):
     @model_validator(mode="after")
     def _available_results_are_complete(self) -> "TargetMsaSearchResponse":
         if self.available and not (
-            self.sequence_sha256
-            and self.unpaired_msa_path
-            and self.paired_msa_path
-            and self.alignment_depth >= 1
+            self.sequence_sha256 and self.unpaired_msa_path and self.paired_msa_path and self.alignment_depth >= 1
         ):
             raise ValueError("an available target MSA result must carry both A3M paths and a positive depth")
         return self
@@ -243,9 +240,7 @@ def normalize_workflow_adjustments(params: Mapping[str, Any]) -> dict[str, int]:
     allowed = {"num_sequences", "reflection_interval"}
     unknown = sorted(set(map(str, params)) - allowed)
     if unknown:
-        raise ValueError(
-            "unknown protein-design adjustment field(s): " + ", ".join(unknown)
-        )
+        raise ValueError("unknown protein-design adjustment field(s): " + ", ".join(unknown))
     if not params:
         raise ValueError("protein-design adjustments must not be empty")
     normalized: dict[str, int] = {}

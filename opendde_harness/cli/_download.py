@@ -112,7 +112,9 @@ def download_file(
                     reason = type(exc).__name__
                 failures.append(f"{url}: {reason}")
                 remaining = len(sources) - index - 1
-                print(f"Source failed ({reason}): {url}" + ("; trying the next source" if remaining else ""), flush=True)
+                print(
+                    f"Source failed ({reason}): {url}" + ("; trying the next source" if remaining else ""), flush=True
+                )
                 existing = target.stat().st_size if target.is_file() else 0
     raise DownloadError(f"Every download source failed for {name}: " + "; ".join(failures))
 

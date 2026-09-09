@@ -148,8 +148,7 @@ class TaskLeases:
         for task_id in [task_id for task_id, expires in self._expiry.items() if expires <= now]:
             del self._expiry[task_id]
         return [
-            {"task_id": task_id, "expires_in": round(expires - now, 3)}
-            for task_id, expires in self._expiry.items()
+            {"task_id": task_id, "expires_in": round(expires - now, 3)} for task_id, expires in self._expiry.items()
         ]
 
 
@@ -328,7 +327,9 @@ def create_app(
         from fastapi import FastAPI, Header, HTTPException, Query, Request
         from fastapi.responses import JSONResponse, Response
     except ImportError as exc:
-        raise RuntimeError("Install OpenDDE Harness with the 'protein-design' extra to run the compute service") from exc
+        raise RuntimeError(
+            "Install OpenDDE Harness with the 'protein-design' extra to run the compute service"
+        ) from exc
 
     from opendde_harness.cli.compute_assets import model_environment
 
@@ -346,7 +347,9 @@ def create_app(
 
         environment = check_runtime_environment()
         code_root = Path(os.environ.get("OPENDDE_HARNESS_PROJECT_ROOT", "/workspace"))
-        code_version = verify_runtime_code(code_root)["harness_version"] if (code_root / MANIFEST).is_file() else __version__
+        code_version = (
+            verify_runtime_code(code_root)["harness_version"] if (code_root / MANIFEST).is_file() else __version__
+        )
     active_harness = harness or build_harness_from_environment()
     leases = GpuLeaseTable(
         visible_cuda_devices(),
@@ -447,9 +450,7 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         payload = dict(
-            await active_harness.health(
-                backend, execution_mode, image, api_url, probe_external=probe_external
-            )
+            await active_harness.health(backend, execution_mode, image, api_url, probe_external=probe_external)
         )
         queue = jobs.queue_stats()
         if configured_token and authorization != f"Bearer {configured_token}":
@@ -487,9 +488,7 @@ def create_app(
                 content={"detail": "busy", "running": queue["running"], "queued": queue["queued"], "tasks": tasks},
             )
         jobs.stop_accepting()
-        app.state.shutdown = asyncio.create_task(
-            retire(drain=not request.if_idle), name="protein-design-shutdown"
-        )
+        app.state.shutdown = asyncio.create_task(retire(drain=not request.if_idle), name="protein-design-shutdown")
         return JSONResponse(
             status_code=202,
             content={"detail": "shutting down", "running": queue["running"], "queued": queue["queued"]},
@@ -613,7 +612,9 @@ def run() -> None:
     try:
         import uvicorn
     except ImportError as exc:
-        raise RuntimeError("Install OpenDDE Harness with the 'protein-design' extra to run the compute service") from exc
+        raise RuntimeError(
+            "Install OpenDDE Harness with the 'protein-design' extra to run the compute service"
+        ) from exc
     uvicorn.run(
         "opendde_harness.plugin.protein_design.servers.api:create_app",
         factory=True,

@@ -45,11 +45,7 @@ def _parent_id(candidate: dict[str, Any]) -> str | None:
 
 def _score(candidate: dict[str, Any], metric: str) -> float | None:
     metrics = candidate.get("metrics") or {}
-    value = (
-        candidate.get("objective")
-        if metric == "objective"
-        else metrics.get(metric)
-    )
+    value = candidate.get("objective") if metric == "objective" else metrics.get(metric)
     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
         return float(value)
     return None
@@ -93,9 +89,7 @@ def mutation_analysis(
             occurrences[mutation] += 1
             parent_origins[mutation].add(_parent_id(candidate) or "root")
             if child_score is not None and parent_score is not None:
-                improvements[mutation].append(
-                    _improvement(child_score, parent_score, minimize)
-                )
+                improvements[mutation].append(_improvement(child_score, parent_score, minimize))
     rows = []
     for mutation, count in occurrences.items():
         deltas = improvements.get(mutation, [])
@@ -152,12 +146,8 @@ def conservation_profile(path_text: str, top_k: int = 15) -> dict[str, Any]:
     return {
         "sequence_count": len(sequences),
         "alignment_length": length,
-        "most_conserved": sorted(
-            positions, key=lambda item: item["dominant_fraction"], reverse=True
-        )[:top_k],
-        "most_variable": sorted(
-            positions, key=lambda item: item["dominant_fraction"]
-        )[:top_k],
+        "most_conserved": sorted(positions, key=lambda item: item["dominant_fraction"], reverse=True)[:top_k],
+        "most_variable": sorted(positions, key=lambda item: item["dominant_fraction"])[:top_k],
     }
 
 
@@ -165,11 +155,7 @@ def newick_summary(path_text: str) -> dict[str, Any]:
     text = Path(path_text).read_text(encoding="utf-8").strip()
     if not text or text.count("(") != text.count(")"):
         raise ValueError(f"invalid Newick tree: {path_text}")
-    labels = [
-        match.strip().strip("'\"")
-        for match in re.findall(r"(?:^|[(,])\s*([^():;,]+)", text)
-        if match.strip()
-    ]
+    labels = [match.strip().strip("'\"") for match in re.findall(r"(?:^|[(,])\s*([^():;,]+)", text) if match.strip()]
     return {
         "leaf_count": len(labels),
         "sample_leaf_ids": labels[:20],

@@ -347,11 +347,7 @@ class LiteLLMProvider(LLMProvider):
         self._hosted_web_search_unavailable.add(self._hosted_web_search_capability_key(model))
         kwargs.pop("web_search_options", None)
         if sources_include_added:
-            include = [
-                value
-                for value in (kwargs.get("include") or [])
-                if value != "web_search_call.action.sources"
-            ]
+            include = [value for value in (kwargs.get("include") or []) if value != "web_search_call.action.sources"]
             if include:
                 kwargs["include"] = include
             else:
@@ -1189,9 +1185,7 @@ class LiteLLMProvider(LLMProvider):
                     )
                     continue
                 if event_type == "response.failed":
-                    raise RuntimeError(
-                        f"Responses API failed: {responses_error_text(value_of(data, 'response', {}))}"
-                    )
+                    raise RuntimeError(f"Responses API failed: {responses_error_text(value_of(data, 'response', {}))}")
                 if event_type == "error":
                     # A top-level error ends the run without a response object.
                     # Skipped as an unknown event, it left the stream finishing
@@ -1346,7 +1340,9 @@ class LiteLLMProvider(LLMProvider):
 
             tool_calls.append(
                 ToolCallRequest(
-                    id=_tool_call_id(getattr(tc, "id", None), str(getattr(response, "model", "") or self.default_model)),
+                    id=_tool_call_id(
+                        getattr(tc, "id", None), str(getattr(response, "model", "") or self.default_model)
+                    ),
                     name=tc.function.name,
                     arguments=args,
                     provider_specific_fields=provider_specific_fields,

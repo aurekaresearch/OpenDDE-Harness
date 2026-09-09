@@ -110,7 +110,10 @@ async def setup_status(params: dict) -> dict:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         logger.warning("setup.status: invalid JSON in {}: {}", path, exc)
-        return {"provider_configured": False, "error": "Configuration contains invalid JSON. Repair it before onboarding."}
+        return {
+            "provider_configured": False,
+            "error": "Configuration contains invalid JSON. Repair it before onboarding.",
+        }
 
     if not isinstance(payload, dict):
         return {"provider_configured": False, "error": "Configuration must be a JSON object."}

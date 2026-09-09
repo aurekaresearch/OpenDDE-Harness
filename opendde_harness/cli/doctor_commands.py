@@ -226,9 +226,7 @@ def _probe_memory(config: "OpenDDEHarnessConfig") -> MemoryInfo:
 
             missing = [s for s in REQUIRED_SECTIONS if not memory_role_configured(s)]
             info.root = str(memory_root())
-            info.disabled_reason = (
-                f"no credentials for {', '.join(missing)}" if missing else "turned off in config"
-            )
+            info.disabled_reason = f"no credentials for {', '.join(missing)}" if missing else "turned off in config"
         return info
     from opendde_harness.plugin.memory.longterm._health import (
         DEGRADING_SECTIONS,
@@ -389,7 +387,9 @@ def _render_human_output(report: DoctorReport) -> None:
         console.print(f"  Workspace: {paths.workspace_path}  {mark}")
 
     if not paths.config_exists:
-        console.print("\n[yellow]⚠ OpenDDE Harness is not configured.[/yellow] Run [cyan]ddeharness onboard[/cyan] to set it up.")
+        console.print(
+            "\n[yellow]⚠ OpenDDE Harness is not configured.[/yellow] Run [cyan]ddeharness onboard[/cyan] to set it up."
+        )
         return
 
     if not report.config_loaded:
@@ -474,7 +474,9 @@ def _render_human_output(report: DoctorReport) -> None:
         console.print(
             f"[red]✗ Model [bold]{routing.model}[/bold] could not be routed to any configured provider.[/red]"
         )
-        console.print("Run [cyan]ddeharness provider list[/cyan] / [cyan]ddeharness provider set[/cyan] to fix routing.")
+        console.print(
+            "Run [cyan]ddeharness provider list[/cyan] / [cyan]ddeharness provider set[/cyan] to fix routing."
+        )
 
 
 def _render_compute(report: dict, indent: str = "  ") -> None:
@@ -488,7 +490,9 @@ def _render_compute(report: dict, indent: str = "  ") -> None:
     )
     for check in report.get("checks", []):
         icon = "[green]OK[/green]" if check["ok"] else "[red]FAIL[/red]"
-        console.print(f"{indent}{icon} {escape(check['name'])}" + (f": {escape(check['error'])}" if check.get("error") else ""))
+        console.print(
+            f"{indent}{icon} {escape(check['name'])}" + (f": {escape(check['error'])}" if check.get("error") else "")
+        )
     for service in report.get("external_services") or []:
         from opendde_harness.cli.onboard_compute import external_service_line
 
@@ -505,7 +509,11 @@ def _render_compute(report: dict, indent: str = "  ") -> None:
         if not item["ok"]:
             console.print(f"{indent}[red]FAIL[/red] {escape(item['path'])}: {escape(item['error'])}")
     if files:
-        verification = "SHA256 verified" if assets.get("hashes_verified") else "presence/size checked; use --verify-hashes for content verification"
+        verification = (
+            "SHA256 verified"
+            if assets.get("hashes_verified")
+            else "presence/size checked; use --verify-hashes for content verification"
+        )
         console.print(f"{indent}Assets: {sum(item['ok'] for item in files)}/{len(files)} ({verification})")
     if assets.get("opendde") == "not_required":
         console.print(f"{indent}OpenDDE weights/common data: not required in API mode")
@@ -535,7 +543,9 @@ def _render_service(service: dict, indent: str) -> None:
     if not service.get("healthy"):
         return
     idle, limit = service.get("idle_seconds"), service.get("idle_timeout_seconds")
-    countdown = f"idle {int(idle)}s of {int(limit)}s" if idle is not None and limit is not None else "idle timeout not reported"
+    countdown = (
+        f"idle {int(idle)}s of {int(limit)}s" if idle is not None and limit is not None else "idle timeout not reported"
+    )
     console.print(
         f"{indent}Jobs: {service.get('jobs_running') or 0} running, {service.get('jobs_queued') or 0} queued  ({countdown})"
     )
@@ -558,8 +568,12 @@ def register(app: typer.Typer) -> None:
             help="LLM probe timeout in seconds.",
             min=1,
         ),
-        compute_only: bool = typer.Option(False, "--compute-only", help="Check Protein Design compute only; skip LLM and memory checks."),
-        verify_hashes: bool = typer.Option(False, "--verify-hashes", help="Read every required weight and verify its SHA256."),
+        compute_only: bool = typer.Option(
+            False, "--compute-only", help="Check Protein Design compute only; skip LLM and memory checks."
+        ),
+        verify_hashes: bool = typer.Option(
+            False, "--verify-hashes", help="Read every required weight and verify its SHA256."
+        ),
     ) -> None:
         """Check configuration, and the Protein Design compute setup when one is configured."""
         from opendde_harness.cli.onboard_compute import inspect_compute, load_protein_design_config
@@ -567,7 +581,9 @@ def register(app: typer.Typer) -> None:
         config = load_protein_design_config()
         if compute_only:
             if not config:
-                console.print("[red]✗ Protein Design is not configured.[/red] Run [cyan]ddeharness onboard[/cyan] to set it up.")
+                console.print(
+                    "[red]✗ Protein Design is not configured.[/red] Run [cyan]ddeharness onboard[/cyan] to set it up."
+                )
                 raise typer.Exit(1)
             compute = inspect_compute(config, verify_hashes=verify_hashes)
             if json_output:

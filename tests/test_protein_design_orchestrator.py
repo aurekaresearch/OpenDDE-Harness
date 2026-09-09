@@ -189,7 +189,9 @@ class FakePhases:
 def make_orchestrator(phases: FakePhases | None = None) -> tuple[DesignOrchestrator, FakeCompute, FakePhases]:
     compute = FakeCompute()
     phases = phases or FakePhases()
-    orchestrator = DesignOrchestrator(compute, DesignMemory(None, agent_id="test-agent"), phases, fold_poll_interval=0.0)
+    orchestrator = DesignOrchestrator(
+        compute, DesignMemory(None, agent_id="test-agent"), phases, fold_poll_interval=0.0
+    )
     return orchestrator, compute, phases
 
 
@@ -490,9 +492,7 @@ def test_structured_session_budget_scales_with_available_skills() -> None:
 
     provider = SkillLoopProvider()
     session = OpenDDEHarnessStructuredSession(provider, "fake-model", max_attempts=2)
-    skills = tuple(
-        SkillDocument(f"skill-{index}", Path(f"/tmp/skill-{index}"), "content", ()) for index in range(3)
-    )
+    skills = tuple(SkillDocument(f"skill-{index}", Path(f"/tmp/skill-{index}"), "content", ()) for index in range(3))
 
     with pytest.raises(RuntimeError, match="use_skill budget"):
         asyncio.run(session.run(AGENT_PROFILES[AgentRole.ANALYZE], "prompt", skills=skills))
@@ -515,9 +515,7 @@ def test_structured_session_emits_one_input_payload_per_run() -> None:
                 payloads.append(event.input_payload)
 
     provider = SkillLoopProvider()
-    session = OpenDDEHarnessStructuredSession(
-        provider, "fake-model", max_attempts=1, progress_sink=Sink()
-    )
+    session = OpenDDEHarnessStructuredSession(provider, "fake-model", max_attempts=1, progress_sink=Sink())
     renders = 0
     original = session._system_message
 
@@ -552,9 +550,7 @@ def test_structured_session_widens_the_budget_when_the_model_runs_out_of_tokens(
                 response = Response(content="")
                 response.finish_reason = "length"
                 return response
-            return Response(
-                content=json_module.dumps({"downstream_header": "epitope", "report": "ok"})
-            )
+            return Response(content=json_module.dumps({"downstream_header": "epitope", "report": "ok"}))
 
     provider = TruncatedThenAnswer()
     session = OpenDDEHarnessStructuredSession(provider, "fake-model", max_attempts=2)
@@ -613,17 +609,11 @@ def _analyze_session(compute: Any) -> tuple[Any, Any]:
         async def chat_with_retry(self, **kwargs: Any) -> Response:
             self.calls += 1
             self.tool_messages.extend(
-                str(message.get("content"))
-                for message in kwargs.get("messages", [])
-                if message.get("role") == "tool"
+                str(message.get("content")) for message in kwargs.get("messages", []) if message.get("role") == "tool"
             )
             if self.calls == 1:
-                return Response(
-                    tool_calls=[ToolCall("protrek_sequence_search", {"sequence": BINDER_SEQUENCE}, "t1")]
-                )
-            return Response(
-                content=json_module.dumps({"downstream_header": "epitope", "report": "no homologs"})
-            )
+                return Response(tool_calls=[ToolCall("protrek_sequence_search", {"sequence": BINDER_SEQUENCE}, "t1")])
+            return Response(content=json_module.dumps({"downstream_header": "epitope", "report": "no homologs"}))
 
     provider = ProtrekThenAnswer()
     session = OpenDDEHarnessStructuredSession(
@@ -658,9 +648,7 @@ def test_run_completes_when_the_analysis_agent_hits_a_protrek_outage() -> None:
         ProtrekAnalysisPhases(),
         fold_poll_interval=0.0,
     )
-    snapshot = asyncio.run(
-        orchestrator.run("task-protrek", config, stop_event=asyncio.Event(), adjustments={})
-    )
+    snapshot = asyncio.run(orchestrator.run("task-protrek", config, stop_event=asyncio.Event(), adjustments={}))
 
     assert snapshot.status.value == "completed"
     assert not snapshot.failed_cycles

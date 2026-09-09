@@ -241,9 +241,7 @@ class HistoryTrimmer:
             # shipped an assistant tool_calls turn whose results had been
             # dropped, which the provider rejects outright.
             group = self._tool_exchange(session_messages, dropped)
-            trimmed_ids = self.canonical_ids(
-                session_messages, [mid for mid in trimmed_ids if mid not in group]
-            )
+            trimmed_ids = self.canonical_ids(session_messages, [mid for mid in trimmed_ids if mid not in group])
             warnings.append(f"dropped message {dropped} to fit budget")
             history = self.history_from_ids(session_messages, trimmed_ids)
             messages = build_messages(history)

@@ -26,19 +26,13 @@ def normalize_search_candidate(
     candidate_id = str(candidate.get("candidate_id") or "").strip()
     if not candidate_id:
         raise ValueError("OpenDDE Harness search-history candidates require candidate_id")
-    parent_id = str(
-        candidate.get("parent_id")
-        or metadata.get("parent_id")
-        or ""
-    ).strip() or None
+    parent_id = str(candidate.get("parent_id") or metadata.get("parent_id") or "").strip() or None
     objective = candidate.get("objective")
     if objective is None:
         objective = metrics.get(objective_key)
     objective = (
         float(objective)
-        if isinstance(objective, (int, float))
-        and not isinstance(objective, bool)
-        and math.isfinite(float(objective))
+        if isinstance(objective, (int, float)) and not isinstance(objective, bool) and math.isfinite(float(objective))
         else None
     )
     inferred_cycle = cycle
@@ -50,10 +44,7 @@ def normalize_search_candidate(
             match = re.match(r"c(\d+)", candidate_id)
             inferred_cycle = int(match.group(1)) if match else None
     action = str(
-        population_action
-        or metadata.get("population_action")
-        or candidate.get("population_action")
-        or "unknown"
+        population_action or metadata.get("population_action") or candidate.get("population_action") or "unknown"
     )
     gate_value = candidate.get(
         "gate_passed",
@@ -61,9 +52,7 @@ def normalize_search_candidate(
     )
     chains = candidate.get("chains") or metadata.get("chains") or {}
     normalized_chains = (
-        {str(chain): str(sequence) for chain, sequence in chains.items()}
-        if isinstance(chains, Mapping)
-        else {}
+        {str(chain): str(sequence) for chain, sequence in chains.items()} if isinstance(chains, Mapping) else {}
     )
     return {
         "candidate_id": candidate_id,
@@ -76,8 +65,7 @@ def normalize_search_candidate(
         "mutations": list(metadata.get("mutations") or candidate.get("mutations") or []),
         "skill_id": metadata.get("skill_id") or candidate.get("skill_id"),
         "gate_passed": bool(gate_value) if gate_value is not None else None,
-        "gate_reason": candidate.get("gate_reason")
-        or (metadata.get("gate_evidence") or {}).get("reason"),
+        "gate_reason": candidate.get("gate_reason") or (metadata.get("gate_evidence") or {}).get("reason"),
         "population_action": action,
         "sequence": str(candidate.get("sequence") or ""),
         "chains": normalized_chains,
@@ -113,10 +101,7 @@ def build_search_trajectory_summary(
     minimize: bool,
     max_cycles: int = 20,
 ) -> dict[str, Any]:
-    normalized = [
-        _ensure_normalized(entry, objective_key=objective_key, minimize=minimize)
-        for entry in entries
-    ]
+    normalized = [_ensure_normalized(entry, objective_key=objective_key, minimize=minimize) for entry in entries]
     normalized = [entry for entry in normalized if entry["candidate_id"]]
     by_id = {entry["candidate_id"]: entry for entry in normalized}
     scored = [entry for entry in normalized if entry["objective"] is not None]
@@ -129,9 +114,7 @@ def build_search_trajectory_summary(
     )
     actions = Counter(entry["population_action"] for entry in normalized)
     gate_reasons = Counter(
-        str(entry["gate_reason"])
-        for entry in normalized
-        if entry["gate_passed"] is False and entry["gate_reason"]
+        str(entry["gate_reason"]) for entry in normalized if entry["gate_passed"] is False and entry["gate_reason"]
     )
     skills: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"candidate_count": 0, "improved_edges": 0, "mean_improvement": None}
@@ -165,9 +148,7 @@ def build_search_trajectory_summary(
             continue
         current = cycle_best.get(cycle)
         if current is None or (
-            entry["objective"] < current["objective"]
-            if minimize
-            else entry["objective"] > current["objective"]
+            entry["objective"] < current["objective"] if minimize else entry["objective"] > current["objective"]
         ):
             cycle_best[cycle] = entry
     recent_cycles = sorted(cycle_best)[-max_cycles:]
@@ -189,12 +170,8 @@ def build_search_trajectory_summary(
         "population_actions": dict(actions.most_common()),
         "recurring_gate_failures": dict(gate_reasons.most_common(10)),
         "skill_outcomes": dict(skills),
-        "top_improving_edges": sorted(
-            improving_edges, key=lambda edge: edge["improvement"], reverse=True
-        )[:10],
-        "top_declining_edges": sorted(
-            declining_edges, key=lambda edge: edge["improvement"]
-        )[:10],
+        "top_improving_edges": sorted(improving_edges, key=lambda edge: edge["improvement"], reverse=True)[:10],
+        "top_declining_edges": sorted(declining_edges, key=lambda edge: edge["improvement"])[:10],
         "recent_cycle_best": [
             {
                 "cycle": cycle,

@@ -32,9 +32,7 @@ except ImportError:
 
 def _cif_to_pdb(cif_path: Path, output_dir: Optional[Path] = None) -> Path:
     if not HAS_BIOTITE:
-        raise RuntimeError(
-            "biotite package is required for .cif/.mmcif conversion"
-        )
+        raise RuntimeError("biotite package is required for .cif/.mmcif conversion")
 
     if output_dir is None:
         output_dir = cif_path.parent
@@ -122,10 +120,7 @@ def analyze_structure(
         if configured.is_file():
             plip_command = str(configured)
     if plip_command is None:
-        raise RuntimeError(
-            "PLIP command not found. Run structure analysis inside the "
-            "configured compute service."
-        )
+        raise RuntimeError("PLIP command not found. Run structure analysis inside the configured compute service.")
 
     cmd = [
         plip_command,
@@ -145,16 +140,12 @@ def analyze_structure(
 
     try:
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"PLIP analysis timed out after {timeout}s") from exc
 
         if result.returncode != 0:
-            error_text = (
-                result.stderr.strip() or result.stdout.strip() or "unknown error"
-            )
+            error_text = result.stderr.strip() or result.stdout.strip() or "unknown error"
             raise RuntimeError(f"PLIP analysis failed: {error_text}")
 
         report_path = plip_output_dir / "report.txt"
@@ -170,7 +161,6 @@ def analyze_structure(
         shutil.rmtree(plip_output_dir, ignore_errors=True)
         if temp_dir is not None:
             shutil.rmtree(temp_dir, ignore_errors=True)
-
 
 
 def _resolve_output_path(
@@ -214,12 +204,7 @@ def _run_one_analysis(
         return output_path, None
     except Exception as exc:  # noqa: BLE001
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        error_text = (
-            "PLIP analysis failed.\n"
-            f"Error: {exc}\n\n"
-            "Traceback:\n"
-            f"{traceback.format_exc()}"
-        )
+        error_text = f"PLIP analysis failed.\nError: {exc}\n\nTraceback:\n{traceback.format_exc()}"
         output_path.write_text(error_text, encoding="utf-8")
         return output_path, str(exc)
 
@@ -227,8 +212,7 @@ def _run_one_analysis(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Analyze one or more structure files and write PLIP interactions "
-            "to txt. Multiple inputs run concurrently."
+            "Analyze one or more structure files and write PLIP interactions to txt. Multiple inputs run concurrently."
         )
     )
     parser.add_argument(
@@ -301,10 +285,7 @@ def main() -> None:
     if args.name is None:
         names = [None] * len(structure_files)
     elif len(args.name) != len(structure_files):
-        parser.error(
-            f"--name count ({len(args.name)}) must match number of structures "
-            f"({len(structure_files)})"
-        )
+        parser.error(f"--name count ({len(args.name)}) must match number of structures ({len(structure_files)})")
     else:
         names = list(args.name)
 
@@ -330,7 +311,10 @@ def main() -> None:
     if n == 1 or workers == 1:
         for sf, out in zip(structure_files, output_paths):
             _, err = _run_one_analysis(
-                sf, out, args.ligand_resname, binder_chain,
+                sf,
+                out,
+                args.ligand_resname,
+                binder_chain,
                 args.timeout,
             )
             if err:
@@ -358,9 +342,7 @@ def main() -> None:
         print(str(out))
 
     if failures:
-        sys.stderr.write(
-            f"{len(failures)}/{n} structure(s) failed PLIP analysis:\n"
-        )
+        sys.stderr.write(f"{len(failures)}/{n} structure(s) failed PLIP analysis:\n")
         for sf, err in failures:
             sys.stderr.write(f"  - {sf}: {err}\n")
         sys.exit(1)

@@ -1446,7 +1446,7 @@ class AgentLoop:
                 getattr(classification, "category", "unknown"),
                 summary[:200],
             )
-            return _error(f"{partial}\n\n[Reply interrupted: {summary}. Send \"continue\" to resume.]", classification)
+            return _error(f'{partial}\n\n[Reply interrupted: {summary}. Send "continue" to resume.]', classification)
 
         if had_error:
             return _error(error_content, error_classification)
@@ -1940,16 +1940,9 @@ class AgentLoop:
                     # riding along on it (ToolOutput). The model always gets the
                     # model text; the UI preview prefers the display string.
                     model_text = str(result)
-                    if (
-                        tool_call.name == "use_skill"
-                        and not model_text.lstrip().lower().startswith("error:")
-                    ):
+                    if tool_call.name == "use_skill" and not model_text.lstrip().lower().startswith("error:"):
                         skill_id = tool_call.arguments.get("skill_id")
-                        if (
-                            isinstance(skill_id, str)
-                            and "/" in skill_id
-                            and skill_id not in used_skill_ids
-                        ):
+                        if isinstance(skill_id, str) and "/" in skill_id and skill_id not in used_skill_ids:
                             used_skill_ids.append(skill_id)
                     display_src = getattr(result, "display_text", None) or model_text
                     # The log stays one line; the UI event keeps newlines so a
@@ -2695,7 +2688,9 @@ def _merge_tool_call_fragments(
     for tc in incoming:
         idx = int(tc.get("index", 0) or 0)
         while len(slots) <= idx:
-            slots.append({"id": None, "function": {"name": None, "arguments_buf": []}, "fields": None, "fn_fields": None})
+            slots.append(
+                {"id": None, "function": {"name": None, "arguments_buf": []}, "fields": None, "fn_fields": None}
+            )
         slot = slots[idx]
         if tc.get("id") and not slot["id"]:
             slot["id"] = tc["id"]

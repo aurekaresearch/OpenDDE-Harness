@@ -159,17 +159,13 @@ structures captured in the client's tracing data. See the [dashboard guide](docs
 
 ## Development & License
 
-See the [repository rules](AGENTS.md) and [compute image build instructions](docker/README.md). Ordinary users consume a prebuilt image; Dockerfiles remain available for publishers and customization. Python tests live under `tests/` and run in CI with `uv run pytest`.
-
-Licensed under [Apache-2.0](LICENSE); see [third-party notices](LICENSES/README.md). TUI and memory foundations are adapted from [Raven](https://github.com/EverMind-AI/Raven), and long-term memory is served by [EverOS](https://github.com/EverMind-AI/EverOS). Models may have separate terms.
-
-Computational results require experimental validation. Model calls and compute may incur costs.
+See the [repository rules](AGENTS.md) and [compute image build instructions](docker/README.md). Ordinary users consume a prebuilt image; Dockerfiles remain available for publishers and customization. Licensed under [Apache-2.0](LICENSE); see [third-party notices](LICENSES/README.md). TUI and memory foundations are adapted from Raven, and long-term memory is served by EverOS. Models may have separate terms. Computational results require experimental validation. Model calls and compute may incur costs.
 
 ## Citation and Acknowledgements
 
-If you use OpenDDE Harness in your work, please cite this software and the technical report linked above. When using OpenDDE for structure prediction, also cite the [OpenDDE technical report](https://arxiv.org/abs/2607.03787) and follow its [citation and acknowledgement guidance](https://github.com/aurekaresearch/OpenDDE#citation-and-acknowledgements). Cite the original methods for other models and tools used in your experiments, including SolubleMPNN and ESM2 when applicable.
+If you use OpenDDE Harness in your work, please cite this software and the technical report linked above. When using OpenDDE for structure prediction, also cite the [OpenDDE technical report](https://arxiv.org/abs/2607.03787) and follow its citation and acknowledgement guidance. Cite the original methods for other models and tools used in your experiments, including SolubleMPNN and ESM2 when applicable.
 
-We acknowledge [Raven](https://github.com/EverMind-AI/Raven), [EverOS](https://github.com/EverMind-AI/EverOS), and the upstream projects listed in the [third-party notices](LICENSES/README.md). Their software and model licenses continue to apply.
+We acknowledge Raven, EverOS, and the upstream projects listed in the [third-party notices](LICENSES/README.md). Their software and model licenses continue to apply.
 
 ## Partnership and Collaboration
 

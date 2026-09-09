@@ -67,7 +67,9 @@ def _serve(monkeypatch, handler):
 
     from opendde_harness.cli import _download
 
-    monkeypatch.setattr(_download, "new_client", lambda: httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True))
+    monkeypatch.setattr(
+        _download, "new_client", lambda: httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    )
 
 
 def test_installed_code_prepares_and_reuses_without_checkout(tmp_path, installed_code):
@@ -97,7 +99,10 @@ def test_code_upgrade_keeps_old_snapshot_and_environment(tmp_path, installed_cod
     second = compute_code.prepare_runtime_code(tmp_path / "cache")
     assert first != second
     assert (first / "opendde_harness/__init__.py").read_bytes() == old
-    assert compute_code.verify_runtime_code(first)["environment_sha256"] == compute_code.verify_runtime_code(second)["environment_sha256"]
+    assert (
+        compute_code.verify_runtime_code(first)["environment_sha256"]
+        == compute_code.verify_runtime_code(second)["environment_sha256"]
+    )
 
 
 def test_corrupt_cached_code_is_not_overwritten(tmp_path, installed_code):
@@ -269,7 +274,15 @@ def test_stale_snapshots_are_pruned_keeping_referenced_and_newest(tmp_path, monk
     removed = compute_code.prune_runtime_code(cache, snapshots["f"])
     assert removed == [snapshots["c"]]
     assert commands[0][1:] == ["ps", "-aq", "--filter", "label=org.opendde-harness.code-id"]
-    assert sorted(path.name for path in cache.iterdir()) == [".prepare-live", "1.0.0-a", "1.0.0-b", "1.0.0-d", "1.0.0-e", "1.0.0-f", "sources"]
+    assert sorted(path.name for path in cache.iterdir()) == [
+        ".prepare-live",
+        "1.0.0-a",
+        "1.0.0-b",
+        "1.0.0-d",
+        "1.0.0-e",
+        "1.0.0-f",
+        "sources",
+    ]
     assert capsys.readouterr().out == f"Removed stale runtime code: {snapshots['c']}\n"
     monkeypatch.setattr(compute_code.shutil, "which", lambda _name: None)
     assert compute_code.prune_runtime_code(cache, snapshots["f"]) == []

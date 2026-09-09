@@ -373,4 +373,3 @@ def test_an_unreachable_service_reports_no_gpu_inventory() -> None:
     assert summary["available"] is False
     assert summary["devices"] == []
     assert "did not answer" in summary["reason"]
-

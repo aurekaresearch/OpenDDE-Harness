@@ -221,7 +221,9 @@ _KEY_OR_LIST = Requirement(
     "an API key",
     "an API key -- run `ddeharness provider set {public} --api-key <key>` (or --api-key-list k1,k2)",
 )
-_ADDRESS = Requirement(("api_base",), "an address", "an address -- run `ddeharness provider set {public} --api-base <url>`")
+_ADDRESS = Requirement(
+    ("api_base",), "an address", "an address -- run `ddeharness provider set {public} --api-base <url>`"
+)
 #: Same requirement, plus the spec's own working default -- read through
 #: `usable_default_api_base`, the same property `Config.get_api_base` serves
 #: from, so the gate can never accept a default the reader then refuses to

@@ -132,6 +132,7 @@ from opendde_harness.cli.session_commands import session_app
 
 app.add_typer(session_app, name="sessions")
 
+
 @app.command("compare")
 def compare(
     legacy: Path = typer.Argument(..., exists=True, dir_okay=False),

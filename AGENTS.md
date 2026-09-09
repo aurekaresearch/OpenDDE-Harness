@@ -41,6 +41,7 @@ make build-tui
 ## Code and tests
 
 - Follow nearby naming, formatting, and logging patterns. Add English comments only for non-obvious logic or constraints.
+- Python formatting follows the repository's Ruff configuration. JS/TS formatting follows the repository's Prettier configuration; do not substitute manual formatting or lint-only checks.
 - Preserve optional-backend behavior and client/compute boundaries; do not assume CUDA or local model assets exist.
 - Keep unit tests under `tests/test_*.py`. CLI changes update the existing `tests/test_cli_<module>_commands.py`; helper and cross-module tests may use descriptive suffixes.
 - Integration tests use `tests/integration/test_<scope>_<kind>.py`, with `kind` equal to `e2e`, `smoke`, or `real_<resource>`.
@@ -50,6 +51,8 @@ make build-tui
 
 - Before creating a branch, confirm the base with the user, fetch its latest tip, and branch before editing. Use `<type>/<short_snake_case_desc>`; the default base is `main`.
 - Commit and push only when explicitly requested. Do not amend or rewrite existing commits without authorization.
+- Before every commit, format all Python and JS/TS source files included in that commit, including staged changes from earlier work. Run `uv run ruff format <python_paths>` for Python. From `ui-tui/`, run `npx --no-install prettier --write <js_ts_paths>` using paths relative to that directory, including `../` for sources elsewhere in the repository.
+- After formatting, run `uv run ruff format --check <python_paths>` and `npx --no-install prettier --check <js_ts_paths>` in the same respective directories, then the relevant lint and tests. Review and stage the formatting changes before committing; do not commit while these checks fail. Respect generated/vendor exclusions and do not format unrelated files.
 - Use Conventional Commits: `<type>(<scope>): <subject>`. Scope is an `opendde_harness/` subpackage, or omitted for cross-package changes. Use English ASCII, a lowercase subject, no trailing period, and a header of at most 100 characters.
 - Before pushing, fetch the target, check conflicts with `git merge-tree --write-tree HEAD origin/<target>`, rebase onto its latest tip if needed, and rerun relevant tests. Only use `--force-with-lease` on your own feature branch; never force-push protected branches.
 - After pushing a new branch, offer to open a PR. Draft an English ASCII title and description covering the problem, changes, actual verification, risks, and related issues; check the text and show it for confirmation before creating the PR.

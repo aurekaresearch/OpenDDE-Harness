@@ -12,7 +12,10 @@ from opendde_harness.providers.responses_api import (
 def test_responses_input_translates_tool_turns():
     messages = [
         {"role": "system", "content": "sys"},
-        {"role": "user", "content": [{"type": "text", "text": "look"}, {"type": "image_url", "image_url": {"url": "data:x"}}]},
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "look"}, {"type": "image_url", "image_url": {"url": "data:x"}}],
+        },
         {
             "role": "assistant",
             "content": "",
@@ -23,14 +26,19 @@ def test_responses_input_translates_tool_turns():
     items = responses_input(messages)
 
     assert items[0] == {"role": "system", "content": "sys"}
-    assert items[1]["content"] == [{"type": "input_text", "text": "look"}, {"type": "input_image", "image_url": "data:x"}]
+    assert items[1]["content"] == [
+        {"type": "input_text", "text": "look"},
+        {"type": "input_image", "image_url": "data:x"},
+    ]
     assert items[2] == {"type": "function_call", "call_id": "c1", "name": "exec", "arguments": '{"cmd": "ls"}'}
     assert items[3] == {"type": "function_call_output", "call_id": "c1", "output": "out"}
 
 
 def test_responses_tools_and_choice():
     tools = [{"type": "function", "function": {"name": "f", "description": "d", "parameters": {"type": "object"}}}]
-    assert responses_tools(tools) == [{"type": "function", "name": "f", "parameters": {"type": "object"}, "description": "d"}]
+    assert responses_tools(tools) == [
+        {"type": "function", "name": "f", "parameters": {"type": "object"}, "description": "d"}
+    ]
     assert responses_tools(None) is None
     assert responses_tool_choice({"type": "function", "function": {"name": "f"}}) == {"type": "function", "name": "f"}
     assert responses_tool_choice("auto") == "auto"
@@ -54,7 +62,9 @@ def test_web_search_preview_lists_sources():
 
 def test_responses_content_keeps_unknown_blocks_as_text():
     assert responses_content("plain") == "plain"
-    assert responses_content([{"type": "weird", "x": 1}]) == [{"type": "input_text", "text": '{"type": "weird", "x": 1}'}]
+    assert responses_content([{"type": "weird", "x": 1}]) == [
+        {"type": "input_text", "text": '{"type": "weird", "x": 1}'}
+    ]
 
 
 def test_failed_response_never_returns_tool_calls():

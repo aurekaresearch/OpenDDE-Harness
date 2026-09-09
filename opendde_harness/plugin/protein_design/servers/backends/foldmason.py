@@ -130,9 +130,7 @@ def run_structural_tree(
             )
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout).strip()
-                warnings.append(
-                    f"chain {chain_id}: FoldMason exited {result.returncode}: {detail[-1000:]}"
-                )
+                warnings.append(f"chain {chain_id}: FoldMason exited {result.returncode}: {detail[-1000:]}")
                 continue
             tree_path = prefix.with_suffix(".nw")
             alignment_path = prefix.with_name(f"{prefix.name}_aa.fa")
@@ -216,10 +214,7 @@ def _select_representatives(
     minimize: bool,
 ) -> list[dict[str, Any]]:
     by_id = {str(item["candidate_id"]): item for item in candidates}
-    sequence_signatures = {
-        candidate_id: _sequence_signature(item, cdr_regions)
-        for candidate_id, item in by_id.items()
-    }
+    sequence_signatures = {candidate_id: _sequence_signature(item, cdr_regions) for candidate_id, item in by_id.items()}
     selected: list[dict[str, Any]] = []
     selected_ids: set[str] = set()
 
@@ -231,21 +226,23 @@ def _select_representatives(
             selected.append(candidate)
             selected_ids.add(candidate_id)
 
-    retained = [
-        item for item in candidates if str(item.get("population_action") or "").startswith("retained")
-    ]
+    retained = [item for item in candidates if str(item.get("population_action") or "").startswith("retained")]
     for item in sorted(retained, key=lambda value: _objective_key(value, minimize)):
         add(item)
 
     scored = [item for item in candidates if _finite(item.get("objective"))]
-    best = min(scored, key=lambda item: float(item["objective"])) if minimize and scored else (
-        max(scored, key=lambda item: float(item["objective"])) if scored else None
+    best = (
+        min(scored, key=lambda item: float(item["objective"]))
+        if minimize and scored
+        else (max(scored, key=lambda item: float(item["objective"])) if scored else None)
     )
     for leaf in (best, by_id.get(str(current_parent_id or ""))):
         for item in _lineage(leaf, by_id):
             add(item)
 
-    latest_cycle = max((int(item.get("cycle")) for item in candidates if isinstance(item.get("cycle"), int)), default=-1)
+    latest_cycle = max(
+        (int(item.get("cycle")) for item in candidates if isinstance(item.get("cycle"), int)), default=-1
+    )
     for item in sorted(
         (candidate for candidate in candidates if candidate.get("cycle") == latest_cycle),
         key=lambda value: _objective_key(value, minimize),
@@ -253,16 +250,20 @@ def _select_representatives(
         add(item)
 
     remaining = [item for item in candidates if str(item["candidate_id"]) not in selected_ids]
-    minimum_distances = {
-        str(item["candidate_id"]): min(
-            _signature_distance(
-                sequence_signatures[str(item["candidate_id"])],
-                sequence_signatures[str(incumbent["candidate_id"])],
+    minimum_distances = (
+        {
+            str(item["candidate_id"]): min(
+                _signature_distance(
+                    sequence_signatures[str(item["candidate_id"])],
+                    sequence_signatures[str(incumbent["candidate_id"])],
+                )
+                for incumbent in selected
             )
-            for incumbent in selected
-        )
-        for item in remaining
-    } if selected else {}
+            for item in remaining
+        }
+        if selected
+        else {}
+    )
     while remaining and len(selected) < max_structures:
         if not selected:
             choice_index, choice = min(
@@ -338,10 +339,7 @@ def _sequence_signature(
 
 
 def _signature_distance(left: Mapping[str, str], right: Mapping[str, str]) -> float:
-    fragments = [
-        (left.get(chain, ""), right.get(chain, ""))
-        for chain in sorted(set(left) | set(right))
-    ]
+    fragments = [(left.get(chain, ""), right.get(chain, "")) for chain in sorted(set(left) | set(right))]
     return sum(_normalized_edit_distance(a, b) for a, b in fragments) / len(fragments)
 
 

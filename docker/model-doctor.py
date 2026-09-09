@@ -52,7 +52,13 @@ def main():
     code_root = Path(opendde_harness.__file__).resolve().parent.parent
     os.environ.setdefault("STRUCTPRED_OPENDDE_CODE_DIR", str(code_root / "external/opendde"))
     torch.set_num_threads(4)
-    report = {"device": args.device, "mode": args.mode, "sources": source_revisions(), "checks": [], "network": "disabled"}
+    report = {
+        "device": args.device,
+        "mode": args.mode,
+        "sources": source_revisions(),
+        "checks": [],
+        "network": "disabled",
+    }
     harness = PythonProteinDesignHarness(output_path=str(args.output.parent))
 
     def invoke(operation, payload):
@@ -66,11 +72,20 @@ def main():
         started = time.monotonic()
         try:
             result = operation()
-            report["checks"].append({"name": name, "status": "passed", "seconds": time.monotonic() - started, "result": result})
+            report["checks"].append(
+                {"name": name, "status": "passed", "seconds": time.monotonic() - started, "result": result}
+            )
             print(f"PASS {name}", flush=True)
             return result
         except Exception as exc:
-            report["checks"].append({"name": name, "status": "failed", "seconds": time.monotonic() - started, "error": f"{type(exc).__name__}: {exc}"})
+            report["checks"].append(
+                {
+                    "name": name,
+                    "status": "failed",
+                    "seconds": time.monotonic() - started,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
             print(f"FAIL {name}: {exc}", flush=True)
             return None
 
@@ -95,10 +110,20 @@ def main():
         check("device", lambda: resolve_device(args.device))
         check("weights", assets)
         check("esm2_scoring", esm)
-        proposals = check("esm2_guided_generation", lambda: invoke("generate_esm2_guided", {
-            "parent_id": "fixture", "parent_chains": {"B": "MKVLWA"}, "mutable_positions": {"B": [1, 2]},
-            "min_llr": -100, "num_sequences": 2, "options": {"batch_size": 2},
-        }))
+        proposals = check(
+            "esm2_guided_generation",
+            lambda: invoke(
+                "generate_esm2_guided",
+                {
+                    "parent_id": "fixture",
+                    "parent_chains": {"B": "MKVLWA"},
+                    "mutable_positions": {"B": [1, 2]},
+                    "min_llr": -100,
+                    "num_sequences": 2,
+                    "options": {"batch_size": 2},
+                },
+            ),
+        )
         if proposals is not None and not proposals.get("result", {}).get("candidates"):
             report["checks"][-1]["status"] = "failed"
             report["checks"][-1]["error"] = "No ESM-guided candidates returned"
@@ -121,13 +146,24 @@ def main():
             mutable = list(range(len(chains[binder])))
 
             def mpnn():
-                result = invoke("generate_soluble_mpnn", {
-                    "parent_chains": chains, "structure_path": str(fixture), "num_sequences": 8,
-                    "mutable_positions": [f"{binder}:{i}" for i in mutable],
-                    "parameters": {"seed": 101, "temperature": 1.0, "wt_bias": 0},
-                })
+                result = invoke(
+                    "generate_soluble_mpnn",
+                    {
+                        "parent_chains": chains,
+                        "structure_path": str(fixture),
+                        "num_sequences": 8,
+                        "mutable_positions": [f"{binder}:{i}" for i in mutable],
+                        "parameters": {"seed": 101, "temperature": 1.0, "wt_bias": 0},
+                    },
+                )
                 require(len(result["candidates"]) == 8, "SolubleMPNN returned the wrong candidate count")
-                require(all(len(item["chains"][binder]) == len(chains[binder]) and item["chains"][target] == chains[target] for item in result["candidates"]), "SolubleMPNN changed fixed chains or sequence lengths")
+                require(
+                    all(
+                        len(item["chains"][binder]) == len(chains[binder]) and item["chains"][target] == chains[target]
+                        for item in result["candidates"]
+                    ),
+                    "SolubleMPNN changed fixed chains or sequence lengths",
+                )
                 require_device("SolubleMPNN")
                 return result
 
@@ -135,54 +171,135 @@ def main():
             check("structure_read", lambda: invoke("structure_read", {"path": str(fixture)}))
 
             def rmsd():
-                result = invoke("pose_rmsd", {"reference_path": str(fixture), "mobile_path": str(fixture), "target_chain_ids": [target], "binder_chain_ids": [binder]})
+                result = invoke(
+                    "pose_rmsd",
+                    {
+                        "reference_path": str(fixture),
+                        "mobile_path": str(fixture),
+                        "target_chain_ids": [target],
+                        "binder_chain_ids": [binder],
+                    },
+                )
                 require(result["rmsd"] < 1e-5, "Self-alignment RMSD is not zero")
                 return result
+
             check("pose_rmsd", rmsd)
-            check("epitope_analysis", lambda: invoke("epitope_analysis", {
-                "structure_path": str(fixture), "antibody_chains": [binder], "antigen_chains": [target],
-                "cdr_regions": {binder: {"CDR3": mutable}},
-            }))
+            check(
+                "epitope_analysis",
+                lambda: invoke(
+                    "epitope_analysis",
+                    {
+                        "structure_path": str(fixture),
+                        "antibody_chains": [binder],
+                        "antigen_chains": [target],
+                        "cdr_regions": {binder: {"CDR3": mutable}},
+                    },
+                ),
+            )
 
             def plip():
-                result = invoke("structure_analysis", {"structure_paths": [str(fixture)], "candidate_names": ["fixture"], "binder_chain_ids": [binder], "target_chain_ids": [target]})
+                result = invoke(
+                    "structure_analysis",
+                    {
+                        "structure_paths": [str(fixture)],
+                        "candidate_names": ["fixture"],
+                        "binder_chain_ids": [binder],
+                        "target_chain_ids": [target],
+                    },
+                )
                 require(result["available"], f"PLIP did not produce a valid report: {result}")
                 return result
+
             check("plip_openbabel", plip)
 
             def tree():
                 require(generated is not None, "SolubleMPNN candidates are unavailable")
                 candidates = []
                 for index, item in enumerate(generated["candidates"]):
-                    copy = atoms[~atoms.hetero & ((atoms.atom_name == "N") | (atoms.atom_name == "CA") | (atoms.atom_name == "C") | (atoms.atom_name == "O"))].copy()
+                    copy = atoms[
+                        ~atoms.hetero
+                        & (
+                            (atoms.atom_name == "N")
+                            | (atoms.atom_name == "CA")
+                            | (atoms.atom_name == "C")
+                            | (atoms.atom_name == "O")
+                        )
+                    ].copy()
                     residue_ids, _names = struc.get_residues(copy[copy.chain_id == binder])
                     for residue, letter in zip(residue_ids, item["chains"][binder], strict=True):
-                        copy.res_name[(copy.chain_id == binder) & (copy.res_id == residue)] = ProteinSequence.convert_letter_1to3(letter)
+                        copy.res_name[(copy.chain_id == binder) & (copy.res_id == residue)] = (
+                            ProteinSequence.convert_letter_1to3(letter)
+                        )
                     path = args.output.parent / f"variant_{index}.pdb"
                     save_structure(path, copy)
-                    candidates.append({"candidate_id": f"variant_{index}", "sequence": item["chains"][binder], "structure_path": str(path), "objective": float(index), "cycle": 0})
+                    candidates.append(
+                        {
+                            "candidate_id": f"variant_{index}",
+                            "sequence": item["chains"][binder],
+                            "structure_path": str(path),
+                            "objective": float(index),
+                            "cycle": 0,
+                        }
+                    )
                 population = args.output.parent / "candidates.json"
                 population.write_text(json.dumps(candidates))
-                result = invoke("evolution_tree", {"candidates_json_path": str(population), "binder_chain_ids": [binder], "cdr_regions": {binder: mutable}})
-                require(result["result"]["structural_analysis"]["status"] == "ran", f"FoldMason did not execute: {result}")
+                result = invoke(
+                    "evolution_tree",
+                    {
+                        "candidates_json_path": str(population),
+                        "binder_chain_ids": [binder],
+                        "cdr_regions": {binder: mutable},
+                    },
+                )
+                require(
+                    result["result"]["structural_analysis"]["status"] == "ran", f"FoldMason did not execute: {result}"
+                )
                 for details in result["result"]["structural_analysis"]["chains"].values():
-                    require(Path(details["tree_path"]).stat().st_size > 0 and Path(details["alignment_path"]).stat().st_size > 0, "FoldMason outputs are empty")
+                    require(
+                        Path(details["tree_path"]).stat().st_size > 0
+                        and Path(details["alignment_path"]).stat().st_size > 0,
+                        "FoldMason outputs are empty",
+                    )
                 return result
+
             check("foldmason_evolution", tree)
 
             if args.mode == "local":
+
                 def fold():
-                    result = invoke("fold", {"candidates": [{"candidate_id": "fixture", "sequence": chains[binder], "chains": chains}], "options": {
-                        "execution_mode": "local", "device": args.device, "gpus": "none" if args.device == "cpu" else "0",
-                        "use_msa": False, "use_templates": False, "enable_msa_search": False,
-                        "seeds": [101], "diffusion_samples": 5, "diffusion_steps": 200, "recycling_cycles": 10,
-                        "binder_chain_ids": [binder], "target_chain_ids": [target], "objective_key": "loss",
-                        "fixed_residues": {binder: list(range(max(1, len(chains[binder]) // 2)))},
-                        "esm2_options": {"batch_size": 2},
-                    }})
-                    require(len(result["candidates"]) == 1 and result["candidates"][0]["metadata"]["success"], f"OpenDDE prediction/scoring failed: {result}")
-                    require(len(list((args.output.parent / "fold").rglob("*_sample_*.cif"))) == 5, "OpenDDE did not produce exactly five structures")
+                    result = invoke(
+                        "fold",
+                        {
+                            "candidates": [{"candidate_id": "fixture", "sequence": chains[binder], "chains": chains}],
+                            "options": {
+                                "execution_mode": "local",
+                                "device": args.device,
+                                "gpus": "none" if args.device == "cpu" else "0",
+                                "use_msa": False,
+                                "use_templates": False,
+                                "enable_msa_search": False,
+                                "seeds": [101],
+                                "diffusion_samples": 5,
+                                "diffusion_steps": 200,
+                                "recycling_cycles": 10,
+                                "binder_chain_ids": [binder],
+                                "target_chain_ids": [target],
+                                "objective_key": "loss",
+                                "fixed_residues": {binder: list(range(max(1, len(chains[binder]) // 2)))},
+                                "esm2_options": {"batch_size": 2},
+                            },
+                        },
+                    )
+                    require(
+                        len(result["candidates"]) == 1 and result["candidates"][0]["metadata"]["success"],
+                        f"OpenDDE prediction/scoring failed: {result}",
+                    )
+                    require(
+                        len(list((args.output.parent / "fold").rglob("*_sample_*.cif"))) == 5,
+                        "OpenDDE did not produce exactly five structures",
+                    )
                     return result
+
                 check("opendde_local_prediction_and_scoring", fold)
     except Exception as exc:
         report["checks"].append({"name": "fixture", "status": "failed", "error": f"{type(exc).__name__}: {exc}"})

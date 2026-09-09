@@ -55,14 +55,8 @@ def build_design_case_v2(
         if population_actions.get(candidate.candidate_id) == "retained_constrained_elite"
     }
     gate_passed = [candidate for candidate in scored if _passes_gate(candidate)]
-    retained = [
-        candidate for candidate in scored if candidate.candidate_id in retained_ids
-    ]
-    cycle_admitted_ids = {
-        candidate.candidate_id
-        for candidate in candidates
-        if candidate.candidate_id in admitted_ids
-    }
+    retained = [candidate for candidate in scored if candidate.candidate_id in retained_ids]
+    cycle_admitted_ids = {candidate.candidate_id for candidate in candidates if candidate.candidate_id in admitted_ids}
     best_child = _best(retained or gate_passed or scored, minimize=config.minimize)
     rejection_summary = _rejection_summary(
         candidates,
@@ -166,9 +160,7 @@ def build_design_case_v2(
             "recurring_offenders": recurring_offenders,
             "structure_path": best_child.structure_path if best_child is not None else None,
             "parent_structure_path": _structure_path(selected_parent),
-            "working_parent_id": (
-                working_parent.candidate_id if working_parent is not None else None
-            ),
+            "working_parent_id": (working_parent.candidate_id if working_parent is not None else None),
             "representative_candidate_ids": representative_ids,
         },
         "lesson": lesson,
@@ -238,14 +230,14 @@ def _gate_state(candidate: Mapping[str, Any] | None) -> dict[str, Any]:
     rejection_reasons = (
         [str(item) for item in reasons]
         if isinstance(reasons, list)
-        else [str(reason)] if reason and passed is False else []
+        else [str(reason)]
+        if reason and passed is False
+        else []
     )
     fraction = evidence.get("cdr_contact_fraction")
     return {
         "cdr_contact_fraction": (
-            float(fraction)
-            if isinstance(fraction, (int, float)) and not isinstance(fraction, bool)
-            else None
+            float(fraction) if isinstance(fraction, (int, float)) and not isinstance(fraction, bool) else None
         ),
         "passed": passed,
         "rejection_reasons": rejection_reasons,
@@ -255,9 +247,13 @@ def _gate_state(candidate: Mapping[str, Any] | None) -> dict[str, Any]:
 def _best(candidates: list[Candidate], *, minimize: bool) -> Candidate | None:
     if not candidates:
         return None
-    return min(candidates, key=lambda item: float(item.objective)) if minimize else max(
-        candidates,
-        key=lambda item: float(item.objective),
+    return (
+        min(candidates, key=lambda item: float(item.objective))
+        if minimize
+        else max(
+            candidates,
+            key=lambda item: float(item.objective),
+        )
     )
 
 
@@ -441,14 +437,10 @@ def _quality(
     global_best_improved: bool,
 ) -> dict[str, Any]:
     improved = [
-        candidate
-        for candidate in scored
-        if _improved(_objective(candidate), parent_objective, minimize=minimize)
+        candidate for candidate in scored if _improved(_objective(candidate), parent_objective, minimize=minimize)
     ]
     supporting = [
-        candidate
-        for candidate in improved
-        if candidate.candidate_id in retained_ids and _passes_gate(candidate)
+        candidate for candidate in improved if candidate.candidate_id in retained_ids and _passes_gate(candidate)
     ]
     if not scored or not gate_passed:
         verdict = "failure"
@@ -496,10 +488,12 @@ def _lesson(
     if best_child is None:
         summary = f"{skill} produced no scored child candidate."
     else:
-        mutation_text = ", ".join(
-            f"{item.get('chain')}{item.get('position')} {item.get('from')}>{item.get('to')}"
-            for item in mutations
-        ) or "the proposed CDR design"
+        mutation_text = (
+            ", ".join(
+                f"{item.get('chain')}{item.get('position')} {item.get('from')}>{item.get('to')}" for item in mutations
+            )
+            or "the proposed CDR design"
+        )
         summary = (
             f"{skill} applied {mutation_text}; candidate {best_child.candidate_id} "
             f"changed the objective from {parent_objective} to {_objective(best_child)} "

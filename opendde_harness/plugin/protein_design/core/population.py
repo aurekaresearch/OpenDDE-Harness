@@ -44,10 +44,7 @@ class ConstrainedElitePopulation:
                 actions[candidate.candidate_id] = "failed_candidate_not_retained"
                 continue
             key = self._sequence_key(candidate)
-            if any(
-                set(sequence.upper()) - CANONICAL_AMINO_ACIDS
-                for _chain, sequence in key
-            ):
+            if any(set(sequence.upper()) - CANONICAL_AMINO_ACIDS for _chain, sequence in key):
                 actions[candidate.candidate_id] = "masked_sequence_not_retained"
                 continue
             if key in sequence_keys:
@@ -68,17 +65,11 @@ class ConstrainedElitePopulation:
         mutation_usage: dict[str, int] = {}
         position_limit = max(
             1,
-            math.ceil(
-                self._config.population_size
-                * self._config.constrained_max_position_reuse_fraction
-            ),
+            math.ceil(self._config.population_size * self._config.constrained_max_position_reuse_fraction),
         )
         mutation_limit = max(
             1,
-            math.ceil(
-                self._config.population_size
-                * self._config.constrained_max_mutation_reuse_fraction
-            ),
+            math.ceil(self._config.population_size * self._config.constrained_max_mutation_reuse_fraction),
         )
 
         for candidate in unique:
@@ -120,11 +111,7 @@ class ConstrainedElitePopulation:
             and len({chain for chain, _index in keys}) == 1
             and {index for _chain, index in keys} == {0, 1, 2}
         )
-        weights = (
-            [0.25, 0.25, 0.50]
-            if is_single_chain_three_cdrs
-            else [1.0 / len(keys)] * len(keys)
-        )
+        weights = [0.25, 0.25, 0.50] if is_single_chain_three_cdrs else [1.0 / len(keys)] * len(keys)
         return sum(
             weight
             * self._normalized_edit_distance(
@@ -247,9 +234,7 @@ class ParentSampler:
             raise ValueError("cannot select a parent from an empty population")
         ordered = sorted(
             candidates,
-            key=lambda item: (
-                math.inf if item.objective is None else float(item.objective)
-            ),
+            key=lambda item: math.inf if item.objective is None else float(item.objective),
             reverse=not self._config.minimize,
         )
         strategy = self._config.parent_selection_strategy
@@ -278,8 +263,7 @@ class ParentSampler:
         end = self._config.parent_fitness_temperature_end
         temperature = start * (end / start) ** progress
         scores = [
-            float(candidate.objective) if candidate.objective is not None else math.inf
-            for candidate in candidates
+            float(candidate.objective) if candidate.objective is not None else math.inf for candidate in candidates
         ]
         utilities = [-value for value in scores] if self._config.minimize else scores
         finite = [value for value in utilities if math.isfinite(value)]
@@ -287,20 +271,11 @@ class ParentSampler:
             softmax = [1.0] * len(candidates)
         else:
             lower, upper = min(finite), max(finite)
-            normalized = [
-                (value - lower) / (upper - lower) if math.isfinite(value) else 0.0
-                for value in utilities
-            ]
-            softmax = [
-                math.exp(max(-700.0, (value - 1.0) / max(temperature, 1e-6)))
-                for value in normalized
-            ]
+            normalized = [(value - lower) / (upper - lower) if math.isfinite(value) else 0.0 for value in utilities]
+            softmax = [math.exp(max(-700.0, (value - 1.0) / max(temperature, 1e-6))) for value in normalized]
         total = sum(softmax)
         uniform = self._config.parent_fitness_uniform_fraction / len(candidates)
-        weights = [
-            (1.0 - self._config.parent_fitness_uniform_fraction) * value / total + uniform
-            for value in softmax
-        ]
+        weights = [(1.0 - self._config.parent_fitness_uniform_fraction) * value / total + uniform for value in softmax]
         return rng.choices(candidates, weights=weights, k=1)[0]
 
 

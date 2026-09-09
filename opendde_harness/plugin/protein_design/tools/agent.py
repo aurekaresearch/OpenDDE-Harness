@@ -92,17 +92,11 @@ class ProteinDesignToolRegistry:
             target = context.compute or compute
             payload = scoped_arguments(context, arguments)
             if model is EvolutionTreeRequest:
-                payload["candidates_json_path"] = str(
-                    context.metadata.get("candidates_json_path") or "in-memory"
-                )
+                payload["candidates_json_path"] = str(context.metadata.get("candidates_json_path") or "in-memory")
                 payload["objective_key"] = (
-                    context.metadata.get("objective_key")
-                    or payload.get("objective_key")
-                    or "loss"
+                    context.metadata.get("objective_key") or payload.get("objective_key") or "loss"
                 )
-                payload["minimize"] = bool(
-                    context.metadata.get("minimize", payload.get("minimize", True))
-                )
+                payload["minimize"] = bool(context.metadata.get("minimize", payload.get("minimize", True)))
                 for key in (
                     "cycle",
                     "binder_chain_ids",

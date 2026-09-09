@@ -97,9 +97,7 @@ def run_plip_structure_analysis(
     if len(structure_files) != len(candidate_names):
         raise ValueError("structure_files and candidate_names must contain the same number of items")
     if len(structure_files) > _REFLECTION_PLIP_MAX_CANDIDATES:
-        raise ValueError(
-            f"structure analysis accepts at most {_REFLECTION_PLIP_MAX_CANDIDATES} candidates"
-        )
+        raise ValueError(f"structure analysis accepts at most {_REFLECTION_PLIP_MAX_CANDIDATES} candidates")
 
     binder_chains = _normalize_chain_ids(binder_chain_ids, "binder_chain_ids")
     target_chains = _normalize_chain_ids(target_chain_ids, "target_chain_ids")
@@ -135,18 +133,24 @@ def run_plip_structure_analysis(
             timeout=wall_timeout,
         )
     except subprocess.TimeoutExpired:
-        return {"available": False, "result": (
-            "PLIP structure analysis unavailable: bounded runtime exceeded "
-            f"{wall_timeout}s. Continue reflection using fold metrics and contact gates."
-        )}
+        return {
+            "available": False,
+            "result": (
+                "PLIP structure analysis unavailable: bounded runtime exceeded "
+                f"{wall_timeout}s. Continue reflection using fold metrics and contact gates."
+            ),
+        }
 
     report_paths = [Path(line.strip()) for line in completed.stdout.splitlines() if line.strip().endswith("_plip.txt")]
     if len(report_paths) != len(candidate_names):
-        return {"available": False, "result": (
-            "PLIP structure analysis unavailable: unexpected report count "
-            f"expected {len(candidate_names)}, received {len(report_paths)}. "
-            "Continue reflection using fold metrics and contact gates."
-        )}
+        return {
+            "available": False,
+            "result": (
+                "PLIP structure analysis unavailable: unexpected report count "
+                f"expected {len(candidate_names)}, received {len(report_paths)}. "
+                "Continue reflection using fold metrics and contact gates."
+            ),
+        }
 
     summaries = [
         (

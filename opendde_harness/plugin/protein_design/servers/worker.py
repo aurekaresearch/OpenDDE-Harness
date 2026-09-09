@@ -136,18 +136,14 @@ async def run_task(task_id: str, task_root: Path) -> TaskSnapshot:
                 workflow,
                 stop_event=stop_event,
                 adjustments=adjustments,
-                on_progress=lambda progress: store.write_snapshot(
-                    _with_compute_binding(progress, workflow)
-                ),
+                on_progress=lambda progress: store.write_snapshot(_with_compute_binding(progress, workflow)),
             )
         result = _with_compute_binding(result, workflow)
         store.write_snapshot(result)
         return result
     except Exception as exc:
         logger.exception("protein-design task {} failed", task_id)
-        failed = _with_compute_binding(
-            store.read_snapshot(task_id, reconcile=False), workflow
-        ).model_copy(
+        failed = _with_compute_binding(store.read_snapshot(task_id, reconcile=False), workflow).model_copy(
             update={"status": TaskState.FAILED, "error": str(exc)}
         )
         store.write_snapshot(failed)

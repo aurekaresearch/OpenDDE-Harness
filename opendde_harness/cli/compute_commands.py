@@ -14,17 +14,33 @@ compute_app = typer.Typer(help="Prepare, run or stop the Protein Design compute 
 
 @compute_app.command("prepare")
 def prepare(
-    root: Optional[Path] = typer.Option(None, "--root", help="Harness tool weights directory (SolubleMPNN, ESM2); defaults to the configured or prepared location."),
-    opendde_root_dir: Optional[Path] = typer.Option(None, "--opendde-root", help="OpenDDE data directory (checkpoint/, common/) for local folding; defaults to OPENDDE_ROOT_DIR or ~/.cache/opendde."),
-    mode: Optional[str] = typer.Option(None, "--mode", help="OpenDDE mode: api or local. Local mode also prepares OpenDDE weights."),
-    checkpoint: Optional[str] = typer.Option(None, "--checkpoint", help="OpenDDE checkpoint filename; used in local mode only."),
+    root: Optional[Path] = typer.Option(
+        None,
+        "--root",
+        help="Harness tool weights directory (SolubleMPNN, ESM2); defaults to the configured or prepared location.",
+    ),
+    opendde_root_dir: Optional[Path] = typer.Option(
+        None,
+        "--opendde-root",
+        help="OpenDDE data directory (checkpoint/, common/) for local folding; defaults to OPENDDE_ROOT_DIR or ~/.cache/opendde.",
+    ),
+    mode: Optional[str] = typer.Option(
+        None, "--mode", help="OpenDDE mode: api or local. Local mode also prepares OpenDDE weights."
+    ),
+    checkpoint: Optional[str] = typer.Option(
+        None, "--checkpoint", help="OpenDDE checkpoint filename; used in local mode only."
+    ),
     download_workers: int = typer.Option(2, "--download-workers", min=1, max=4),
     assets_only: bool = typer.Option(False, "--assets-only", help="Prepare weights only; skip runtime code."),
     code_only: bool = typer.Option(False, "--code-only", help="Prepare runtime code only; skip weights."),
     code_cache: Optional[Path] = typer.Option(None, "--code-cache", help="Versioned runtime code cache."),
-    upstream_dir: Optional[Path] = typer.Option(None, "--upstream-dir", help="Reuse verified upstream Git checkouts for runtime code."),
+    upstream_dir: Optional[Path] = typer.Option(
+        None, "--upstream-dir", help="Reuse verified upstream Git checkouts for runtime code."
+    ),
     sources_only: Optional[Path] = typer.Option(
-        None, "--sources-only", metavar="HARNESS_ROOT",
+        None,
+        "--sources-only",
+        metavar="HARNESS_ROOT",
         help="Clone pinned upstream checkouts under a Harness source checkout; prepare nothing else.",
     ),
 ) -> None:
@@ -44,10 +60,15 @@ def prepare(
     if mode not in {"api", "local"}:
         raise typer.BadParameter("Configured folding mode must be api or local.")
     if checkpoint and mode == "api":
-        typer.echo("Warning: --checkpoint is ignored in api mode; OpenDDE weights are prepared for local folding only.", err=True)
+        typer.echo(
+            "Warning: --checkpoint is ignored in api mode; OpenDDE weights are prepared for local folding only.",
+            err=True,
+        )
     checkpoint = checkpoint or Path(saved.get("opendde_checkpoint") or DEFAULT_CHECKPOINT).name
     if mode == "local" and checkpoint not in compute_assets.CHECKPOINTS:
-        raise typer.BadParameter("Unknown OpenDDE checkpoint filename; specify a published checkpoint with --checkpoint.")
+        raise typer.BadParameter(
+            "Unknown OpenDDE checkpoint filename; specify a published checkpoint with --checkpoint."
+        )
     try:
         if sources_only is not None:
             compute_assets.prepare_sources(sources_only)

@@ -48,7 +48,9 @@ def resolve_device(requested: str | None = None) -> str:
     if device == "auto":
         return "cuda" if torch.cuda.is_available() else "cpu"
     if not torch.cuda.is_available():
-        raise ValueError("CUDA was requested but is unavailable in the compute environment. Select CPU or fix GPU access.")
+        raise ValueError(
+            "CUDA was requested but is unavailable in the compute environment. Select CPU or fix GPU access."
+        )
     if ":" in device and int(device.split(":", 1)[1]) >= torch.cuda.device_count():
         raise ValueError(f"CUDA device is unavailable: {device}")
     return device

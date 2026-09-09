@@ -60,10 +60,7 @@ def redact_progress_payload(value: Any) -> Any:
             key = str(raw_key)
             normalized = _normalized_key(key)
             is_secret = any(
-                normalized == secret
-                or normalized.endswith(secret)
-                or secret in normalized
-                for secret in _SECRET_KEYS
+                normalized == secret or normalized.endswith(secret) or secret in normalized for secret in _SECRET_KEYS
             )
             result[key] = _REDACTED if is_secret else redact_progress_payload(item)
         return result
@@ -106,8 +103,7 @@ class DesignProgressEvent(BaseModel):
     def compact_payload(self) -> dict[str, Any]:
         payload = self.model_dump(mode="json", exclude={"input_payload", "output_payload", "metadata"})
         payload["has_details"] = any(
-            value not in (None, {}, [], "")
-            for value in (self.input_payload, self.output_payload, self.metadata)
+            value not in (None, {}, [], "") for value in (self.input_payload, self.output_payload, self.metadata)
         )
         return payload
 

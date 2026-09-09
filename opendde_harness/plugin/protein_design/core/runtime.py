@@ -35,7 +35,6 @@ class _BinderSection:
     initial_candidates: list[dict[str, Any]]
 
 
-
 class WorkflowConfigLoader:
     _DESIGN_FIELDS = frozenset(
         {
@@ -111,9 +110,7 @@ class WorkflowConfigLoader:
         }
     )
     _TARGET_FIELDS = frozenset({"chains", "name"})
-    _TARGET_CHAIN_FIELDS = frozenset(
-        {"hotspots", "pairedMsaPath", "sequence", "unpairedMsaPath"}
-    )
+    _TARGET_CHAIN_FIELDS = frozenset({"hotspots", "pairedMsaPath", "sequence", "unpairedMsaPath"})
     _BINDER_FIELDS = frozenset({"chains", "name"})
     _BINDER_CHAIN_FIELDS = frozenset(
         {
@@ -153,32 +150,19 @@ class WorkflowConfigLoader:
     @staticmethod
     def _normalize_config(data: dict[str, Any]) -> WorkflowConfig:
         compute = WorkflowConfigLoader._mapping_section(data, "compute")
-        WorkflowConfigLoader._reject_unknown_fields(
-            "compute", compute, WorkflowConfigLoader._COMPUTE_FIELDS
-        )
+        WorkflowConfigLoader._reject_unknown_fields("compute", compute, WorkflowConfigLoader._COMPUTE_FIELDS)
         if "post_refold_filter" in data:
-            raise ValueError(
-                "unknown root config field 'post_refold_filter'; "
-                "move it under design.post_refold_filter"
-            )
-        WorkflowConfigLoader._reject_unknown_fields(
-            "root", data, WorkflowConfigLoader._STRUCTURED_FIELDS
-        )
+            raise ValueError("unknown root config field 'post_refold_filter'; move it under design.post_refold_filter")
+        WorkflowConfigLoader._reject_unknown_fields("root", data, WorkflowConfigLoader._STRUCTURED_FIELDS)
         benchmark_metadata = data.get("benchmark_metadata") or {}
         if not isinstance(benchmark_metadata, dict):
             raise ValueError("benchmark_metadata must be a YAML mapping")
         design = WorkflowConfigLoader._mapping_section(data, "design")
         fold = WorkflowConfigLoader._mapping_section(data, "fold")
         llm = WorkflowConfigLoader._mapping_section(data, "llm")
-        WorkflowConfigLoader._reject_unknown_fields(
-            "design", design, WorkflowConfigLoader._DESIGN_FIELDS
-        )
-        WorkflowConfigLoader._reject_unknown_fields(
-            "llm", llm, WorkflowConfigLoader._LLM_FIELDS
-        )
-        WorkflowConfigLoader._reject_unknown_fields(
-            "fold", fold, WorkflowConfigLoader._FOLD_FIELDS
-        )
+        WorkflowConfigLoader._reject_unknown_fields("design", design, WorkflowConfigLoader._DESIGN_FIELDS)
+        WorkflowConfigLoader._reject_unknown_fields("llm", llm, WorkflowConfigLoader._LLM_FIELDS)
+        WorkflowConfigLoader._reject_unknown_fields("fold", fold, WorkflowConfigLoader._FOLD_FIELDS)
         target = WorkflowConfigLoader._parse_target(data)
         target_name = target.name
         target_chains = target.chains
@@ -197,10 +181,7 @@ class WorkflowConfigLoader:
         initial_candidates = binders.initial_candidates
         overlapping_chain_ids = sorted(set(target_chains) & set(binder_chains))
         if overlapping_chain_ids:
-            raise ValueError(
-                "target and binder chain IDs must be distinct: "
-                + ", ".join(overlapping_chain_ids)
-            )
+            raise ValueError("target and binder chain IDs must be distinct: " + ", ".join(overlapping_chain_ids))
         mutable_positions = {
             chain_id: [index for index in range(len(sequence)) if index not in set(fixed_residues.get(chain_id, []))]
             for chain_id, sequence in binder_chains.items()
@@ -208,8 +189,14 @@ class WorkflowConfigLoader:
         skill_weights, post = WorkflowConfigLoader._parse_design_policy(design)
         cycles = design.get("n_cycles", 3)
         fold_backend, fold_options, loss_weights = WorkflowConfigLoader._parse_fold(
-            fold, design, target_chains, binder_chain_options, binder_chains, fixed_residues,
-            cdr_regions, cdr_region_groups,
+            fold,
+            design,
+            target_chains,
+            binder_chain_options,
+            binder_chains,
+            fixed_residues,
+            cdr_regions,
+            cdr_region_groups,
         )
         return WorkflowConfig(
             target=str(target_name or "unknown"),
@@ -230,9 +217,7 @@ class WorkflowConfigLoader:
             metadata={
                 "source_config": data,
                 "loss_weights": loss_weights,
-                "binder_type": WorkflowConfigLoader._antibody_format(
-                    list(binder_chain_type_by_chain.values())
-                ),
+                "binder_type": WorkflowConfigLoader._antibody_format(list(binder_chain_type_by_chain.values())),
                 "benchmark_metadata": dict(benchmark_metadata),
             },
             target_sequence=target_sequence,
@@ -250,12 +235,8 @@ class WorkflowConfigLoader:
             seed=int(data.get("seed", 42)),
             population_size=int(design.get("population_size", 20)),
             constrained_min_cdr_distance=float(design.get("constrained_min_cdr_distance", 0.05)),
-            constrained_max_position_reuse_fraction=float(
-                design.get("constrained_max_position_reuse_fraction", 0.75)
-            ),
-            constrained_max_mutation_reuse_fraction=float(
-                design.get("constrained_max_mutation_reuse_fraction", 0.30)
-            ),
+            constrained_max_position_reuse_fraction=float(design.get("constrained_max_position_reuse_fraction", 0.75)),
+            constrained_max_mutation_reuse_fraction=float(design.get("constrained_max_mutation_reuse_fraction", 0.30)),
             parent_selection_strategy=str(design.get("parent_selection_strategy", "fitness")).lower(),
             parent_fitness_temperature_start=float(design.get("parent_fitness_temperature_start", 1.0)),
             parent_fitness_temperature_end=float(design.get("parent_fitness_temperature_end", 0.2)),
@@ -263,18 +244,10 @@ class WorkflowConfigLoader:
             quality_check_enabled=bool(design.get("enable_quality_check", True)),
             quality_check_threshold=float(design.get("quality_check_threshold", 0.7)),
             llm_model=llm.get("model_name"),
-            llm_temperature=(
-                float(llm["temperature"]) if llm.get("temperature") is not None else None
-            ),
-            llm_max_tokens=(
-                int(llm["max_tokens"]) if llm.get("max_tokens") is not None else None
-            ),
-            bootstrap_full_redesign_cycles=int(
-                design.get("bootstrap_full_redesign_cycles", 0)
-            ),
-            stagnation_full_redesign_threshold=int(
-                design.get("stagnation_full_redesign_threshold", 0)
-            ),
+            llm_temperature=(float(llm["temperature"]) if llm.get("temperature") is not None else None),
+            llm_max_tokens=(int(llm["max_tokens"]) if llm.get("max_tokens") is not None else None),
+            bootstrap_full_redesign_cycles=int(design.get("bootstrap_full_redesign_cycles", 0)),
+            stagnation_full_redesign_threshold=int(design.get("stagnation_full_redesign_threshold", 0)),
             skill_weights=skill_weights,
             esm2_available=bool((skill_weights or {}).get("esm2-guided-mutation", 0.0) > 0.0),
             mutation_count_instruction=f"Use {design.get('num_mutations', 'the configured number of')} CDR mutations.",
@@ -301,9 +274,7 @@ class WorkflowConfigLoader:
         target = data.get("target")
         if not isinstance(target, dict):
             raise ValueError("target config must be a YAML mapping")
-        WorkflowConfigLoader._reject_unknown_fields(
-            "target", target, WorkflowConfigLoader._TARGET_FIELDS
-        )
+        WorkflowConfigLoader._reject_unknown_fields("target", target, WorkflowConfigLoader._TARGET_FIELDS)
         target_name = target.get("name")
         if not str(target_name or "").strip():
             raise ValueError("target.name must be a non-empty string")
@@ -326,15 +297,11 @@ class WorkflowConfigLoader:
                 sequence = raw_chain.get("sequence")
             else:
                 sequence = raw_chain
-            sequence = WorkflowConfigLoader._normalize_sequence(
-                sequence, f"target.chains.{chain_key}.sequence"
-            )
+            sequence = WorkflowConfigLoader._normalize_sequence(sequence, f"target.chains.{chain_key}.sequence")
             if isinstance(raw_chain, dict):
                 normalized = dict(raw_chain)
                 normalized["sequence"] = sequence
-                normalized["hotspots"] = WorkflowConfigLoader._parse_positions(
-                    raw_chain.get("hotspots"), len(sequence)
-                )
+                normalized["hotspots"] = WorkflowConfigLoader._parse_positions(raw_chain.get("hotspots"), len(sequence))
                 target_chains[chain_key] = normalized
             else:
                 target_chains[chain_key] = sequence
@@ -380,9 +347,7 @@ class WorkflowConfigLoader:
             )
             raw_chains = binder.get("chains")
             if not isinstance(raw_chains, dict) or not raw_chains:
-                raise ValueError(
-                    f"initial_binders[{binder_index}].chains must define at least one binder chain"
-                )
+                raise ValueError(f"initial_binders[{binder_index}].chains must define at least one binder chain")
             chains: dict[str, str] = {}
             candidate_chain_types: list[str] = []
             for chain_id, raw in raw_chains.items():
@@ -396,9 +361,7 @@ class WorkflowConfigLoader:
                 if not chain_key.strip():
                     raise ValueError("binder chain IDs must be non-empty")
                 if chain_key in chains:
-                    raise ValueError(
-                        f"duplicate binder chain ID after normalization: {chain_key!r}"
-                    )
+                    raise ValueError(f"duplicate binder chain ID after normalization: {chain_key!r}")
                 sequence = WorkflowConfigLoader._normalize_sequence(
                     item.get("sequence"),
                     f"initial_binders[{binder_index}].chains.{chain_key}.sequence",
@@ -419,41 +382,25 @@ class WorkflowConfigLoader:
                     )
                 chains[str(chain_id)] = sequence
                 binder_chains.setdefault(str(chain_id), sequence)
-                chain_options = {
-                    key: str(item[key])
-                    for key in ("unpairedMsaPath", "pairedMsaPath")
-                    if item.get(key)
-                }
+                chain_options = {key: str(item[key]) for key in ("unpairedMsaPath", "pairedMsaPath") if item.get(key)}
                 previous_options = binder_chain_options.get(chain_key)
                 if previous_options is not None and previous_options != chain_options:
-                    raise ValueError(
-                        f"initial binders disagree on MSA inputs for chain {chain_key!r}"
-                    )
+                    raise ValueError(f"initial binders disagree on MSA inputs for chain {chain_key!r}")
                 binder_chain_options[chain_key] = chain_options
                 previous_chain_type = binder_chain_type_by_chain.get(chain_key)
                 if previous_chain_type is not None and previous_chain_type != chain_type:
-                    raise ValueError(
-                        f"initial binders disagree on chain_type for chain {chain_key!r}"
-                    )
+                    raise ValueError(f"initial binders disagree on chain_type for chain {chain_key!r}")
                 binder_chain_type_by_chain[chain_key] = chain_type
                 candidate_chain_types.append(chain_type)
-                explicit = WorkflowConfigLoader._parse_positions(
-                    item.get("fixed_residues"), len(sequence)
-                )
-                requested = WorkflowConfigLoader._parse_positions(
-                    item.get("designable_residues"), len(sequence)
-                )
+                explicit = WorkflowConfigLoader._parse_positions(item.get("fixed_residues"), len(sequence))
+                requested = WorkflowConfigLoader._parse_positions(item.get("designable_residues"), len(sequence))
                 cdr = WorkflowConfigLoader._parse_positions(item.get("cdr_regions"), len(sequence))
-                groups = WorkflowConfigLoader._parse_position_groups(
-                    item.get("cdr_regions"), len(sequence)
-                )
+                groups = WorkflowConfigLoader._parse_position_groups(item.get("cdr_regions"), len(sequence))
                 cdr_was_configured = item.get("cdr_regions") is not None
                 designable_was_configured = item.get("designable_residues") is not None
                 fixed_was_configured = item.get("fixed_residues") is not None
                 if cdr_was_configured and not cdr:
-                    raise ValueError(
-                        f"cdr_regions for chain {chain_key!r} does not select any residues"
-                    )
+                    raise ValueError(f"cdr_regions for chain {chain_key!r} does not select any residues")
                 if designable_was_configured:
                     mutable = set(requested)
                 elif cdr_was_configured:
@@ -465,15 +412,9 @@ class WorkflowConfigLoader:
                 # and leave the complementary CDR positions implicit.  Keep the
                 # structural CDR annotation aligned with those design permissions
                 # so the contact gate does not see an empty CDR.
-                if (
-                    not cdr_was_configured
-                    and not designable_was_configured
-                    and fixed_was_configured
-                ):
+                if not cdr_was_configured and not designable_was_configured and fixed_was_configured:
                     cdr = sorted(mutable)
-                    groups = WorkflowConfigLoader._parse_position_groups(
-                        cdr, len(sequence)
-                    )
+                    groups = WorkflowConfigLoader._parse_position_groups(cdr, len(sequence))
                 if chain_key in fixed_residues:
                     previous = {
                         "explicit": explicit_fixed_residues[chain_key],
@@ -488,9 +429,7 @@ class WorkflowConfigLoader:
                         "cdr_groups": groups,
                     }
                     if previous != current:
-                        raise ValueError(
-                            f"initial binders disagree on residue permissions for chain {chain_key!r}"
-                        )
+                        raise ValueError(f"initial binders disagree on residue permissions for chain {chain_key!r}")
                 explicit_fixed_residues[chain_key] = explicit
                 designable_residues[chain_key] = requested
                 cdr_regions[chain_key] = cdr
@@ -504,12 +443,8 @@ class WorkflowConfigLoader:
             if expected_binder_chain_ids is None:
                 expected_binder_chain_ids = current_chain_ids
             elif current_chain_ids != expected_binder_chain_ids:
-                raise ValueError(
-                    "all initial binders must define the same binder chain IDs"
-                )
-            candidate_id = str(
-                binder.get("name") or f"initial_{len(initial_candidates)}"
-            )
+                raise ValueError("all initial binders must define the same binder chain IDs")
+            candidate_id = str(binder.get("name") or f"initial_{len(initial_candidates)}")
             if candidate_id in initial_candidate_ids:
                 raise ValueError(f"duplicate initial binder name: {candidate_id!r}")
             initial_candidate_ids.add(candidate_id)
@@ -550,24 +485,15 @@ class WorkflowConfigLoader:
         elif isinstance(raw_weights, dict):
             unknown_skills = sorted(set(map(str, raw_weights)) - supported)
             if unknown_skills:
-                raise ValueError(
-                    "unknown design skill weight(s): " + ", ".join(unknown_skills)
-                )
+                raise ValueError("unknown design skill weight(s): " + ", ".join(unknown_skills))
             skill_weights = {str(key): float(value) for key, value in raw_weights.items()}
             invalid_weights = sorted(
-                key
-                for key, value in skill_weights.items()
-                if not math.isfinite(value) or value < 0.0
+                key for key, value in skill_weights.items() if not math.isfinite(value) or value < 0.0
             )
             if invalid_weights:
-                raise ValueError(
-                    "design skill weights must be finite and non-negative: "
-                    + ", ".join(invalid_weights)
-                )
+                raise ValueError("design skill weights must be finite and non-negative: " + ", ".join(invalid_weights))
             if not any(value > 0.0 for value in skill_weights.values()):
-                raise ValueError(
-                    "design.router_skill_probabilities must enable at least one skill"
-                )
+                raise ValueError("design.router_skill_probabilities must enable at least one skill")
         else:
             raise ValueError("design.router_skill_probabilities must be a YAML mapping")
         post = design.get("post_refold_filter") or {}
@@ -593,23 +519,16 @@ class WorkflowConfigLoader:
     ) -> tuple[str, dict[str, Any], dict[str, float]]:
         fold_backend = str(fold.get("model") or "opendde").strip().lower()
         if fold_backend != "opendde":
-            raise ValueError(
-                "fold.model must be 'opendde'; other fold and refold backends "
-                "are not supported"
-            )
-        fold_execution_mode = str(
-            fold.get("execution_mode")
-            or os.environ.get("OPENDDE_HARNESS_PROTEIN_FOLD_EXECUTION_MODE", "local")
-        ).strip().lower()
+            raise ValueError("fold.model must be 'opendde'; other fold and refold backends are not supported")
+        fold_execution_mode = (
+            str(fold.get("execution_mode") or os.environ.get("OPENDDE_HARNESS_PROTEIN_FOLD_EXECUTION_MODE", "local"))
+            .strip()
+            .lower()
+        )
         if fold_execution_mode == "api":
-            api_url = str(
-                fold.get("api_url")
-                or os.environ.get("OPENDDE_HARNESS_OPENDDE_API_URL", "")
-            ).strip()
+            api_url = str(fold.get("api_url") or os.environ.get("OPENDDE_HARNESS_OPENDDE_API_URL", "")).strip()
             if not api_url:
-                raise ValueError(
-                    "fold.api_url is required for fold.execution_mode: api"
-                )
+                raise ValueError("fold.api_url is required for fold.execution_mode: api")
             from opendde_harness.plugin.protein_design.servers.backends.opendde_api import (
                 normalize_opendde_api_url,
             )
@@ -619,9 +538,7 @@ class WorkflowConfigLoader:
                 str(design.get("optimization_metric", "loss")).lower() == "loss"
                 and fold.get("need_atom_confidence") is False
             ):
-                raise ValueError(
-                    "API loss optimization requires fold.need_atom_confidence: true"
-                )
+                raise ValueError("API loss optimization requires fold.need_atom_confidence: true")
             if fold.get("use_msa") is False:
                 raise ValueError(
                     "fold.execution_mode: api always runs the service-managed MSA/template "
@@ -669,12 +586,8 @@ class WorkflowConfigLoader:
                 "cdr_region_groups": cdr_region_groups,
                 "loss_weights": loss_weights,
                 "target_hotspots": target_hotspots,
-                "cdr_contact_fraction_threshold": float(
-                    design.get("cdr_contact_fraction_threshold", 0.5)
-                ),
-                "hotspot_contact_cutoff_a": float(
-                    design.get("hotspot_contact_cutoff_a", 5.0)
-                ),
+                "cdr_contact_fraction_threshold": float(design.get("cdr_contact_fraction_threshold", 0.5)),
+                "hotspot_contact_cutoff_a": float(design.get("hotspot_contact_cutoff_a", 5.0)),
                 "esm2_options": {"device": design.get("esm_device")},
             }
         )
@@ -701,16 +614,12 @@ class WorkflowConfigLoader:
     @staticmethod
     def _normalize_antibody_chain_type(value: Any, field: str) -> str:
         if value is None or not str(value).strip():
-            raise ValueError(
-                f"{field} is required; this harness only accepts antibody binders"
-            )
+            raise ValueError(f"{field} is required; this harness only accepts antibody binders")
         key = str(value).strip().upper().replace("_", "-")
         normalized = WorkflowConfigLoader._ANTIBODY_CHAIN_TYPE_ALIASES.get(key)
         if normalized is None:
             supported = "VHH, scFv, VH, or VL"
-            raise ValueError(
-                f"{field}={value!r} is not an antibody chain type; supported types are {supported}"
-            )
+            raise ValueError(f"{field}={value!r} is not an antibody chain type; supported types are {supported}")
         return normalized
 
     @staticmethod
@@ -720,8 +629,7 @@ class WorkflowConfigLoader:
         if len(chain_types) == 2 and sorted(chain_types) == ["VH", "VL"]:
             return
         raise ValueError(
-            f"{field} is not a supported antibody topology; use one VHH/scFv chain "
-            "or one paired VH and VL chain"
+            f"{field} is not a supported antibody topology; use one VHH/scFv chain or one paired VH and VL chain"
         )
 
     @staticmethod
@@ -738,9 +646,7 @@ class WorkflowConfigLoader:
     ) -> None:
         unknown = sorted(set(map(str, value)) - allowed)
         if unknown:
-            raise ValueError(
-                f"unknown {section} config field(s): {', '.join(unknown)}"
-            )
+            raise ValueError(f"unknown {section} config field(s): {', '.join(unknown)}")
 
     @staticmethod
     def _parse_positions(value: Any, sequence_length: int) -> list[int]:
@@ -757,16 +663,12 @@ class WorkflowConfigLoader:
                 if start > end:
                     raise ValueError(f"invalid residue range {token!r}: start is greater than end")
                 if start < 0 or end >= sequence_length:
-                    raise ValueError(
-                        f"residue range {token!r} is outside sequence length {sequence_length}"
-                    )
+                    raise ValueError(f"residue range {token!r} is outside sequence length {sequence_length}")
                 positions.update(range(start, end + 1))
             else:
                 position = int(token)
                 if position < 0 or position >= sequence_length:
-                    raise ValueError(
-                        f"residue position {position} is outside sequence length {sequence_length}"
-                    )
+                    raise ValueError(f"residue position {position} is outside sequence length {sequence_length}")
                 positions.add(position)
         return sorted(positions)
 

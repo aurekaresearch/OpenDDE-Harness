@@ -150,7 +150,8 @@ export async function performHeapDump(trigger: MemoryTrigger = 'manual'): Promis
     // Diagnostics first — heap-snapshot serialization can crash on very large
     // heaps, and the JSON sidecar is the most actionable artifact if so.
     const diagnostics = await captureMemoryDiagnostics(trigger)
-    const dir = process.env.OPENDDE_HARNESS_HEAPDUMP_DIR?.trim() || join(homedir() || tmpdir(), '.opendde_harness', 'heapdumps')
+    const dir =
+      process.env.OPENDDE_HARNESS_HEAPDUMP_DIR?.trim() || join(homedir() || tmpdir(), '.opendde_harness', 'heapdumps')
 
     await mkdir(dir, { recursive: true })
 

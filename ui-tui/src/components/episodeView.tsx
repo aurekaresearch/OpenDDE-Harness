@@ -238,28 +238,28 @@ const ToolGroup = memo(function ToolGroup({
               )}
             </Box>
 
-            {tool.resultPreview ? (
-              tool.resultPreview
-                .split('\n')
-                .map(line => line.trim())
-                .filter(Boolean)
-                .map((line, lineIndex, lines) => (
-                  <Box key={lineIndex}>
-                    <NoSelect fromLeftEdge>
-                      <Text color={t.color.muted} dim>
-                        {'  '}
-                        {last ? '  ' : '│ '}
-                        {lineIndex === lines.length - 1 ? '└ ' : '├ '}
-                      </Text>
-                    </NoSelect>
-                    <Box flexGrow={1} minWidth={0}>
-                      <Text color={t.color.muted} dim wrap="truncate-end">
-                        {clipToWidth(line, Math.max(8, (width ?? 120) - ROW_SLACK - 6))}
-                      </Text>
+            {tool.resultPreview
+              ? tool.resultPreview
+                  .split('\n')
+                  .map(line => line.trim())
+                  .filter(Boolean)
+                  .map((line, lineIndex, lines) => (
+                    <Box key={lineIndex}>
+                      <NoSelect fromLeftEdge>
+                        <Text color={t.color.muted} dim>
+                          {'  '}
+                          {last ? '  ' : '│ '}
+                          {lineIndex === lines.length - 1 ? '└ ' : '├ '}
+                        </Text>
+                      </NoSelect>
+                      <Box flexGrow={1} minWidth={0}>
+                        <Text color={t.color.muted} dim wrap="truncate-end">
+                          {clipToWidth(line, Math.max(8, (width ?? 120) - ROW_SLACK - 6))}
+                        </Text>
+                      </Box>
                     </Box>
-                  </Box>
-                ))
-            ) : null}
+                  ))
+              : null}
           </Box>
         )
       })}

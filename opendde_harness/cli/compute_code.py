@@ -218,7 +218,8 @@ def _prepare_upstream(
 
 def _snapshots(cache_root: Path) -> list[Path]:
     snapshots = [
-        path for path in cache_root.iterdir()
+        path
+        for path in cache_root.iterdir()
         if path.is_dir() and not path.is_symlink() and not path.name.startswith(".") and (path / MANIFEST).is_file()
     ]
     return sorted(snapshots, key=lambda path: path.stat().st_mtime, reverse=True)
@@ -232,7 +233,7 @@ def _reuse_snapshot(name: str, revision: str, destination: Path, cache_root: Pat
             manifest = json.loads((snapshot / MANIFEST).read_text())
             if manifest["identity"]["sources"].get(name) != revision:
                 continue
-            expected = {key[len(prefix):]: value for key, value in manifest["files"].items() if key.startswith(prefix)}
+            expected = {key[len(prefix) :]: value for key, value in manifest["files"].items() if key.startswith(prefix)}
             if not expected or _files(source) != expected:
                 continue
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
@@ -254,13 +255,15 @@ def _referenced_snapshots() -> set[Path] | None:
     try:
         containers = subprocess.check_output(
             [executable, "ps", "-aq", "--filter", "label=org.opendde-harness.code-id"],
-            text=True, timeout=SUBPROCESS_TIMEOUT,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
         ).split()
         if not containers:
             return set()
         mounts = subprocess.check_output(
             [executable, "inspect", "--format", "{{range .Mounts}}{{.Source}}{{println}}{{end}}", *containers],
-            text=True, timeout=SUBPROCESS_TIMEOUT,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -273,7 +276,8 @@ def prune_runtime_code(cache_root: Path, current: Path, *, keep: int = 2) -> lis
     if referenced is None:
         return []
     stale = [
-        snapshot for snapshot in _snapshots(cache_root)
+        snapshot
+        for snapshot in _snapshots(cache_root)
         if snapshot != current and not any(mount == snapshot or mount.is_relative_to(snapshot) for mount in referenced)
     ]
     removed = []
@@ -325,7 +329,9 @@ def prepare_runtime_code(
             revisions_path.write_text("".join(f"{name}={value}\n" for name, value in revisions.items()))
         checksums_path = staged / "opendde_harness/cli/model-checksums.sha256"
         if not checksums_path.exists():
-            checksums_path.write_text("".join(f"{asset.sha256}  {asset.relative_path}\n" for asset in shared_asset_plan()))
+            checksums_path.write_text(
+                "".join(f"{asset.sha256}  {asset.relative_path}\n" for asset in shared_asset_plan())
+            )
         sources = identity["sources"]
         for index, (name, revision) in enumerate(sources.items(), 1):
             target = staged / "external" / name
@@ -333,14 +339,20 @@ def prepare_runtime_code(
                 continue
             try:
                 _prepare_upstream(
-                    name, revision, target, upstream_dir,
-                    position=f"{index} of {len(sources)}", sources_dir=cache_root / "sources",
+                    name,
+                    revision,
+                    target,
+                    upstream_dir,
+                    position=f"{index} of {len(sources)}",
+                    sources_dir=cache_root / "sources",
                 )
             except (tarfile.TarError, EOFError) as exc:
                 raise ValueError(f"Invalid or incomplete source archive: {name}") from exc
         required = (
-            "external/opendde/runner/inference.py", "external/ligandmpnn/model_utils.py",
-            "external/ligandmpnn/data_utils.py", "external/plip/plip/plipcmd.py",
+            "external/opendde/runner/inference.py",
+            "external/ligandmpnn/model_utils.py",
+            "external/ligandmpnn/data_utils.py",
+            "external/plip/plip/plipcmd.py",
         )
         if not all((staged / name).is_file() for name in required):
             raise ValueError("Prepared tool sources are incomplete")

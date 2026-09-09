@@ -28,8 +28,7 @@ def normalize_opendde_api_url(value: str) -> str:
         or parsed.fragment
     ):
         raise ValueError(
-            "OpenDDE API URL must be an HTTP(S) origin without an API path, "
-            f"query, or fragment: {value!r}"
+            f"OpenDDE API URL must be an HTTP(S) origin without an API path, query, or fragment: {value!r}"
         )
     return normalized
 
@@ -90,9 +89,7 @@ class OpenDDEJobClient:
     def probe(self) -> None:
         """Verify that the configured service exposes the OpenDDE API."""
         try:
-            response = self._client.get(
-                "/api/v1/folding/opendde/openapi.json", timeout=5.0
-            )
+            response = self._client.get("/api/v1/folding/opendde/openapi.json", timeout=5.0)
         except httpx.HTTPError as exc:
             detail = str(exc).strip() or type(exc).__name__
             raise OpenDDEAPIError(f"OpenDDE API probe failed: {detail}") from exc
@@ -103,9 +100,12 @@ class OpenDDEJobClient:
         except ValueError as exc:
             raise OpenDDEAPIError("OpenDDE API probe returned invalid JSON") from exc
         paths = schema.get("paths") if isinstance(schema, Mapping) else None
-        if not isinstance(paths, Mapping) or not schema.get("openapi") or not any(
-            isinstance(paths.get(path), Mapping) and "post" in paths[path]
-            for path in ("/jobs", self.JOBS_PATH)
+        if (
+            not isinstance(paths, Mapping)
+            or not schema.get("openapi")
+            or not any(
+                isinstance(paths.get(path), Mapping) and "post" in paths[path] for path in ("/jobs", self.JOBS_PATH)
+            )
         ):
             raise OpenDDEAPIError("The endpoint does not expose the OpenDDE job API")
 
@@ -136,21 +136,16 @@ class OpenDDEJobClient:
                     message = error.get("message") if isinstance(error, Mapping) else error
                     raise OpenDDEAPIError(f"OpenDDE job {run_id} failed: {message}")
                 if not isinstance(payload.get("response"), Mapping):
-                    raise OpenDDEAPIError(
-                        f"OpenDDE job {run_id} completed without a response"
-                    )
+                    raise OpenDDEAPIError(f"OpenDDE job {run_id} completed without a response")
                 return payload
             stalled_polls = stalled_polls + 1 if payload.get("possibly_stalled") else 0
             if stalled_poll_limit > 0 and stalled_polls >= stalled_poll_limit:
                 raise OpenDDEAPIError(
-                    f"OpenDDE job {run_id} reported possibly_stalled for "
-                    f"{stalled_polls} consecutive polls"
+                    f"OpenDDE job {run_id} reported possibly_stalled for {stalled_polls} consecutive polls"
                 )
             if time.monotonic() >= deadline:
                 stalled = " (service reports possibly_stalled)" if payload.get("possibly_stalled") else ""
-                raise TimeoutError(
-                    f"OpenDDE job {run_id} did not finish within {timeout_seconds:g}s{stalled}"
-                )
+                raise TimeoutError(f"OpenDDE job {run_id} did not finish within {timeout_seconds:g}s{stalled}")
             time.sleep(max(0.05, poll_interval_seconds))
 
     def download(self, run_id: str, destination: Path) -> Path:
@@ -158,9 +153,7 @@ class OpenDDEJobClient:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(destination.suffix + ".part")
         try:
-            with self._client.stream(
-                "GET", f"{self.JOBS_PATH}/{run_id}/download"
-            ) as response:
+            with self._client.stream("GET", f"{self.JOBS_PATH}/{run_id}/download") as response:
                 self._raise_for_status(response, {200})
                 with temporary.open("wb") as handle:
                     for chunk in response.iter_bytes():
@@ -179,9 +172,7 @@ class OpenDDEJobClient:
             for member in bundle.infolist():
                 path = PurePosixPath(member.filename)
                 if path.is_absolute() or ".." in path.parts:
-                    raise OpenDDEAPIError(
-                        f"unsafe path in OpenDDE result archive: {member.filename!r}"
-                    )
+                    raise OpenDDEAPIError(f"unsafe path in OpenDDE result archive: {member.filename!r}")
             bundle.extractall(destination)
 
     def _request_json(
@@ -201,9 +192,7 @@ class OpenDDEJobClient:
         try:
             payload = response.json()
         except ValueError as exc:
-            raise OpenDDEAPIError(
-                f"{method} {path} returned non-JSON content"
-            ) from exc
+            raise OpenDDEAPIError(f"{method} {path} returned non-JSON content") from exc
         if not isinstance(payload, dict):
             raise OpenDDEAPIError(f"{method} {path} returned a non-object response")
         return payload

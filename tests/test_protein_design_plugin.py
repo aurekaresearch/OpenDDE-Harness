@@ -41,11 +41,7 @@ def test_plugin_is_active_with_its_data_contributions():
 def test_identity_prompt_keeps_the_antibody_block_in_place(tmp_path, monkeypatch):
     monkeypatch.setattr(render, "_language_directive", lambda: "")
     text = render.identity_text(tmp_path, model="openai/gpt-x")
-    head = (
-        "# OpenDDE Harness ϒ\n\n"
-        "You are OpenDDE Harness, an antibody design assistant.\n\n"
-        "## Scope\n"
-    )
+    head = "# OpenDDE Harness ϒ\n\nYou are OpenDDE Harness, an antibody design assistant.\n\n## Scope\n"
     assert text.startswith(head)
     assert f"{antibody_scope()}\n\n## Runtime\n" in text
     headings = [line for line in text.splitlines() if line.startswith("## ")]

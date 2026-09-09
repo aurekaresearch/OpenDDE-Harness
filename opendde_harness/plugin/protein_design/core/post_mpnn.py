@@ -99,9 +99,7 @@ async def prepare_post_mpnn(
             if not selected:
                 raise ValueError("No distinct valid SolubleMPNN sequences for this parent")
             if len(selected) < MPNN_SURVIVORS_PER_PARENT:
-                shortfall = (
-                    f"only {len(selected)} of {MPNN_SURVIVORS_PER_PARENT} distinct valid SolubleMPNN sequences"
-                )
+                shortfall = f"only {len(selected)} of {MPNN_SURVIVORS_PER_PARENT} distinct valid SolubleMPNN sequences"
                 for child in selected:
                     child.metadata["post_mpnn_shortfall"] = shortfall
             children.extend(selected)

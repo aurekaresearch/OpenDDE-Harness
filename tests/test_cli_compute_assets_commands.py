@@ -29,12 +29,18 @@ def test_sources_only_prepares_pinned_checkouts_without_models(tmp_path, monkeyp
     (tmp_path / "docker/environment.json").write_text((ROOT / "docker/environment.json").read_text())
     calls = []
     monkeypatch.setattr(compute_assets, "clone_repository", lambda *args: calls.append(args))
-    monkeypatch.setattr(compute_assets, "prepare", lambda *a, **k: (_ for _ in ()).throw(AssertionError("model preparation")))
+    monkeypatch.setattr(
+        compute_assets, "prepare", lambda *a, **k: (_ for _ in ()).throw(AssertionError("model preparation"))
+    )
     compute_assets.prepare_sources(tmp_path)
     assert {path.name for _, _, path in calls} == {"opendde", "ligandmpnn", "plip", "foldmason"}
     revisions = compute_assets.source_revisions(tmp_path / "docker/versions.env")
     for _, revision, path in calls:
-        expected = load_environment()["foldmason_revision"] if path.name == "foldmason" else revisions[path.name.upper() + "_REV"]
+        expected = (
+            load_environment()["foldmason_revision"]
+            if path.name == "foldmason"
+            else revisions[path.name.upper() + "_REV"]
+        )
         assert revision == expected
         assert path.parent == tmp_path / "external"
     assert not (tmp_path / "compute-assets.json").exists()
@@ -49,7 +55,9 @@ def test_sources_only_rejects_non_checkout(tmp_path):
 def test_git_failures_carry_stderr(tmp_path, monkeypatch):
     def run(command, **kwargs):
         assert kwargs.get("timeout")
-        raise subprocess.CalledProcessError(128, command, stderr="fatal: repository 'https://example.invalid/x.git' not found\n")
+        raise subprocess.CalledProcessError(
+            128, command, stderr="fatal: repository 'https://example.invalid/x.git' not found\n"
+        )
 
     monkeypatch.setattr(compute_assets.shutil, "which", lambda _: "/usr/bin/git")
     monkeypatch.setattr(compute_assets.subprocess, "run", run)
@@ -61,7 +69,11 @@ def test_git_failures_carry_stderr(tmp_path, monkeypatch):
 def test_weights_layout_lists_only_the_tools_the_mode_needs(tmp_path):
     api = compute_assets.weights_layout(tmp_path / "harness", tmp_path / "opendde", with_opendde=False)
     local = compute_assets.weights_layout(
-        tmp_path / "harness", tmp_path / "opendde", with_opendde=True, checkpoint="opendde_abag.pt", translate=lambda en, zh: zh
+        tmp_path / "harness",
+        tmp_path / "opendde",
+        with_opendde=True,
+        checkpoint="opendde_abag.pt",
+        translate=lambda en, zh: zh,
     )
     assert api.splitlines() == [
         f"Harness tool weights (OPENDDE_HARNESS_WEIGHTS_DIR): {tmp_path / 'harness'}",
@@ -82,7 +94,9 @@ def test_opendde_root_precedence(tmp_path, monkeypatch):
     assert compute_assets.opendde_root() == (tmp_path / ".cache/opendde").resolve()
     monkeypatch.setenv("OPENDDE_ROOT_DIR", str(tmp_path / "env"))
     assert compute_assets.opendde_root() == (tmp_path / "env").resolve()
-    compute_assets.write_json(compute_assets.asset_state_path(), {"schema_version": 2, "paths": {"opendde_data": str(tmp_path / "prepared")}})
+    compute_assets.write_json(
+        compute_assets.asset_state_path(), {"schema_version": 2, "paths": {"opendde_data": str(tmp_path / "prepared")}}
+    )
     assert compute_assets.opendde_root() == (tmp_path / "prepared").resolve()
     assert compute_assets.opendde_root({"opendde_data": str(tmp_path / "saved")}) == (tmp_path / "saved").resolve()
 
@@ -111,7 +125,11 @@ def test_local_preparation_uses_both_roots(tmp_path, monkeypatch):
     report = compute_assets.inspect_assets(weights, opendde_root=data, with_opendde=True, checkpoint="opendde.pt")
     assert report["opendde_root"] == str(data)
     assert all(item["error"] != "missing or empty" for item in report["files"])
-    assert {Path(item["path"]).parents[1] for item in report["files"] if "/checkpoint/" in item["path"] or "/common/" in item["path"]} == {data}
+    assert {
+        Path(item["path"]).parents[1]
+        for item in report["files"]
+        if "/checkpoint/" in item["path"] or "/common/" in item["path"]
+    } == {data}
 
 
 def test_shared_models_are_copied_from_the_opendde_data_root(tmp_path, monkeypatch):
@@ -119,7 +137,9 @@ def test_shared_models_are_copied_from_the_opendde_data_root(tmp_path, monkeypat
 
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     data = b"mpnn"
-    mpnn = compute_assets.Asset(compute_assets.SOLUBLE_MPNN_WEIGHTS, "https://example.invalid", hashlib.sha256(data).hexdigest(), len(data))
+    mpnn = compute_assets.Asset(
+        compute_assets.SOLUBLE_MPNN_WEIGHTS, "https://example.invalid", hashlib.sha256(data).hexdigest(), len(data)
+    )
     monkeypatch.setattr(compute_assets, "shared_asset_plan", lambda: [mpnn])
     previous = tmp_path / ".cache/opendde" / mpnn.relative_path
     previous.parent.mkdir(parents=True)
@@ -146,7 +166,9 @@ def test_weights_root_precedence(tmp_path, monkeypatch):
     assert compute_assets.weights_root() == (tmp_path / ".cache/opendde-harness").resolve()
     monkeypatch.setenv("OPENDDE_HARNESS_WEIGHTS_DIR", str(tmp_path / "env"))
     assert compute_assets.weights_root({}) == (tmp_path / "env").resolve()
-    compute_assets.write_json(compute_assets.asset_state_path(), {"schema_version": 2, "paths": {"weights_dir": str(tmp_path / "prepared")}})
+    compute_assets.write_json(
+        compute_assets.asset_state_path(), {"schema_version": 2, "paths": {"weights_dir": str(tmp_path / "prepared")}}
+    )
     assert compute_assets.weights_root({}) == (tmp_path / "prepared").resolve()
     assert compute_assets.weights_root({"weights_dir": str(tmp_path / "saved")}) == (tmp_path / "saved").resolve()
     # A pre-split release recorded the OpenDDE data root here; taking it would
@@ -156,16 +178,32 @@ def test_weights_root_precedence(tmp_path, monkeypatch):
 
 
 def test_build_dry_run_needs_neither_source_assets_nor_weights(tmp_path):
-    env = {**os.environ, "TMPDIR": str(tmp_path / "not-created"), "ESM_CACHE": "/missing", "SOLUBLE_MPNN_WEIGHTS": "/missing"}
+    env = {
+        **os.environ,
+        "TMPDIR": str(tmp_path / "not-created"),
+        "ESM_CACHE": "/missing",
+        "SOLUBLE_MPNN_WEIGHTS": "/missing",
+    }
     result = subprocess.run(
-        ["bash", str(ROOT / "docker/build.sh"), "--dry-run", "--push", "example/runtime:first", "example/runtime:second"],
-        env=env, text=True, capture_output=True, check=True,
+        [
+            "bash",
+            str(ROOT / "docker/build.sh"),
+            "--dry-run",
+            "--push",
+            "example/runtime:first",
+            "example/runtime:second",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
     )
     command = shlex.split(result.stdout)
     assert "--push" in command and "--load" not in command
     assert "--build-context" not in command
     assert [command[i + 1] for i, item in enumerate(command[:-1]) if item == "--tag"] == [
-        "example/runtime:first", "example/runtime:second"
+        "example/runtime:first",
+        "example/runtime:second",
     ]
     assert list(tmp_path.iterdir()) == []
 
@@ -200,17 +238,28 @@ def test_model_staging_preserves_checkpoint_name_and_checksums(tmp_path, checkpo
     checkpoint.write_bytes(b"local checkpoint")
     common = source / "common"
     common.mkdir()
-    for asset_name in ("components.cif", "components.cif.rdkit_mol.pkl", "obsolete_to_successor.json", "release_date_cache.json"):
+    for asset_name in (
+        "components.cif",
+        "components.cif.rdkit_mol.pkl",
+        "obsolete_to_successor.json",
+        "release_date_cache.json",
+    ):
         (common / asset_name).write_bytes(b"common data")
     destination = tmp_path / "staged"
     destination.mkdir()
-    env = {**os.environ, "SOLUBLE_MPNN_WEIGHTS": str(source / "soluble_mpnn"),
-           "ESM_CACHE": str(source / "huggingface"), "OPENDDE_ROOT_DIR": str(source),
-           "OPENDDE_COMMON_DIR": str(common)}
+    env = {
+        **os.environ,
+        "SOLUBLE_MPNN_WEIGHTS": str(source / "soluble_mpnn"),
+        "ESM_CACHE": str(source / "huggingface"),
+        "OPENDDE_ROOT_DIR": str(source),
+        "OPENDDE_COMMON_DIR": str(common),
+    }
     env.pop("OPENDDE_CHECKPOINT", None)
     if checkpoint_name:
         env["OPENDDE_CHECKPOINT"] = str(checkpoint)
-    subprocess.run(["bash", str(scripts / "prepare-models.sh"), str(destination)], env=env, capture_output=True, check=True)
+    subprocess.run(
+        ["bash", str(scripts / "prepare-models.sh"), str(destination)], env=env, capture_output=True, check=True
+    )
     assert [path.name for path in (destination / "checkpoint").iterdir()] == [name]
     assert (destination / "checkpoint" / name).read_bytes() == checkpoint.read_bytes()
     subprocess.run(["sha256sum", "--check", "SHA256SUMS"], cwd=destination, capture_output=True, check=True)
@@ -221,7 +270,8 @@ def test_model_doctor_preserves_existing_artifacts(tmp_path):
     fixture.write_text("existing structure")
     result = subprocess.run(
         [sys.executable, str(ROOT / "docker/model-doctor.py"), "--output", str(tmp_path / "report.json")],
-        text=True, capture_output=True,
+        text=True,
+        capture_output=True,
     )
     assert result.returncode != 0 and "empty verification output directory" in result.stderr
     assert fixture.read_text() == "existing structure"
@@ -232,7 +282,8 @@ def test_model_doctor_requires_local_structure_before_creating_output(tmp_path):
     output = tmp_path / "new" / "report.json"
     result = subprocess.run(
         [sys.executable, str(ROOT / "docker/model-doctor.py"), "--mode", "local", "--output", str(output)],
-        text=True, capture_output=True,
+        text=True,
+        capture_output=True,
     )
     assert result.returncode == 2 and "--structure is required" in result.stderr
     assert not output.parent.exists()
@@ -243,7 +294,9 @@ def _serve(monkeypatch, handler):
 
     from opendde_harness.cli import _download
 
-    monkeypatch.setattr(_download, "new_client", lambda: httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True))
+    monkeypatch.setattr(
+        _download, "new_client", lambda: httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+    )
 
 
 def test_soluble_mpnn_tries_graylab_then_project_hf_repo_with_mirror_then_ipd(tmp_path, monkeypatch):
@@ -254,9 +307,13 @@ def test_soluble_mpnn_tries_graylab_then_project_hf_repo_with_mirror_then_ipd(tm
     data = b"mpnn"
     graylab, project, ipd = compute_assets.SOLUBLE_MPNN_SOURCES
     assert graylab.startswith("https://ipd.graylab.jhu.edu/") and project.startswith(compute_assets.MODEL_ROOT + "/")
-    asset = next(item for item in compute_assets.shared_asset_plan() if item.relative_path == compute_assets.SOLUBLE_MPNN_WEIGHTS)
+    asset = next(
+        item for item in compute_assets.shared_asset_plan() if item.relative_path == compute_assets.SOLUBLE_MPNN_WEIGHTS
+    )
     assert asset.sources == compute_assets.SOLUBLE_MPNN_SOURCES
-    asset = compute_assets.Asset(asset.relative_path, asset.url, hashlib.sha256(data).hexdigest(), len(data), asset.mirrors)
+    asset = compute_assets.Asset(
+        asset.relative_path, asset.url, hashlib.sha256(data).hexdigest(), len(data), asset.mirrors
+    )
     attempts = []
     monkeypatch.delenv("HF_ENDPOINT", raising=False)
 
@@ -271,17 +328,26 @@ def test_soluble_mpnn_tries_graylab_then_project_hf_repo_with_mirror_then_ipd(tm
 
     _serve(monkeypatch, handler)
     assert compute_assets.download_asset(tmp_path, asset).read_bytes() == data
-    assert attempts == [graylab, project, "https://hf-mirror.com" + project[len("https://huggingface.co"):], ipd]
+    assert attempts == [graylab, project, "https://hf-mirror.com" + project[len("https://huggingface.co") :], ipd]
     _serve(monkeypatch, lambda request: httpx.Response(404))
     with pytest.raises(ValueError, match="Every download source failed"):
-        compute_assets.download_asset(tmp_path, compute_assets.Asset("soluble_mpnn/other.pt", asset.url, "b" * 64, 1, asset.mirrors))
+        compute_assets.download_asset(
+            tmp_path, compute_assets.Asset("soluble_mpnn/other.pt", asset.url, "b" * 64, 1, asset.mirrors)
+        )
 
 
 def test_environment_contract_rejects_wrong_image():
     spec = load_environment()
-    image = {"Os": "linux", "Architecture": "amd64", "Config": {"Labels": {
-        ENVIRONMENT_LABEL: spec["id"], ENVIRONMENT_SHA_LABEL: environment_digest(spec),
-    }}}
+    image = {
+        "Os": "linux",
+        "Architecture": "amd64",
+        "Config": {
+            "Labels": {
+                ENVIRONMENT_LABEL: spec["id"],
+                ENVIRONMENT_SHA_LABEL: environment_digest(spec),
+            }
+        },
+    }
     check_image_environment(image, spec)
     image["Config"]["Labels"][ENVIRONMENT_SHA_LABEL] = "wrong"
     with pytest.raises(ValueError, match="Incompatible compute environment"):
@@ -344,7 +410,9 @@ def test_asset_inspection_is_mode_aware_and_detects_corruption(tmp_path, monkeyp
     import hashlib
 
     data = b"model"
-    shared = compute_assets.Asset("soluble_mpnn/test.pt", "https://example.invalid", hashlib.sha256(data).hexdigest(), len(data))
+    shared = compute_assets.Asset(
+        "soluble_mpnn/test.pt", "https://example.invalid", hashlib.sha256(data).hexdigest(), len(data)
+    )
     local = compute_assets.Asset("checkpoint/opendde.pt", "https://example.invalid", "a" * 64, len(data))
     monkeypatch.setattr(compute_assets, "shared_asset_plan", lambda: [shared])
     monkeypatch.setattr(compute_assets, "asset_plan", lambda _: [local])

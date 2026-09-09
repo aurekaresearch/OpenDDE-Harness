@@ -375,9 +375,7 @@ class LongTermMemoryBackend:
         self._agent_id: str = self._services.agent_id
         self._user_id: str = self._services.user_id
         self._app_id = str(self._config.get("app_id") or DEFAULT_OPENDDE_HARNESS_APP_ID)
-        self._project_id = str(
-            self._config.get("project_id") or DEFAULT_OPENDDE_HARNESS_PROJECT_ID
-        )
+        self._project_id = str(self._config.get("project_id") or DEFAULT_OPENDDE_HARNESS_PROJECT_ID)
         self._warn_stale_identity_keys()
         self._flush_every_turns: int = int(
             self._config.get("flush_every_turns", 1),

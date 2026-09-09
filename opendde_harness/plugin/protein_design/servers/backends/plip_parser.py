@@ -173,14 +173,17 @@ def parse_plip_report(
             if not re.search(pattern, line):
                 continue
             section_end = next(
-                (i for i in range(section_start + 1, len(lines))
-                 if re.match(r"\*\*[^*]+\*\*", lines[i])),
+                (i for i in range(section_start + 1, len(lines)) if re.match(r"\*\*[^*]+\*\*", lines[i])),
                 len(lines),
             )
-            all_interactions.extend(_parse_interaction_table(
-                lines[section_start:section_end], interaction_type,
-                binder_chains, target_chains,
-            ))
+            all_interactions.extend(
+                _parse_interaction_table(
+                    lines[section_start:section_end],
+                    interaction_type,
+                    binder_chains,
+                    target_chains,
+                )
+            )
 
     # Build residue sets
     binder_residues = {(i.binder_chain, i.binder_resnum) for i in all_interactions}

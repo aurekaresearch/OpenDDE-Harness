@@ -4,7 +4,11 @@ from opendde_harness.context_engine.history_trimmer import HistoryTrimmer
 
 MESSAGES = [
     {"role": "user", "content": "start"},
-    {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "function": {"name": "read", "arguments": "{}"}}]},
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "call_1", "function": {"name": "read", "arguments": "{}"}}],
+    },
     {"role": "tool", "tool_call_id": "call_1", "content": "file contents"},
     {"role": "assistant", "content": "done"},
     {"role": "user", "content": "next"},

@@ -1719,8 +1719,7 @@ def _reuse_unowned_root(state: Any) -> object:
             return _OWN_ROOT_INSTEAD
         oc.console.print(
             oc._t(
-                f"  [dim]Start it in another terminal, for example:[/dim]\n"
-                f"      {SERVER_CMDLINE} --root {state.root}",
+                f"  [dim]Start it in another terminal, for example:[/dim]\n      {SERVER_CMDLINE} --root {state.root}",
                 f"  [dim]请在另一个终端启动它，例如：[/dim]\n      {SERVER_CMDLINE} --root {state.root}",
             ),
             highlight=False,

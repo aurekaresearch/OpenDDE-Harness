@@ -80,7 +80,11 @@ def docker(*args: str, env: dict[str, str] | None = None) -> str:
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ComputeSetupError("Docker did not respond. Check the daemon and your Docker permissions.") from exc
     if result.returncode:
-        secret_values = tuple(value for key, value in (env or {}).items() if any(part in key.upper() for part in ("TOKEN", "PASSWORD", "SECRET", "API_KEY")))
+        secret_values = tuple(
+            value
+            for key, value in (env or {}).items()
+            if any(part in key.upper() for part in ("TOKEN", "PASSWORD", "SECRET", "API_KEY"))
+        )
         detail = _diagnostic(result.stderr or result.stdout, secret_values)
         raise ComputeSetupError(
             f"Docker {' '.join(args[:2])} failed (exit {result.returncode}): {detail or 'no diagnostic output'}. "
@@ -104,7 +108,9 @@ def check_local_docker() -> dict[str, Any]:
     try:
         info = json.loads(docker("info", "--format", "{{json .}}"))
     except ValueError as exc:
-        raise ComputeSetupError("Docker info returned invalid JSON. Check Docker daemon status and the selected context.") from exc
+        raise ComputeSetupError(
+            "Docker info returned invalid JSON. Check Docker daemon status and the selected context."
+        ) from exc
     if not isinstance(info, dict):
         raise ComputeSetupError("Docker info returned an invalid response.")
     if info.get("OSType") != "linux":
@@ -122,7 +128,10 @@ def gpu_inventory() -> list[str]:
     try:
         result = subprocess.run(
             [executable, "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=10, check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return []
@@ -330,7 +339,9 @@ class DockerSettings:
             values["env"] = {str(key): str(item) for key, item in (values.get("env") or {}).items()}
             return cls(**values)
         except (AttributeError, TypeError, ValueError) as exc:
-            raise ComputeSetupError("Saved compute_docker settings are incomplete or invalid; run ddeharness onboard.") from exc
+            raise ComputeSetupError(
+                "Saved compute_docker settings are incomplete or invalid; run ddeharness onboard."
+            ) from exc
 
     def saved(self) -> dict[str, Any]:
         value = asdict(self)
@@ -449,7 +460,10 @@ def prepare_assets(settings: DockerSettings) -> None:
     }
     try:
         prepare(
-            Path(settings.weights_dir), checkpoint, asset_state_path(), paths=paths,
+            Path(settings.weights_dir),
+            checkpoint,
+            asset_state_path(),
+            paths=paths,
             opendde_root=Path(settings.opendde_data) if settings.opendde_data else None,
             with_opendde=settings.mode == "local",
         )
@@ -512,15 +526,11 @@ def proxy_environment(source: Mapping[str, str] | None = None) -> dict[str, str]
 
 def external_service_environment(overrides: Mapping[str, Any] | None = None) -> dict[str, str]:
     """Optional-service settings taken from the host, then from ``compute_docker.env``."""
-    passthrough = {
-        name: os.environ[name] for name in EXTERNAL_SERVICE_VARIABLES if os.environ.get(name) is not None
-    }
+    passthrough = {name: os.environ[name] for name in EXTERNAL_SERVICE_VARIABLES if os.environ.get(name) is not None}
     for key, value in (overrides or {}).items():
         name = str(key).strip()
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-            raise ComputeSetupError(
-                f"compute_docker.env names must be environment variable names; got {key!r}."
-            )
+            raise ComputeSetupError(f"compute_docker.env names must be environment variable names; got {key!r}.")
         if name == AUTH_ENV or name.startswith("STRUCTPRED_") or name in {"PYTHONPATH", "PROTEIN_DESIGN_OUTPUT_PATH"}:
             raise ComputeSetupError(f"compute_docker.env cannot override {name}; it is set by onboarding.")
         passthrough[name] = str(value)
@@ -570,7 +580,9 @@ def create_arguments(
             try:
                 relative = Path(value).expanduser().resolve().relative_to(data)
             except ValueError as exc:
-                raise ComputeSetupError("OpenDDE common data and checkpoint must be inside the OpenDDE data directory.") from exc
+                raise ComputeSetupError(
+                    "OpenDDE common data and checkpoint must be inside the OpenDDE data directory."
+                ) from exc
             env[key] = str(base / relative.as_posix())
     else:
         env["OPENDDE_HARNESS_OPENDDE_API_URL"] = api_url
@@ -634,7 +646,9 @@ def wait_for_service(url: str, token: str, mode: str, api_url: str = "", *, time
             try:
                 response = client.get(f"{url}/health", params=params)
                 if response.status_code in {401, 403}:
-                    raise ComputeSetupError("Compute authentication failed. Check the compute token in ddeharness onboard.")
+                    raise ComputeSetupError(
+                        "Compute authentication failed. Check the compute token in ddeharness onboard."
+                    )
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict):
@@ -665,7 +679,8 @@ def wait_for_service(url: str, token: str, mode: str, api_url: str = "", *, time
                 device = str(workers.get("device", ""))
                 gpu_ready = device == "cpu" or mode != "local" or bool(payload.get("gpu"))
                 tool_errors = [
-                    name for name, item in (workers.get("tools") or {}).items()
+                    name
+                    for name, item in (workers.get("tools") or {}).items()
                     if isinstance(item, dict) and item.get("required") and not item.get("ready")
                 ]
                 if tool_errors:
@@ -696,7 +711,9 @@ def _reclaim_name(container: dict[str, Any], token: str) -> int | None:
     name = str(container.get("Name") or "").lstrip("/")
     config = container.get("Config") or {}
     if (config.get("Labels") or {}).get(MANAGED_LABEL) != "true":
-        raise ComputeSetupError(f"Container {name} is not managed by OpenDDE Harness; remove or rename it before starting compute.")
+        raise ComputeSetupError(
+            f"Container {name} is not managed by OpenDDE Harness; remove or rename it before starting compute."
+        )
     if not container.get("State", {}).get("Running"):
         docker("rm", "-f", str(container["Id"]))
         return None
@@ -786,10 +803,7 @@ def external_service_line(service: Mapping[str, Any]) -> str:
     if service.get("service_check") == "not_run":
         return f"{label}: not probed (optional; endpoint {endpoint})"
     reason = str(service.get("reason") or "unreachable")
-    return (
-        f"{label}: unreachable from the compute container "
-        f"(optional; {reason}; set {variable} or a proxy)"
-    )
+    return f"{label}: unreachable from the compute container (optional; {reason}; set {variable} or a proxy)"
 
 
 def probe_external_services(url: str, token: str, *, timeout: float = 10) -> list[dict[str, Any]]:
@@ -816,17 +830,47 @@ def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, time
         from opendde_harness.plugin.protein_design.servers.compute_pool import ComputeWorker
 
         try:
-            workers = [ComputeWorker.from_mapping(item, default_token=config.get("compute_token")) for item in config["compute_workers"]]
+            workers = [
+                ComputeWorker.from_mapping(item, default_token=config.get("compute_token"))
+                for item in config["compute_workers"]
+            ]
             if len({item.worker_id for item in workers}) != len(workers):
                 raise ValueError("Compute worker IDs must be unique")
         except (AttributeError, TypeError, ValueError) as exc:
-            return {"ready": False, "placement": "worker_pool", "checks": [{"name": "configuration", "ok": False, "error": _diagnostic(exc)}]}
-        reports = [{"id": item.worker_id, **inspect_compute({
-            **config, "compute_workers": [], "compute_docker": {}, "compute_url": item.url, "compute_token": item.token,
-        }, verify_hashes=verify_hashes, timeout=timeout)} for item in workers]
+            return {
+                "ready": False,
+                "placement": "worker_pool",
+                "checks": [{"name": "configuration", "ok": False, "error": _diagnostic(exc)}],
+            }
+        reports = [
+            {
+                "id": item.worker_id,
+                **inspect_compute(
+                    {
+                        **config,
+                        "compute_workers": [],
+                        "compute_docker": {},
+                        "compute_url": item.url,
+                        "compute_token": item.token,
+                    },
+                    verify_hashes=verify_hashes,
+                    timeout=timeout,
+                ),
+            }
+            for item in workers
+        ]
         return {
-            "ready": all(item["ready"] for item in reports), "placement": "worker_pool", "workers": reports,
-            "checks": [{"name": item["id"], "ok": item["ready"], "error": None if item["ready"] else "Worker is not ready; inspect its checks."} for item in reports],
+            "ready": all(item["ready"] for item in reports),
+            "placement": "worker_pool",
+            "workers": reports,
+            "checks": [
+                {
+                    "name": item["id"],
+                    "ok": item["ready"],
+                    "error": None if item["ready"] else "Worker is not ready; inspect its checks.",
+                }
+                for item in reports
+            ],
         }
     saved = config.get("compute_docker") or {}
     fold = config.get("fold_defaults") or {}
@@ -834,8 +878,11 @@ def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, time
     local = bool(saved)
     url = "" if local else str(config.get("compute_url") or "").rstrip("/")
     report: dict[str, Any] = {
-        "ready": False, "placement": "local_docker" if local else "remote_service",
-        "fold_mode": mode, "device": None, "checks": [],
+        "ready": False,
+        "placement": "local_docker" if local else "remote_service",
+        "fold_mode": mode,
+        "device": None,
+        "checks": [],
     }
 
     def record(name: str, operation):
@@ -843,35 +890,70 @@ def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, time
             result = operation()
             report["checks"].append({"name": name, "ok": True})
             return result
-        except (OSError, ValueError, TypeError, KeyError, httpx.HTTPError, ComputeSetupError, subprocess.SubprocessError) as exc:
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            httpx.HTTPError,
+            ComputeSetupError,
+            subprocess.SubprocessError,
+        ) as exc:
             token = str(config.get("compute_token") or "")
             detail = _diagnostic(exc, (token,))
             report["checks"].append({"name": name, "ok": False, "error": detail})
             return None
 
     if not local and not url:
-        report["checks"].append({"name": "configuration", "ok": False, "error": "Run ddeharness onboard to configure Protein Design."})
+        report["checks"].append(
+            {"name": "configuration", "ok": False, "error": "Run ddeharness onboard to configure Protein Design."}
+        )
     if local:
         info = record("docker", check_local_docker)
         if info:
             image = str(saved.get("image") or default_image())
-            record("image", lambda: check_image_environment(json.loads(docker("image", "inspect", image))[0], load_environment()))
+            record(
+                "image",
+                lambda: check_image_environment(json.loads(docker("image", "inspect", image))[0], load_environment()),
+            )
         checkpoint = Path(saved.get("opendde_checkpoint") or DEFAULT_CHECKPOINT).name
-        assets = record("assets", lambda: inspect_assets(
-            weights_root(saved), opendde_root=opendde_root(saved), checkpoint=checkpoint,
-            with_opendde=mode == "local", verify_hashes=verify_hashes,
-        ))
+        assets = record(
+            "assets",
+            lambda: inspect_assets(
+                weights_root(saved),
+                opendde_root=opendde_root(saved),
+                checkpoint=checkpoint,
+                with_opendde=mode == "local",
+                verify_hashes=verify_hashes,
+            ),
+        )
         report["assets"] = assets
         if assets and not assets["ready"]:
-            report["checks"].append({"name": "required_assets", "ok": False, "error": "Required weights are missing or invalid; run ddeharness compute prepare."})
+            report["checks"].append(
+                {
+                    "name": "required_assets",
+                    "ok": False,
+                    "error": "Required weights are missing or invalid; run ddeharness compute prepare.",
+                }
+            )
         if saved.get("code_mode") == "managed":
             # Managed code is not saved in the config; its directory follows the
             # release, so ask for it rather than reading an empty package_root.
-            report["code"] = record("runtime_code", lambda: verify_runtime_code(
-                runtime_code_dir(), runtime_code_identity(),
-            ))
+            report["code"] = record(
+                "runtime_code",
+                lambda: verify_runtime_code(
+                    runtime_code_dir(),
+                    runtime_code_identity(),
+                ),
+            )
         elif not Path(saved.get("package_root") or "", "external/opendde/runner/inference.py").is_file():
-            report["checks"].append({"name": "runtime_code", "ok": False, "error": "Configured runtime code is missing; run ddeharness onboard."})
+            report["checks"].append(
+                {
+                    "name": "runtime_code",
+                    "ok": False,
+                    "error": "Configured runtime code is missing; run ddeharness onboard.",
+                }
+            )
         service = record("container", lambda: local_service.instance_status(config))
         if service:
             report["service"] = service
@@ -880,12 +962,15 @@ def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, time
             else:
                 report["device"] = "cpu" if saved.get("gpus") == "none" else "cuda"
     if url:
+
         def probe():
             params = {"backend": "opendde", "execution_mode": mode, "probe_external": 1}
             if fold.get("api_url"):
                 params["api_url"] = fold["api_url"]
             token = str(config.get("compute_token") or "")
-            with httpx.Client(timeout=timeout, trust_env=False, headers={"Authorization": f"Bearer {token}"} if token else {}) as client:
+            with httpx.Client(
+                timeout=timeout, trust_env=False, headers={"Authorization": f"Bearer {token}"} if token else {}
+            ) as client:
                 response = client.get(f"{url}/health", params=params)
                 response.raise_for_status()
                 payload = response.json()
@@ -902,6 +987,7 @@ def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, time
                 auth = client.get(f"{url}/population/top", params={"top_k": 1})
                 auth.raise_for_status()
                 return payload
+
         payload = record("service", probe)
         if payload:
             report["device"] = payload["workers"].get("device")

@@ -25,16 +25,16 @@ repos:
 
   - repo: local
     hooks:
+      - id: prettier
+        name: prettier (JS/TS)
+        entry: ui-tui/node_modules/.bin/prettier --write
+        language: system
+        files: '\.([cm]?[jt]s|[jt]sx)$'
+        exclude: '^(ui-tui/packages/hermes-ink/|opendde_harness/tracing/viewer/ui/vendor/)'
+
       - id: eslint-ui-tui
         name: eslint (ui-tui)
         entry: bash -c '[ -d ui-tui/node_modules ] || exit 0; cd ui-tui && npm run lint'
-        language: system
-        pass_filenames: false
-        files: '^ui-tui/src/.*\.(ts|tsx)$'
-
-      - id: prettier-ui-tui
-        name: prettier (ui-tui)
-        entry: bash -c '[ -d ui-tui/node_modules ] || exit 0; cd ui-tui && npx prettier --check "src/**/*.{ts,tsx}"'
         language: system
         pass_filenames: false
         files: '^ui-tui/src/.*\.(ts|tsx)$'

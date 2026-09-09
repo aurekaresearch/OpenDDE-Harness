@@ -63,7 +63,10 @@ async def test_pool_client_re_resolves_once_after_a_refused_connection(monkeypat
         return ComputeEndpoint("http://127.0.0.1:18204", "new-token")
 
     client = compute_pool.ReconnectingComputeClient(
-        "http://127.0.0.1:18203", resolver=resolver, transport=server.transport, token="old-token",
+        "http://127.0.0.1:18203",
+        resolver=resolver,
+        transport=server.transport,
+        token="old-token",
     )
     payload = await client.top_candidates(1)
     assert payload["port"] == 18204 and resolved == [True]
@@ -77,7 +80,9 @@ async def test_pool_client_re_resolves_once_after_a_refused_connection(monkeypat
 async def test_pool_client_gives_up_when_the_resolved_endpoint_also_refuses():
     server = FakeComputeServer(live_port=18206)
     client = compute_pool.ReconnectingComputeClient(
-        "http://127.0.0.1:18205", resolver=lambda: ComputeEndpoint("http://127.0.0.1:18207", None), transport=server.transport,
+        "http://127.0.0.1:18205",
+        resolver=lambda: ComputeEndpoint("http://127.0.0.1:18207", None),
+        transport=server.transport,
     )
     with pytest.raises(ProteinDesignComputeError, match="ConnectError"):
         await client.population()
@@ -88,15 +93,22 @@ async def test_pool_client_gives_up_when_the_resolved_endpoint_also_refuses():
 async def test_local_placement_pool_uses_reconnecting_client_and_drops_stale_loopback_binding(monkeypatch):
     server = FakeComputeServer(live_port=18208)
     monkeypatch.setattr(
-        compute_pool, "ensure_compute_service", lambda config: ComputeEndpoint("http://127.0.0.1:18208", "tok"),
+        compute_pool,
+        "ensure_compute_service",
+        lambda config: ComputeEndpoint("http://127.0.0.1:18208", "tok"),
     )
     reconnecting = compute_pool.ReconnectingComputeClient
     monkeypatch.setattr(
-        compute_pool, "ReconnectingComputeClient",
+        compute_pool,
+        "ReconnectingComputeClient",
         lambda url, **kwargs: reconnecting(url, transport=server.transport, **kwargs),
     )
-    pool = compute_pool.ComputePool.from_config({"compute_docker": {"image": "img"}, "compute_token": "tok", "compute_url": "http://127.0.0.1:1"})
-    workflow = WorkflowConfig(target="T", target_sequence="ACD", compute_url="http://127.0.0.1:1", compute_worker_id="127.0.0.1")
+    pool = compute_pool.ComputePool.from_config(
+        {"compute_docker": {"image": "img"}, "compute_token": "tok", "compute_url": "http://127.0.0.1:1"}
+    )
+    workflow = WorkflowConfig(
+        target="T", target_sequence="ACD", compute_url="http://127.0.0.1:1", compute_worker_id="127.0.0.1"
+    )
     selection = await pool.select(workflow)
     assert selection.worker.url == "http://127.0.0.1:18208"
     assert isinstance(selection.client, reconnecting)

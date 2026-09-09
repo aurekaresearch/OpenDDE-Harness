@@ -47,7 +47,8 @@ const initialState = (): ProteinDesignTaskState => ({ focusedTaskId: null, tasks
 
 export const $proteinDesignTasks = atom<ProteinDesignTaskState>(initialState())
 
-const taskRoot = () => process.env.OPENDDE_HARNESS_PROTEIN_DESIGN_ROOT || join(homedir(), '.opendde_harness', 'protein_design')
+const taskRoot = () =>
+  process.env.OPENDDE_HARNESS_PROTEIN_DESIGN_ROOT || join(homedir(), '.opendde_harness', 'protein_design')
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)

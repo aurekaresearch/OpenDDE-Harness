@@ -31,10 +31,7 @@ class DesignMemory:
 
     async def retrieve(self, target: str, query: str, *, top_k: int = 8) -> list[str]:
         hits = await self._recall(target, query, top_k=top_k)
-        return [
-            hit.text for hit in hits
-            if (hit.metadata or {}).get("type") != "skill" and hit.text.strip()
-        ]
+        return [hit.text for hit in hits if (hit.metadata or {}).get("type") != "skill" and hit.text.strip()]
 
     async def retrieve_skills(
         self,
@@ -51,8 +48,7 @@ class DesignMemory:
                 continue
             if self._has_collapsed_english_prose(hit.text):
                 logger.warning(
-                    "Ignoring malformed learned skill %r: English word boundaries "
-                    "were removed during generation",
+                    "Ignoring malformed learned skill %r: English word boundaries were removed during generation",
                     metadata.get("name") or metadata.get("id"),
                 )
                 continue
@@ -124,9 +120,7 @@ class DesignMemory:
         lesson = outcome.get("lesson") if isinstance(outcome.get("lesson"), dict) else {}
         quality = outcome.get("quality") if isinstance(outcome.get("quality"), dict) else {}
         selected_skill = str(
-            outcome.get("selected_skill_id")
-            or action.get("primary_skill")
-            or "protein-design-proposal"
+            outcome.get("selected_skill_id") or action.get("primary_skill") or "protein-design-proposal"
         )
         task_intent = str(
             outcome.get("task_intent")
@@ -171,10 +165,7 @@ class DesignMemory:
             },
             {
                 "role": "assistant",
-                "content": (
-                    "\n".join(insights)
-                    or str(outcome.get("key_insight") or lesson.get("summary") or "")
-                ),
+                "content": ("\n".join(insights) or str(outcome.get("key_insight") or lesson.get("summary") or "")),
             },
         ]
         try:

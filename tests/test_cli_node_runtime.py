@@ -76,7 +76,9 @@ def test_checksum_mismatch_installs_nothing(runtime_home, tarball):
     archive, _ = tarball
     console, buffer = _console()
     with pytest.raises(node_runtime.NodeRuntimeError) as caught:
-        node_runtime.install_node(console, download=_fake_download(archive), fetch=lambda url: f"{'0' * 64}  {ARCHIVE}\n")
+        node_runtime.install_node(
+            console, download=_fake_download(archive), fetch=lambda url: f"{'0' * 64}  {ARCHIVE}\n"
+        )
     message = str(caught.value)
     assert f"{node_runtime.NODE_DIST}/v{node_runtime.NODE_VERSION}/{ARCHIVE}" in message
     assert "OPENDDE_HARNESS_NODE" in message and node_runtime.DISABLE_ENV in message
@@ -89,16 +91,24 @@ def test_missing_shasum_entry_and_unusable_binary_are_reported(runtime_home, tar
     console, _ = _console()
     with pytest.raises(node_runtime.NodeRuntimeError, match="does not list"):
         node_runtime.install_node(console, download=_fake_download(archive), fetch=lambda url: "")
-    monkeypatch.setattr(node_runtime.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("Exec format error")))
+    monkeypatch.setattr(
+        node_runtime.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("Exec format error"))
+    )
     with pytest.raises(node_runtime.NodeRuntimeError, match="cannot run on this machine"):
         node_runtime.install_node(console, download=_fake_download(archive), fetch=lambda url: f"{digest}  {ARCHIVE}\n")
     assert list(runtime_home.iterdir()) == []
 
 
-@pytest.mark.parametrize("system, machine, expected", [
-    ("Linux", "x86_64", "linux-x64"), ("Linux", "aarch64", "linux-arm64"),
-    ("Darwin", "arm64", "darwin-arm64"), ("Darwin", "x86_64", "darwin-x64"), ("Windows", "AMD64", "win-x64"),
-])
+@pytest.mark.parametrize(
+    "system, machine, expected",
+    [
+        ("Linux", "x86_64", "linux-x64"),
+        ("Linux", "aarch64", "linux-arm64"),
+        ("Darwin", "arm64", "darwin-arm64"),
+        ("Darwin", "x86_64", "darwin-x64"),
+        ("Windows", "AMD64", "win-x64"),
+    ],
+)
 def test_package_names_follow_the_official_layout(system, machine, expected):
     package = node_runtime.package_name(system, machine)
     assert package == f"node-v{node_runtime.NODE_VERSION}-{expected}"

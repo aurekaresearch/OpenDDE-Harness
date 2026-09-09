@@ -73,7 +73,9 @@ def test_api_folding_does_not_require_a_local_device(monkeypatch):
     assert config.execution_mode == "api"
 
 
-@pytest.mark.parametrize("payload, valid", [({"openapi": "3.1.0", "paths": {"/jobs": {"post": {}}}}, True), ({"status": "ok"}, False)])
+@pytest.mark.parametrize(
+    "payload, valid", [({"openapi": "3.1.0", "paths": {"/jobs": {"post": {}}}}, True), ({"status": "ok"}, False)]
+)
 def test_api_probe_requires_the_opendde_job_schema(payload, valid):
     import httpx
 

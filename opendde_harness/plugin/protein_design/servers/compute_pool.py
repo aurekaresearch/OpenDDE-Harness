@@ -153,7 +153,9 @@ class ComputePool:
             default_url=str(config.get("compute_url") or DEFAULT_COMPUTE_URL),
             default_token=default_token,
             timeout=float(config.get("request_timeout", 60.0)),
-            endpoint_resolver=functools.partial(ensure_compute_service, dict(config)) if is_local_placement(config) else None,
+            endpoint_resolver=functools.partial(ensure_compute_service, dict(config))
+            if is_local_placement(config)
+            else None,
         )
 
     def client(self, worker: ComputeWorker) -> ProteinDesignComputeClient:
@@ -162,7 +164,10 @@ class ComputePool:
         if client is None:
             if self._resolver is not None:
                 client = ReconnectingComputeClient(
-                    worker.url, resolver=self._resolver, timeout=self._timeout, token=worker.token,
+                    worker.url,
+                    resolver=self._resolver,
+                    timeout=self._timeout,
+                    token=worker.token,
                 )
             else:
                 client = self._client_factory(
@@ -184,9 +189,7 @@ class ComputePool:
         candidates, explicit = self._candidates(config)
         if not candidates:
             requested = config.compute_worker_id or config.compute_profile or config.compute_url
-            raise RuntimeError(
-                f"no protein-design compute worker matches {requested or config.fold_backend!r}"
-            )
+            raise RuntimeError(f"no protein-design compute worker matches {requested or config.fold_backend!r}")
 
         results = await asyncio.gather(
             *(self._probe(worker, config) for worker in candidates),
@@ -212,9 +215,7 @@ class ComputePool:
             matched = [worker for worker in self._workers if worker.url == url]
             if matched:
                 if config.compute_worker_id:
-                    matched = [
-                        worker for worker in matched if worker.worker_id == config.compute_worker_id
-                    ]
+                    matched = [worker for worker in matched if worker.worker_id == config.compute_worker_id]
                 return self._filter_backend(matched, config.fold_backend), True
             worker_id = config.compute_worker_id or urlsplit(url).hostname or url
             return self._filter_backend(
@@ -223,11 +224,7 @@ class ComputePool:
             ), True
         if config.compute_worker_id:
             return self._filter_backend(
-                [
-                    worker
-                    for worker in self._workers
-                    if worker.worker_id == config.compute_worker_id
-                ],
+                [worker for worker in self._workers if worker.worker_id == config.compute_worker_id],
                 config.fold_backend,
             ), True
 
@@ -239,18 +236,12 @@ class ComputePool:
             )
         ]
         if config.compute_profile:
-            candidates = [
-                worker for worker in candidates if config.compute_profile in worker.profiles
-            ]
+            candidates = [worker for worker in candidates if config.compute_profile in worker.profiles]
         return self._filter_backend(candidates, config.fold_backend), bool(config.compute_profile)
 
     @staticmethod
-    def _filter_backend(
-        workers: list[ComputeWorker], backend: str
-    ) -> list[ComputeWorker]:
-        return [
-            worker for worker in workers if not worker.backends or backend in worker.backends
-        ]
+    def _filter_backend(workers: list[ComputeWorker], backend: str) -> list[ComputeWorker]:
+        return [worker for worker in workers if not worker.backends or backend in worker.backends]
 
     async def _probe(
         self,

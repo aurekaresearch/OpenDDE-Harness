@@ -230,9 +230,7 @@ class PythonProteinDesignHarness:
         if normalized_backend != "opendde":
             raise ValueError("only the OpenDDE fold and refold backend is currently supported")
         mode = normalize_execution_mode(execution_mode)
-        return await asyncio.to_thread(
-            self._health_snapshot, normalized_backend, mode, image, api_url, probe_external
-        )
+        return await asyncio.to_thread(self._health_snapshot, normalized_backend, mode, image, api_url, probe_external)
 
     def _health_snapshot(
         self,
@@ -344,9 +342,17 @@ class PythonProteinDesignHarness:
             "soluble_mpnn": {"required": True, "ready": _asset_group_ready(asset_groups["soluble_mpnn"])},
             "plip": {"required": True, "ready": shutil.which(os.environ.get("PLIP_COMMAND", "plipcmd.py")) is not None},
             "foldmason": {"required": True, "ready": shutil.which("foldmason") is not None},
-            "protrek": {"required": False, "ready": importlib.util.find_spec("gradio_client") is not None, "service_check": "not_run"},
+            "protrek": {
+                "required": False,
+                "ready": importlib.util.find_spec("gradio_client") is not None,
+                "service_check": "not_run",
+            },
             "msa": {"required": False, "ready": True, "service_check": "not_run"},
-            "developability": {"required": False, "ready": False, "reason": "backend is not included in this distribution"},
+            "developability": {
+                "required": False,
+                "ready": False,
+                "reason": "backend is not included in this distribution",
+            },
         }
         for name, endpoint in _optional_service_endpoints().items():
             tools[name]["endpoint"] = endpoint
@@ -507,9 +513,7 @@ class PythonProteinDesignHarness:
             if predictor is None:
                 # Folds leased disjoint GPUs run at the same time, so only a
                 # resident model that shares a GPU with this one must go.
-                for key in [
-                    key for key, held in self._predictor_devices.items() if _shares_gpu(devices, held)
-                ]:
+                for key in [key for key, held in self._predictor_devices.items() if _shares_gpu(devices, held)]:
                     close = getattr(self._predictors.pop(key, None), "close", None)
                     self._predictor_devices.pop(key, None)
                     if callable(close):
@@ -1086,7 +1090,11 @@ class PythonProteinDesignHarness:
         )
 
         if not GRADIO_AVAILABLE:
-            return {"available": False, "result": None, "error": "ProTrek client is missing from the compute environment."}
+            return {
+                "available": False,
+                "result": None,
+                "error": "ProTrek client is missing from the compute environment.",
+            }
         return _optional_external(
             PROTREK_SERVICE,
             protrek_endpoint(),
@@ -1104,7 +1112,11 @@ class PythonProteinDesignHarness:
         )
 
         if not GRADIO_AVAILABLE:
-            return {"available": False, "result": None, "error": "ProTrek client is missing from the compute environment."}
+            return {
+                "available": False,
+                "result": None,
+                "error": "ProTrek client is missing from the compute environment.",
+            }
         return _optional_external(
             PROTREK_SERVICE,
             protrek_endpoint(),

@@ -30,6 +30,7 @@ from opendde_harness.utils.helpers import build_assistant_message
 
 T = TypeVar("T", bound=BaseModel)
 
+
 def _assistant_message(response: Any, content: Any, tool_calls: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """One assistant turn, carrying whatever the model signed.
 
@@ -365,7 +366,9 @@ class OpenDDEHarnessStructuredSession:
                 selected_skill = getattr(validated, "skill_id", None)
                 missing_skill = (
                     selected_skill
-                    if isinstance(selected_skill, str) and selected_skill in skill_by_name and selected_skill not in loaded_skill_ids
+                    if isinstance(selected_skill, str)
+                    and selected_skill in skill_by_name
+                    and selected_skill not in loaded_skill_ids
                     else None
                 )
                 if skill_by_name and (not loaded_skill_ids or missing_skill):

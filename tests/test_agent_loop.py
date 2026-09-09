@@ -104,10 +104,14 @@ async def test_stream_error_after_delivery_is_final(tmp_path):
 
 
 async def test_stream_exhausted_chain_returns_error_response(tmp_path):
-    provider = StreamProvider({PRIMARY: [RuntimeError("503"), RuntimeError("gone")], FALLBACK: [RuntimeError("gone too")]})
+    provider = StreamProvider(
+        {PRIMARY: [RuntimeError("503"), RuntimeError("gone")], FALLBACK: [RuntimeError("gone too")]}
+    )
     loop = _loop(tmp_path, provider)
 
-    response = await loop._llm_call_stream([{"role": "user", "content": "hi"}], None, PRIMARY, fallback_models=[FALLBACK])
+    response = await loop._llm_call_stream(
+        [{"role": "user", "content": "hi"}], None, PRIMARY, fallback_models=[FALLBACK]
+    )
 
     assert response.finish_reason == "error"
     assert "gone too" in (response.content or "")
@@ -194,7 +198,9 @@ def test_loop_applies_settings(tmp_path):
     assert loop.tools.has("read_file")
 
 
-@pytest.mark.parametrize("policy,interactive,expected", [("never", True, False), ("always", False, True), ("interactive", False, False)])
+@pytest.mark.parametrize(
+    "policy,interactive,expected", [("never", True, False), ("always", False, True), ("interactive", False, False)]
+)
 def test_checkpoint_gate(policy, interactive, expected):
     assert AgentLoop._checkpoint_active(policy, interactive) is expected
 

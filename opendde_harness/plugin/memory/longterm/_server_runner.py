@@ -15,9 +15,7 @@ def configured_api_mode(root: Path) -> Literal["responses", "chat"]:
     with (root / CONFIG_FILENAME).open("rb") as handle:
         value = (tomllib.load(handle).get("llm") or {}).get("api_mode", "responses")
     if value not in {"responses", "chat"}:
-        raise ValueError(
-            f"invalid [llm].api_mode={value!r}; expected 'responses' or 'chat'"
-        )
+        raise ValueError(f"invalid [llm].api_mode={value!r}; expected 'responses' or 'chat'")
     return value
 
 

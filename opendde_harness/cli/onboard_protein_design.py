@@ -45,7 +45,9 @@ def device_summary(gpus: str, names: list[str], t: Callable[[str, str], str]) ->
     if gpus == "none":
         return "cpu"
     if not names:
-        return "cuda " + t("(nvidia-smi unavailable; device list not verified)", "（nvidia-smi 不可用，未验证设备列表）")
+        return "cuda " + t(
+            "(nvidia-smi unavailable; device list not verified)", "（nvidia-smi 不可用，未验证设备列表）"
+        )
     if gpus == "all":
         scope_en, scope_zh = "all visible", "全部可见"
     else:
@@ -79,15 +81,20 @@ def configure_protein_design() -> None:
             raise typer.Exit(1)
         return value
 
-    local = ask(q.select(
-        t("Where should Protein Design run?", "蛋白设计在哪里执行？"),
-        choices=[
-            q.Choice(t("Local Linux Docker environment", "本机 Linux Docker 环境"), value="local"),
-            q.Choice(t("Existing Linux compute service", "已有的 Linux 计算服务"), value="remote"),
-        ],
-        default="local" if current.get("compute_docker") or not current.get("compute_url") else "remote",
-        style=OPENDDE_HARNESS_STYLE,
-    )) == "local"
+    local = (
+        ask(
+            q.select(
+                t("Where should Protein Design run?", "蛋白设计在哪里执行？"),
+                choices=[
+                    q.Choice(t("Local Linux Docker environment", "本机 Linux Docker 环境"), value="local"),
+                    q.Choice(t("Existing Linux compute service", "已有的 Linux 计算服务"), value="remote"),
+                ],
+                default="local" if current.get("compute_docker") or not current.get("compute_url") else "remote",
+                style=OPENDDE_HARNESS_STYLE,
+            )
+        )
+        == "local"
+    )
     settings = None
     token = str(current.get("compute_token") or "")
     saved = current.get("compute_docker") or {}
@@ -160,7 +167,10 @@ def configure_protein_design() -> None:
     if mode == "api":
         fold["api_url"] = str(defaults.get("api_url") or DEFAULT_OPENDDE_API_URL).strip().rstrip("/")
         note = (
-            t("official default service; override fold_defaults.api_url in config.json to use your own", "官方默认服务；如需自建服务，在 config.json 的 fold_defaults.api_url 中覆盖")
+            t(
+                "official default service; override fold_defaults.api_url in config.json to use your own",
+                "官方默认服务；如需自建服务，在 config.json 的 fold_defaults.api_url 中覆盖",
+            )
             if fold["api_url"] == DEFAULT_OPENDDE_API_URL
             else t("configured in config.json fold_defaults.api_url", "来自 config.json 的 fold_defaults.api_url")
         )
@@ -181,9 +191,17 @@ def configure_protein_design() -> None:
                 if value and (key not in legacy or Path(value).expanduser().absolute() != legacy[key]):
                     assets[key] = str(Path(value).expanduser().absolute())
             data = Path(assets["opendde_data"]).expanduser().resolve()
-            wizard.console.print(escape(weights_layout(
-                root, data, with_opendde=mode == "local", checkpoint=Path(assets["opendde_checkpoint"]).name, translate=t,
-            )))
+            wizard.console.print(
+                escape(
+                    weights_layout(
+                        root,
+                        data,
+                        with_opendde=mode == "local",
+                        checkpoint=Path(assets["opendde_checkpoint"]).name,
+                        translate=t,
+                    )
+                )
+            )
             output_dir = (
                 Path(
                     os.environ.get(
@@ -263,8 +281,11 @@ def configure_protein_design() -> None:
             token = token or secrets.token_urlsafe(32)
             compute.prepare_assets(settings)
             pending = {
-                **current, "compute_docker": settings.saved(), "compute_token": token,
-                "fold_defaults": fold, "compute_workers": [],
+                **current,
+                "compute_docker": settings.saved(),
+                "compute_token": token,
+                "fold_defaults": fold,
+                "compute_workers": [],
             }
             if not local_service.stop_if_idle(token):
                 wizard.console.print(

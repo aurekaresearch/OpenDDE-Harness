@@ -114,11 +114,7 @@ def evaluate_hotspot_contact_map(
     if not 0.0 <= cdr_contact_fraction_threshold <= 1.0:
         raise ValueError("cdr_contact_fraction_threshold must be between 0 and 1")
     hotspot_map = _hotspot_map(hotspots)
-    epitope_set = {
-        (chain, position)
-        for chain, positions in hotspot_map.items()
-        for position in positions
-    }
+    epitope_set = {(chain, position) for chain, positions in hotspot_map.items() for position in positions}
     coverage: dict[str, Any] = {
         "contacted_hotspots": set(),
         "missed_hotspots": set(epitope_set),
@@ -148,9 +144,7 @@ def evaluate_hotspot_contact_map(
 
     binder_search = struc.CellList(binder_atoms, cell_size=float(distance_cutoff))
     target_chain_set = (
-        {str(chain) for chain in target_chains}
-        if target_chains is not None
-        else {chain for chain, _ in epitope_set}
+        {str(chain) for chain in target_chains} if target_chains is not None else {chain for chain, _ in epitope_set}
     )
     contacted_hotspots: set[tuple[str, int]] = set()
     target_residues: set[tuple[str, int]] = set()
@@ -183,14 +177,24 @@ def evaluate_hotspot_contact_map(
                 pair = (binder_key, target_key)
                 all_contact_pairs.add(pair)
                 binder_position = sequence_indices.get(binder_key)
-                if all_cdr_positions and binder_key[0] in all_cdr_positions and binder_position in all_cdr_positions[binder_key[0]]:
+                if (
+                    all_cdr_positions
+                    and binder_key[0] in all_cdr_positions
+                    and binder_position in all_cdr_positions[binder_key[0]]
+                ):
                     cdr_contact_pairs.add(pair)
-                if cdr3_positions and binder_key[0] in cdr3_positions and binder_position in cdr3_positions[binder_key[0]]:
+                if (
+                    cdr3_positions
+                    and binder_key[0] in cdr3_positions
+                    and binder_position in cdr3_positions[binder_key[0]]
+                ):
                     cdr3_contact_pairs.add(pair)
                     if target_key in epitope_set:
                         cdr3_hotspot_pairs.add(pair)
                 if len(contact_pairs) < 24:
-                    contact_pairs.append(f"{binder_key[0]}:{binder_key[1]}-{target_key[0]}:{target_key[1]}@{distance:.2f}A")
+                    contact_pairs.append(
+                        f"{binder_key[0]}:{binder_key[1]}-{target_key[0]}:{target_key[1]}@{distance:.2f}A"
+                    )
         if residue_contacted:
             target_residues.add(target_key)
             if target_key in epitope_set:
@@ -201,13 +205,13 @@ def evaluate_hotspot_contact_map(
     cdr3_gate_passed = not epitope_set or (
         bool(cdr3_positions) and len(cdr3_hotspot_pairs) >= CDR3_MIN_EPITOPE_CONTACTS
     )
-    cdr3_contacted_hotspots = {
-        target for _binder, target in cdr3_hotspot_pairs
-    }
+    cdr3_contacted_hotspots = {target for _binder, target in cdr3_hotspot_pairs}
     binder_interface = contacted_binder_residues
     cdr_interface = {binder for binder, _target in cdr_contact_pairs}
     cdr_fraction = len(cdr_interface) / len(binder_interface) if binder_interface else 0.0
-    cdr_fraction_passed = bool(all_cdr_positions) and bool(binder_interface) and cdr_fraction > cdr_contact_fraction_threshold
+    cdr_fraction_passed = (
+        bool(all_cdr_positions) and bool(binder_interface) and cdr_fraction > cdr_contact_fraction_threshold
+    )
     framework_interface = binder_interface - cdr_interface
     coverage.update(
         {
@@ -240,7 +244,11 @@ def evaluate_hotspot_contact_map(
             "n_contact_antibody": len(binder_interface),
             "n_contact_cdr": len(cdr_interface),
             "framework_contact_residue_ids": [
-                {"chain": chain, "residue_id": residue_id, "sequence_position": sequence_indices.get((chain, residue_id))}
+                {
+                    "chain": chain,
+                    "residue_id": residue_id,
+                    "sequence_position": sequence_indices.get((chain, residue_id)),
+                }
                 | {
                     "distance_to_antigen_a": round(
                         binder_min_distances[(chain, residue_id)],
@@ -295,9 +303,7 @@ def target_aligned_binder_rmsd(
     if len(reference_binder) == 0:
         raise ValueError("pose RMSD requires matched binder CA atoms")
     aligned_mobile = (mobile_binder - mobile_center) @ rotation + reference_center
-    rmsd = float(
-        np.sqrt(np.mean(np.sum((aligned_mobile - reference_binder) ** 2, axis=1)))
-    )
+    rmsd = float(np.sqrt(np.mean(np.sum((aligned_mobile - reference_binder) ** 2, axis=1))))
     return {
         "rmsd": rmsd,
         "matched_target_atoms": int(len(reference_target)),

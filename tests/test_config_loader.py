@@ -115,7 +115,9 @@ def test_save_writes_base_blocks_only_and_round_trips(config_path):
 
 
 def test_feature_blocks_round_trip_as_camel_case():
-    config = Config.model_validate({"skillForge": {"llmGateMaxSelect": 4}, "runtime": {"checkpoint": {"policy": "never"}}})
+    config = Config.model_validate(
+        {"skillForge": {"llmGateMaxSelect": 4}, "runtime": {"checkpoint": {"policy": "never"}}}
+    )
     dumped = config.model_dump(by_alias=True)
 
     assert dumped["skillForge"]["llmGateMaxSelect"] == 4

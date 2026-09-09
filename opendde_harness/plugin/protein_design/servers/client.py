@@ -75,17 +75,13 @@ class ProteinDesignComputeClient:
             }.items()
             if value
         } or None
-        return HealthResponse.model_validate(
-            await self._request("GET", "/health", params=params)
-        )
+        return HealthResponse.model_validate(await self._request("GET", "/health", params=params))
 
     async def submit_fold(self, request: FoldRequest) -> JobSubmission:
         data = await self._request("POST", "/fold", json=request.model_dump())
         return JobSubmission.model_validate(data)
 
-    async def search_target_msa(
-        self, request: TargetMsaSearchRequest
-    ) -> TargetMsaSearchResponse:
+    async def search_target_msa(self, request: TargetMsaSearchRequest) -> TargetMsaSearchResponse:
         data = await self._request(
             "POST",
             "/search/msa/target",
@@ -220,13 +216,9 @@ class ProteinDesignComputeClient:
             if len(body) > 1_000:
                 body = f"{body[:1_000]}..."
             detail = f"; response={body}" if body else ""
-            raise ProteinDesignComputeError(
-                f"{method} {path} failed: HTTP {exc.response.status_code}{detail}"
-            ) from exc
+            raise ProteinDesignComputeError(f"{method} {path} failed: HTTP {exc.response.status_code}{detail}") from exc
         except httpx.RequestError as exc:
             message = str(exc).strip()
             detail = f": {message}" if message else ""
-            raise ProteinDesignComputeError(
-                f"{method} {path} failed: {type(exc).__name__}{detail}"
-            ) from exc
+            raise ProteinDesignComputeError(f"{method} {path} failed: {type(exc).__name__}{detail}") from exc
         return response

@@ -33,6 +33,7 @@ _BACKENDS = {
     ESM2_GUIDED_MUTATION_SKILL: "esm2",
 }
 
+
 @dataclass(frozen=True)
 class DesignRouteContext:
     parent_sequences: Mapping[str, str]
@@ -68,10 +69,7 @@ class DesignSkillRoute:
             "The Router checked runtime legality. Compare all listed skills and select exactly one.",
         ]
         for skill_id in self.allowed_skill_ids:
-            lines.append(
-                f"- `{skill_id}`: backend={self.backends[skill_id]}; "
-                f"prior={self.weights[skill_id]:.4f}"
-            )
+            lines.append(f"- `{skill_id}`: backend={self.backends[skill_id]}; prior={self.weights[skill_id]:.4f}")
         lines.extend(
             (
                 f"- Router reason: {self.reason}.",
@@ -141,11 +139,7 @@ def route_design_skills(context: DesignRouteContext) -> DesignSkillRoute:
         allowed = (context.force_skill_id,)
         reason = "configured_forced_skill"
     elif bootstrap:
-        allowed = tuple(
-            skill
-            for skill in BOOTSTRAP_SKILLS
-            if skill in capable and configured.get(skill, 0.0) > 0.0
-        )
+        allowed = tuple(skill for skill in BOOTSTRAP_SKILLS if skill in capable and configured.get(skill, 0.0) > 0.0)
         # A masked or otherwise unusable parent must still be materialized. If
         # the Router menu disables every bootstrap helper, full redesign is the
         # only safe mandatory fallback; a zero-weight inverse-folding skill must
@@ -154,10 +148,7 @@ def route_design_skills(context: DesignRouteContext) -> DesignSkillRoute:
             allowed = (FULL_REDESIGN_SKILL,)
             configured[FULL_REDESIGN_SKILL] = 1.0
     else:
-        allowed = tuple(
-            skill for skill in DESIGN_SKILLS
-            if skill in capable and configured.get(skill, 0.0) > 0.0
-        )
+        allowed = tuple(skill for skill in DESIGN_SKILLS if skill in capable and configured.get(skill, 0.0) > 0.0)
         if not allowed:
             allowed = (POINT_MUTATION_SKILL,)
             configured[POINT_MUTATION_SKILL] = 1.0

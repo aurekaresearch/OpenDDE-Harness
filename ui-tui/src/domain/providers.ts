@@ -16,10 +16,7 @@ export const providerDisplayNames = (providers: readonly { name: string; slug: s
  * and a row that hides it stops matching the id that gets stored. Storage keeps
  * the prefix either way -- this is what the row reads, not what is written.
  */
-export const bareModelId = (
-  provider: { auth_type?: string; slug: string } | undefined,
-  model: string
-): string => {
+export const bareModelId = (provider: { auth_type?: string; slug: string } | undefined, model: string): string => {
   if (provider?.auth_type !== 'endpoint') {
     return model
   }

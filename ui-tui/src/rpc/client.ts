@@ -65,7 +65,9 @@ export class RpcClient {
   constructor(opts: RpcClientOptions = {}) {
     const target = opts.socketPath ?? process.env.OPENDDE_HARNESS_RPC_SOCKET
     if (!target) {
-      throw new Error('RpcClient: no RPC target supplied; pass `socketPath` or set ' + 'OPENDDE_HARNESS_RPC_SOCKET env var.')
+      throw new Error(
+        'RpcClient: no RPC target supplied; pass `socketPath` or set ' + 'OPENDDE_HARNESS_RPC_SOCKET env var.'
+      )
     }
     this.warn = opts.warn ?? (m => process.stderr.write(`[rpc-client] ${m}\n`))
     this.onNotification = opts.onNotification

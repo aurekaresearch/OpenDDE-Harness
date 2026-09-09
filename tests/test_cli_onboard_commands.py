@@ -41,17 +41,30 @@ def settings(tmp_path):
         "common/obsolete_to_successor.json",
         "common/release_date_cache.json",
         "soluble_mpnn/solublempnn_v_48_020.pt",
-        *(f"huggingface/{esm.name}/snapshots/{revision}/{file}" for file in (
-            "config.json", "model.safetensors", "special_tokens_map.json", "tokenizer_config.json", "vocab.txt"
-        )),
+        *(
+            f"huggingface/{esm.name}/snapshots/{revision}/{file}"
+            for file in (
+                "config.json",
+                "model.safetensors",
+                "special_tokens_map.json",
+                "tokenizer_config.json",
+                "vocab.txt",
+            )
+        ),
     ):
         path = weights / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("asset")
     return DockerSettings(
-        image="example/runtime:test", mode="local", port=18089, gpus="0",
-        package_root=str(code), state_dir=str(tmp_path / "state"),
-        weights_dir=str(weights), opendde_data=str(weights), opendde_common=str(weights / "common"),
+        image="example/runtime:test",
+        mode="local",
+        port=18089,
+        gpus="0",
+        package_root=str(code),
+        state_dir=str(tmp_path / "state"),
+        weights_dir=str(weights),
+        opendde_data=str(weights),
+        opendde_common=str(weights / "common"),
         opendde_checkpoint=str(weights / "checkpoint/opendde.pt"),
     )
 
@@ -104,9 +117,10 @@ def test_saved_settings_ignore_retired_container_name(settings):
         DockerSettings.from_saved({"image": "x"})
 
 
-@pytest.mark.parametrize("relative", [
-    "external/opendde/runner/inference.py", "external/ligandmpnn/model_utils.py", "external/plip/plip/plipcmd.py"
-])
+@pytest.mark.parametrize(
+    "relative",
+    ["external/opendde/runner/inference.py", "external/ligandmpnn/model_utils.py", "external/plip/plip/plipcmd.py"],
+)
 def test_missing_source_is_rejected(settings, relative):
     (Path(settings.package_root) / relative).unlink()
     with pytest.raises(ComputeSetupError, match="missing, empty or unreadable"):
@@ -143,7 +157,11 @@ def test_separate_opendde_data_root_gets_its_own_mount(settings, tmp_path):
     assert env["OPENDDE_HARNESS_WEIGHTS_DIR"] == "/weights"
     settings.mode = "api"
     args, env = create_arguments(settings, "token", "", name="c", port=18089)
-    assert sum(item == "--mount" for item in args) == 3 and "STRUCTPRED_OPENDDE_COMMON_DIR" not in env or env["STRUCTPRED_OPENDDE_COMMON_DIR"].startswith("/weights")
+    assert (
+        sum(item == "--mount" for item in args) == 3
+        and "STRUCTPRED_OPENDDE_COMMON_DIR" not in env
+        or env["STRUCTPRED_OPENDDE_COMMON_DIR"].startswith("/weights")
+    )
 
 
 def test_invalid_hf_reference_rejected(settings):
@@ -166,7 +184,9 @@ def test_start_service_runs_container_and_records_state(settings, harness_home, 
     from opendde_harness.cli import onboard_compute
 
     calls = []
-    monkeypatch.setattr(onboard_compute, "check_local_docker", lambda: calls.append("docker") or {"Runtimes": {"nvidia": {}}})
+    monkeypatch.setattr(
+        onboard_compute, "check_local_docker", lambda: calls.append("docker") or {"Runtimes": {"nvidia": {}}}
+    )
     monkeypatch.setattr(onboard_compute, "ensure_image", lambda image, **k: calls.append("image"))
     monkeypatch.setattr(onboard_compute, "prepare_assets", lambda _: pytest.fail("start must not download assets"))
     monkeypatch.setattr(onboard_compute, "validate_settings", lambda *a, **k: calls.append("validate"))
@@ -204,10 +224,16 @@ def test_resolver_reuses_running_healthy_container(harness_home, monkeypatch):
 
     monkeypatch.setattr(compute_code, "runtime_code_identity", lambda: {"id": CODE_ID})
     monkeypatch.setattr(onboard_compute, "inspect_container", _running)
-    monkeypatch.setattr(onboard_compute, "start_service", lambda *a, **k: pytest.fail("a healthy container must be reused"))
+    monkeypatch.setattr(
+        onboard_compute, "start_service", lambda *a, **k: pytest.fail("a healthy container must be reused")
+    )
     monkeypatch.setattr(local_service, "service_health", lambda url, token, **k: {"status": "ok"})
-    local_service.write_state(local_service.new_state(container="opendde-compute-" + "a" * 12, image="img", code_id=CODE_ID, port=18091))
-    endpoint = local_service.ensure_compute_service({"compute_docker": {"image": "img"}, "compute_token": "tok", "compute_url": "http://127.0.0.1:1"})
+    local_service.write_state(
+        local_service.new_state(container="opendde-compute-" + "a" * 12, image="img", code_id=CODE_ID, port=18091)
+    )
+    endpoint = local_service.ensure_compute_service(
+        {"compute_docker": {"image": "img"}, "compute_token": "tok", "compute_url": "http://127.0.0.1:1"}
+    )
     assert endpoint == local_service.ComputeEndpoint("http://127.0.0.1:18091", "tok")
 
 
@@ -217,21 +243,33 @@ def test_resolver_starts_new_release_and_leaves_old_container_alone(harness_home
     monkeypatch.setattr(compute_code, "runtime_code_identity", lambda: {"id": CODE_ID})
     monkeypatch.setattr(onboard_compute, "inspect_container", _running)
     monkeypatch.setattr(onboard_compute, "docker", lambda *args, **k: pytest.fail(f"unexpected docker {args}"))
-    monkeypatch.setattr(local_service, "service_health", lambda url, token, **k: pytest.fail("old release must not be probed"))
+    monkeypatch.setattr(
+        local_service, "service_health", lambda url, token, **k: pytest.fail("old release must not be probed")
+    )
     old = local_service.new_state(container="opendde-compute-old", image="img", code_id="old-code", port=18092)
     local_service.write_state(old)
     started = []
 
     def start(settings, token, api_url, *, code_id, quiet):
         started.append((settings, token, api_url, code_id, quiet))
-        state = local_service.new_state(container=local_service.container_name(code_id), image=settings.image, code_id=code_id, port=18093)
+        state = local_service.new_state(
+            container=local_service.container_name(code_id), image=settings.image, code_id=code_id, port=18093
+        )
         local_service.write_state(state)
         return state
 
     monkeypatch.setattr(onboard_compute, "start_service", start)
     config = {
-        "compute_docker": {"image": "img", "mode": "api", "gpus": "all", "package_root": "", "state_dir": "/tmp/s", "container_name": "legacy"},
-        "compute_token": "tok", "fold_defaults": {"execution_mode": "api", "api_url": "http://fold.test"},
+        "compute_docker": {
+            "image": "img",
+            "mode": "api",
+            "gpus": "all",
+            "package_root": "",
+            "state_dir": "/tmp/s",
+            "container_name": "legacy",
+        },
+        "compute_token": "tok",
+        "fold_defaults": {"execution_mode": "api", "api_url": "http://fold.test"},
     }
     endpoint = local_service.ensure_compute_service(config)
     assert endpoint == local_service.ComputeEndpoint("http://127.0.0.1:18093", "tok")
@@ -246,9 +284,16 @@ def test_resolver_restarts_dead_or_unhealthy_container(harness_home, monkeypatch
     monkeypatch.setattr(compute_code, "runtime_code_identity", lambda: {"id": CODE_ID})
     monkeypatch.setattr(onboard_compute, "inspect_container", lambda name: None)
     started = []
-    monkeypatch.setattr(onboard_compute, "start_service", lambda *a, **k: started.append(a) or {"url": "http://127.0.0.1:18094"})
-    local_service.write_state(local_service.new_state(container="opendde-compute-" + "a" * 12, image="img", code_id=CODE_ID, port=18091))
-    config = {"compute_docker": {"image": "img", "mode": "api", "gpus": "all", "package_root": "", "state_dir": "/tmp/s"}, "compute_token": "tok"}
+    monkeypatch.setattr(
+        onboard_compute, "start_service", lambda *a, **k: started.append(a) or {"url": "http://127.0.0.1:18094"}
+    )
+    local_service.write_state(
+        local_service.new_state(container="opendde-compute-" + "a" * 12, image="img", code_id=CODE_ID, port=18091)
+    )
+    config = {
+        "compute_docker": {"image": "img", "mode": "api", "gpus": "all", "package_root": "", "state_dir": "/tmp/s"},
+        "compute_token": "tok",
+    }
     assert local_service.ensure_compute_service(config).url == "http://127.0.0.1:18094"
     assert len(started) == 1
 
@@ -256,7 +301,9 @@ def test_resolver_restarts_dead_or_unhealthy_container(harness_home, monkeypatch
 def test_resolver_passes_remote_configuration_through(monkeypatch):
     from opendde_harness.cli import onboard_compute
 
-    monkeypatch.setattr(onboard_compute, "docker", lambda *a, **k: pytest.fail("remote placement must not touch Docker"))
+    monkeypatch.setattr(
+        onboard_compute, "docker", lambda *a, **k: pytest.fail("remote placement must not touch Docker")
+    )
     endpoint = local_service.ensure_compute_service({"compute_url": "https://compute.example/", "compute_token": "tok"})
     assert endpoint == local_service.ComputeEndpoint("https://compute.example", "tok")
     assert local_service.ensure_compute_service({}).url == "http://127.0.0.1:8080"
@@ -311,7 +358,11 @@ def test_docker_error_retains_daemon_diagnostic_without_token(monkeypatch):
     from opendde_harness.cli import onboard_compute as compute
 
     monkeypatch.setattr(compute.shutil, "which", lambda _: "/test/docker")
-    monkeypatch.setattr(compute.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "Cannot connect to daemon; token=private-token"))
+    monkeypatch.setattr(
+        compute.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "Cannot connect to daemon; token=private-token"),
+    )
     with pytest.raises(ComputeSetupError) as caught:
         compute.docker("info", "--format", "{{json .}}")
     assert "Cannot connect to daemon" in str(caught.value)
@@ -384,7 +435,8 @@ def test_quiet_image_pull_stays_silent(monkeypatch):
     monkeypatch.setattr(compute.shutil, "which", lambda _: "/test/docker")
     monkeypatch.setattr(compute, "docker", lambda *args: "" if args[:2] == ("image", "ls") else "{}")
     monkeypatch.setattr(
-        compute.subprocess, "run",
+        compute.subprocess,
+        "run",
         lambda command, **kwargs: calls.append((command, kwargs)) or subprocess.CompletedProcess(command, 0),
     )
 
@@ -399,12 +451,23 @@ def test_cpu_service_readiness_needs_no_gpu(monkeypatch):
     from opendde_harness.cli import onboard_compute as compute
 
     client = httpx.Client
+
     def respond(request):
         if request.url.path == "/health":
-            return httpx.Response(200, json={"status": "ok", "gpu": [], "workers": {
-                "backend_ready": True, "device": "cpu", "tools": {"esm2": {"required": True, "ready": True}}
-            }})
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ok",
+                    "gpu": [],
+                    "workers": {
+                        "backend_ready": True,
+                        "device": "cpu",
+                        "tools": {"esm2": {"required": True, "ready": True}},
+                    },
+                },
+            )
         return httpx.Response(200, json={"candidates": []})
+
     transport = httpx.MockTransport(respond)
     monkeypatch.setattr(compute.httpx, "Client", lambda **kwargs: client(transport=transport, **kwargs))
     compute.wait_for_service("http://compute.test", "token", "local", timeout=0)
@@ -425,7 +488,9 @@ def test_free_port_skips_ports_in_use():
     assert free_port(start) == start
 
 
-@pytest.mark.parametrize("value, valid", [("/tmp/weights", True), ("~/weights", True), ("/", False), ("", False), ("/a,b", False)])
+@pytest.mark.parametrize(
+    "value, valid", [("/tmp/weights", True), ("~/weights", True), ("/", False), ("", False), ("/a,b", False)]
+)
 def test_weights_directory_prompt_validation(value, valid):
     from opendde_harness.cli.onboard_compute import validate_directory
 
@@ -443,8 +508,13 @@ def test_inspect_compute_uses_saved_weights_dir_and_names_prepare(tmp_path, monk
 
     monkeypatch.setattr(compute_assets, "inspect_assets", inspect)
     monkeypatch.setattr(onboard_compute, "check_local_docker", lambda: None)
-    monkeypatch.setattr(local_service, "instance_status", lambda config: {"running": False, "container": "opendde-compute-abc"})
-    config = {"compute_url": "http://127.0.0.1:18089", "compute_docker": {"weights_dir": str(tmp_path), "package_root": "", "gpus": "none"}}
+    monkeypatch.setattr(
+        local_service, "instance_status", lambda config: {"running": False, "container": "opendde-compute-abc"}
+    )
+    config = {
+        "compute_url": "http://127.0.0.1:18089",
+        "compute_docker": {"weights_dir": str(tmp_path), "package_root": "", "gpus": "none"},
+    }
     report = onboard_compute.inspect_compute(config)
     assert roots == [tmp_path.resolve()]
     errors = {item["name"]: item.get("error", "") for item in report["checks"]}
@@ -461,18 +531,28 @@ def test_inspect_compute_probes_the_running_local_container(monkeypatch):
 
     monkeypatch.setattr(compute_assets, "inspect_assets", lambda root, **k: {"ready": True, "files": []})
     monkeypatch.setattr(onboard_compute, "check_local_docker", lambda: None)
-    monkeypatch.setattr(local_service, "instance_status", lambda config: {"running": True, "url": "http://127.0.0.1:18096", "container": "c"})
+    monkeypatch.setattr(
+        local_service,
+        "instance_status",
+        lambda config: {"running": True, "url": "http://127.0.0.1:18096", "container": "c"},
+    )
     probed = []
 
     def respond(request):
         probed.append(str(request.url))
         if request.url.path == "/health":
-            return httpx.Response(200, json={"status": "ok", "workers": {"backend_ready": True, "device": "cuda", "tools": {"esm2": {}}}})
+            return httpx.Response(
+                200, json={"status": "ok", "workers": {"backend_ready": True, "device": "cuda", "tools": {"esm2": {}}}}
+            )
         return httpx.Response(200, json={"candidates": []})
 
     client = httpx.Client
-    monkeypatch.setattr(onboard_compute.httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(respond), **kwargs))
-    report = onboard_compute.inspect_compute({"compute_url": "http://127.0.0.1:1", "compute_docker": {"weights_dir": "/w", "package_root": "/p"}})
+    monkeypatch.setattr(
+        onboard_compute.httpx, "Client", lambda **kwargs: client(transport=httpx.MockTransport(respond), **kwargs)
+    )
+    report = onboard_compute.inspect_compute(
+        {"compute_url": "http://127.0.0.1:1", "compute_docker": {"weights_dir": "/w", "package_root": "/p"}}
+    )
     assert all(url.startswith("http://127.0.0.1:18096/") for url in probed) and probed
     assert report["device"] == "cuda"
 
@@ -527,9 +607,7 @@ def test_custom_endpoint_models_read_bare_and_manual_entry_comes_first(monkeypat
     monkeypatch.setattr(wizard, "_LANG", "en")
     monkeypatch.setattr(wizard, "_require_questionary", lambda: _Questionary())
 
-    chosen = wizard._select_model_id(
-        ["custom/gpt-4o", "custom/qwen3-32b"], provider="custom", manual_first=True
-    )
+    chosen = wizard._select_model_id(["custom/gpt-4o", "custom/qwen3-32b"], provider="custom", manual_first=True)
     # The row reads as the vendor writes it; the id that gets stored keeps the
     # prefix that routes it to the endpoint the user configured.
     assert seen["titles"] == ["Enter a model name", "gpt-4o", "qwen3-32b"]
@@ -564,8 +642,12 @@ def wizard_run(monkeypatch):
     monkeypatch.setattr(compute, "prepare_assets", lambda settings: outcome.setdefault("prepared", settings))
     monkeypatch.setattr(local_service, "stop_if_idle", lambda token, **k: True)
     monkeypatch.setattr(
-        local_service, "ensure_compute_service",
-        lambda config: outcome["ensured"].append(config) or local_service.ComputeEndpoint("http://127.0.0.1:8080", config["compute_token"]),
+        local_service,
+        "ensure_compute_service",
+        lambda config: (
+            outcome["ensured"].append(config)
+            or local_service.ComputeEndpoint("http://127.0.0.1:8080", config["compute_token"])
+        ),
     )
     monkeypatch.setattr(update, "set_plugin_config_fields", lambda name, fields: outcome["saved"].update(fields))
     monkeypatch.delenv("OPENDDE_HARNESS_COMPUTE_IMAGE", raising=False)
@@ -612,10 +694,16 @@ def test_local_docker_step_prints_lifecycle_then_folding_then_weights(wizard_run
 
 
 def test_saved_port_override_is_shown_and_kept(wizard_run):
-    config = {"plugins": {"config": {"protein-design": {
-        "compute_token": "existing-token",
-        "compute_docker": {"port": 18089, "gpus": "none", "idle_seconds": 120, "container_name": "legacy"},
-    }}}}
+    config = {
+        "plugins": {
+            "config": {
+                "protein-design": {
+                    "compute_token": "existing-token",
+                    "compute_docker": {"port": 18089, "gpus": "none", "idle_seconds": 120, "container_name": "legacy"},
+                }
+            }
+        }
+    }
     transcript, outcome = wizard_run(config)
     assert "Compute service API port (compute_docker.port): 18089" in transcript
     assert "removed after 2 minutes idle" in transcript and "Compute device: cpu" in transcript

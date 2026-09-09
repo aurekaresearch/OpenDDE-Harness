@@ -146,7 +146,6 @@ def test_service_health_payload_validates_against_the_client_contract():
     assert HealthResponse.model_validate({**payload, "future_key": 1}).status == "ok"
 
 
-
 def test_default_protrek_endpoint_stays_plain_http(monkeypatch):
     """The upstream service has no TLS; an https default hangs until timeout."""
     from opendde_harness.plugin.protein_design.core import external

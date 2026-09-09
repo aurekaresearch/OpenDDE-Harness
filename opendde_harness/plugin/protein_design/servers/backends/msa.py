@@ -33,10 +33,7 @@ def _normalize_sequence(value: str) -> str:
     if not sequence:
         raise ValueError("target MSA search requires a non-empty target sequence")
     if invalid:
-        raise ValueError(
-            "target MSA search accepts only canonical amino acids; invalid: "
-            + ", ".join(invalid)
-        )
+        raise ValueError("target MSA search accepts only canonical amino acids; invalid: " + ", ".join(invalid))
     return sequence
 
 
@@ -73,9 +70,7 @@ def _normalize_protenix_result(output_dir: Path, result_dir: Path, sequence: str
         (result_dir / "pairing.a3m").write_text(f">query\n{sequence}\n", encoding="utf-8")
 
 
-def _run_protenix_search(
-    sequences: Sequence[str], output_dir: str, mode: str
-) -> Sequence[str]:
+def _run_protenix_search(sequences: Sequence[str], output_dir: str, mode: str) -> Sequence[str]:
     environment = dict(os.environ)
     environment.setdefault("MMSEQS_SERVICE_HOST_URL", DEFAULT_MSA_SERVER_URL)
     script = (
@@ -110,10 +105,7 @@ def _run_protenix_search(
         reason = connection_reason(RuntimeError(detail)) if detail else None
         if reason is not None:
             raise ExternalServiceUnavailableError(MSA_SERVICE, reason, environment["MMSEQS_SERVICE_HOST_URL"])
-        raise RuntimeError(
-            "Protenix online MSA search failed"
-            + (f": {detail}" if detail else "")
-        )
+        raise RuntimeError("Protenix online MSA search failed" + (f": {detail}" if detail else ""))
     marker = "__PROTENIX_MSA_RESULT__"
     if marker not in completed.stdout:
         raise RuntimeError("Protenix online MSA search returned no result manifest")
@@ -145,9 +137,7 @@ def search_target_msa(
     server_url = os.environ.get("MMSEQS_SERVICE_HOST_URL", DEFAULT_MSA_SERVER_URL).rstrip("/")
     server_mode = os.environ.get("OPENDDE_HARNESS_MSA_SERVER_MODE", "protenix").strip().lower()
     if server_mode not in {"protenix", "colabfold"}:
-        raise ValueError(
-            "OPENDDE_HARNESS_MSA_SERVER_MODE must be 'protenix' or 'colabfold'"
-        )
+        raise ValueError("OPENDDE_HARNESS_MSA_SERVER_MODE must be 'protenix' or 'colabfold'")
 
     if not force and unpaired.is_file() and paired.is_file():
         _validate_a3m_query(unpaired, normalized_sequence)
@@ -169,25 +159,19 @@ def search_target_msa(
     output_root.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix="target-msa-", dir=output_root))
     try:
-        result_dirs = (search or _run_protenix_search)(
-            [normalized_sequence], str(temporary), server_mode
-        )
+        result_dirs = (search or _run_protenix_search)([normalized_sequence], str(temporary), server_mode)
         if len(result_dirs) != 1:
             raise RuntimeError("Protenix MSA service returned an unexpected result count")
         result_dir = Path(result_dirs[0])
         generated_unpaired = result_dir / "non_pairing.a3m"
         generated_paired = result_dir / "pairing.a3m"
         if not generated_unpaired.is_file() or not generated_paired.is_file():
-            raise RuntimeError(
-                "Protenix MSA service did not produce paired and unpaired A3M files"
-            )
+            raise RuntimeError("Protenix MSA service did not produce paired and unpaired A3M files")
         _validate_a3m_query(generated_unpaired, normalized_sequence)
         _validate_a3m_query(generated_paired, normalized_sequence)
         depth = _alignment_depth(generated_unpaired)
         if depth <= 1:
-            raise RuntimeError(
-                "online MSA search returned only the query sequence; no homologous target MSA was found"
-            )
+            raise RuntimeError("online MSA search returned only the query sequence; no homologous target MSA was found")
         staged = temporary / "final"
         staged.mkdir()
         shutil.copy2(generated_unpaired, staged / "non_pairing.a3m")

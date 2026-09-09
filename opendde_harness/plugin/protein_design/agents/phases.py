@@ -113,14 +113,11 @@ class ProteinDesignPhases:
     ) -> Candidate:
         ordered = sorted(
             candidates,
-            key=lambda candidate: float(candidate.objective)
-            if candidate.objective is not None
-            else float("inf"),
+            key=lambda candidate: float(candidate.objective) if candidate.objective is not None else float("inf"),
             reverse=not config.minimize,
         )
         lines = [
-            f"Optimization metric: {config.objective_key} "
-            f"({'lower' if config.minimize else 'higher'} is better)",
+            f"Optimization metric: {config.objective_key} ({'lower' if config.minimize else 'higher'} is better)",
             "| Candidate | Parent | Score | ipTM | pLDDT | ipSAE |",
             "|:--|:--|--:|--:|--:|--:|",
         ]
@@ -158,11 +155,7 @@ class ProteinDesignPhases:
             if not isinstance(output, ParentSelectionOutput):
                 output = ParentSelectionOutput.model_validate(output)
             selected_name = output.parent_selection.selected_parent_name
-            selected = next(
-                candidate
-                for candidate in ordered
-                if candidate.candidate_id == selected_name
-            )
+            selected = next(candidate for candidate in ordered if candidate.candidate_id == selected_name)
             config.metadata["parent_selection"] = output.model_dump(mode="json")
             return selected
         except Exception as exc:
@@ -197,9 +190,7 @@ class ProteinDesignPhases:
                 parent_sequences=chains,
                 mutable_positions=config.mutable_positions,
                 population_size=int(config.metadata.get("population_size", len(parents))),
-                inverse_folding_available=(
-                    bool(parent.get("structure_path") or config.initial_structure_path)
-                ),
+                inverse_folding_available=(bool(parent.get("structure_path") or config.initial_structure_path)),
                 esm2_available=config.esm2_available,
                 skill_weights=config.skill_weights,
                 force_skill_id=_forced_design_skill(config, cycle),
@@ -259,9 +250,7 @@ class ProteinDesignPhases:
         )
         if not isinstance(output, DesignAgentOutput):
             output = DesignAgentOutput.model_validate(output)
-        applied_learned = self._validated_learned_skill_ids(
-            output.applied_learned_skill_ids, learned_names
-        )
+        applied_learned = self._validated_learned_skill_ids(output.applied_learned_skill_ids, learned_names)
         context = ProposalContext(
             parent_id=str(parent.get("candidate_id") or parent.get("id") or "parent"),
             parent_sequences=chains,
@@ -281,15 +270,10 @@ class ProteinDesignPhases:
                 batch = []
                 self._executor.last_errors = [str(exc)]
             existing_ids = {proposal.candidate_id for proposal in proposals}
-            existing_sequences = {
-                tuple(sorted(proposal.chains.items())) for proposal in proposals
-            }
+            existing_sequences = {tuple(sorted(proposal.chains.items())) for proposal in proposals}
             for proposal in batch:
                 fingerprint = tuple(sorted(proposal.chains.items()))
-                if (
-                    proposal.candidate_id in existing_ids
-                    or fingerprint in existing_sequences
-                ):
+                if proposal.candidate_id in existing_ids or fingerprint in existing_sequences:
                     continue
                 proposals.append(proposal)
                 existing_ids.add(proposal.candidate_id)
@@ -327,13 +311,10 @@ class ProteinDesignPhases:
                 output = DesignAgentOutput.model_validate(output)
             if output.skill_id != selected_skill_id:
                 output = output.model_copy(update={"skill_id": selected_skill_id})
-            applied_learned = self._validated_learned_skill_ids(
-                output.applied_learned_skill_ids, learned_names
-            )
+            applied_learned = self._validated_learned_skill_ids(output.applied_learned_skill_ids, learned_names)
         if not proposals:
             raise ValueError(
-                "Design Agent produced no valid candidates after format repair: "
-                f"{self._executor.last_errors}"
+                f"Design Agent produced no valid candidates after format repair: {self._executor.last_errors}"
             )
         fold_candidates = []
         for proposal in proposals:
@@ -367,9 +348,7 @@ class ProteinDesignPhases:
         )
 
     @staticmethod
-    def _validated_learned_skill_ids(
-        requested: list[str], available: tuple[str, ...]
-    ) -> tuple[str, ...]:
+    def _validated_learned_skill_ids(requested: list[str], available: tuple[str, ...]) -> tuple[str, ...]:
         """Keep only retrieved advisory skills; never let memory bypass the Router."""
         allowed = set(available)
         return tuple(name for name in dict.fromkeys(requested) if name in allowed)[:3]
@@ -419,9 +398,7 @@ class ProteinDesignPhases:
         # post-filter stage. Persist both objective evidence and the Quality
         # Agent decision so post-filter never has to infer or recompute it.
         for candidate in candidates:
-            candidate.metadata["developability_evidence"] = dict(
-                objective_results.get(candidate.candidate_id) or {}
-            )
+            candidate.metadata["developability_evidence"] = dict(objective_results.get(candidate.candidate_id) or {})
             decision = output.results.get(candidate.candidate_id)
             if decision is not None:
                 candidate.metadata["quality_check"] = decision.model_dump(mode="json")
@@ -507,9 +484,7 @@ class ProteinDesignPhases:
                     "loglikelihood": "Sequence-model compatibility; higher is generally better for comparable sequences.",
                     "objective": "Search objective only; direction is given by minimize. Do not let it dictate final order.",
                 },
-                "candidate_evidence": [
-                    self._post_filter_evidence(item, recurring_offenders) for item in candidates
-                ],
+                "candidate_evidence": [self._post_filter_evidence(item, recurring_offenders) for item in candidates],
             },
             ensure_ascii=False,
         )
@@ -552,7 +527,8 @@ class ProteinDesignPhases:
         )
         supplied = {
             name: value if value is not None and math.isfinite(value) else None
-            for name in metric_names for value in [metrics.get(name)]
+            for name in metric_names
+            for value in [metrics.get(name)]
         }
         return {
             "candidate_id": candidate.candidate_id,
@@ -592,9 +568,7 @@ class ProteinDesignPhases:
             "reflection_interval": config.reflection_interval,
             "binder_chain_ids": list(config.binder_chains),
             "cdr_regions": config.cdr_regions,
-            "candidates_json_path": str(
-                config.metadata.get("candidates_json_path") or "in-memory"
-            ),
+            "candidates_json_path": str(config.metadata.get("candidates_json_path") or "in-memory"),
             **values,
         }
         if config.llm_model:
