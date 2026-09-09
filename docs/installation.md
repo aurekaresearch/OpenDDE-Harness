@@ -4,36 +4,80 @@ Client installation, compute startup and OpenDDE data preparation are separate s
 
 | Command | Action |
 | --- | --- |
-| `sh install.sh` | Install/update the client and terminal UI only |
+| `uv tool install --python 3.12 opendde-harness` | Install the client and bundled terminal UI from PyPI |
+| `uv tool upgrade opendde-harness` | Update a PyPI installation |
 | `ddeharness doctor` | Read-only check of configuration, compute service and required model assets |
 | `ddeharness compute prepare --assets-only` | Prepare required weights outside Docker; no service is started |
 | `ddeharness compute prepare --code-only` | Prepare versioned runtime code without model downloads |
 | `ddeharness onboard` | Configure the LLM provider, long-term memory and Protein Design compute; reuse/pull an image and start compute after confirmation |
-| `ddeharness compute stop` | Stop the on-demand compute container now (it also exits by itself when idle) |
+| `ddeharness compute stop` | Stop an idle local compute container; refuses while jobs or task leases are active |
 
 ## Install the client
 
-The PyPI name is `opendde-harness`; its CLI entry is `ddeharness`. After the release
-has been published, install it with `uv tool install --python 3.12 opendde-harness`.
-The wheel includes the built TUI and the manifests needed to prepare tool code,
-check environment compatibility, and download model assets. No Git checkout is
-required for this installation path. The TUI runs on Node.js 22+. When no Node.js
-22+ is found, the first `ddeharness` (or `ddeharness tui --check`) run prints a
-one-line notice and installs the pinned Node.js 22.x release from nodejs.org into
-`~/.opendde_harness/runtime/` (verified against the release's `SHASUMS256.txt`,
-`https_proxy` honoured), then reports the installed path. Set `OPENDDE_HARNESS_NODE`
-to a compatible Node executable to use your own, or `OPENDDE_HARNESS_NO_NODE_INSTALL=1`
-to forbid the automatic installation; without a usable Node the command then exits
-with install hints. A failed download or checksum leaves nothing behind and names
-the URL and the manual options.
+Use Linux or macOS for the client. Local compute requires Linux x86-64.
 
-Follow the [Quick Start](../README.md#quick-start) on Linux x86-64 with Git, curl and repository access.
+The PyPI package is `opendde-harness`; its command is `ddeharness`. Both methods
+use [uv](https://docs.astral.sh/uv/getting-started/installation/) to manage an
+isolated Python environment. No environment activation is needed.
 
-The source installer builds the TUI with npm, installs the client in an isolated uv-managed Python 3.12 environment, and checks CLI/TUI startup. It reuses Node.js 22+ or installs the same pinned private runtime under `~/.opendde_harness/runtime/` before building (a wheel install leaves that to the startup check). Open a new terminal if `ddeharness` is not yet on PATH.
+### Install from PyPI
 
-It does not install Docker, GPU drivers or compute models. `--client-only` has the same behavior as the default command. Re-running installation rebuilds/reinstalls the client; source edits do not automatically update the installed command.
+```bash
+uv tool install --python 3.12 opendde-harness
+```
 
-For a supplied release wheel, run an administrator-provided installer outside the source checkout with `OPENDDE_HARNESS_WHEEL_URL` set to the wheel URL. Set `OPENDDE_HARNESS_CONSTRAINTS_URL` for matching dependency constraints. A wheel contains the built TUI, so this path does not build the frontend. Use a trusted package and keep credentials out of URLs.
+The wheel includes the built TUI and the manifests needed to prepare compute
+code and model assets. No source checkout or frontend build is required.
+
+To update, close the TUI and run:
+
+```bash
+uv tool upgrade opendde-harness
+```
+
+### Install from source
+
+Install Git, uv, and Node.js 22 or newer with npm, then run:
+
+```bash
+git clone https://github.com/aurekaresearch/OpenDDE-Harness.git
+cd OpenDDE-Harness
+uv tool install --python 3.12 .
+```
+
+The package build installs frontend dependencies and builds the TUI when the
+bundle is missing or older than its sources. Source edits do not automatically
+update the installed command. To update, close the TUI, preserve local edits,
+and run from the checkout:
+
+```bash
+git pull --ff-only
+uv tool install --python 3.12 --reinstall .
+```
+
+To install edits already in the checkout, omit `git pull`.
+
+### Verify the installation
+
+After either installation:
+
+```bash
+ddeharness --version
+ddeharness --help
+ddeharness tui --check
+```
+
+If `ddeharness` is not on PATH, run `uv tool update-shell` and open a new terminal.
+Package installation prepares the client; run `ddeharness onboard` to configure
+the LLM and compute service and prepare model assets.
+
+The release wheel includes the terminal UI. Source builds require Node.js 22 or
+newer with npm before installing the package.
+
+Updates preserve configuration, results, and model data. They do not replace
+compute images or stop a running container. Existing containers keep their code
+until they exit; subsequent starts use the updated release. Run
+`ddeharness compute stop` to stop idle compute early, or let it exit when idle.
 
 ## Select a compute image
 
@@ -49,7 +93,7 @@ Use this reference or another trusted image with the same environment contract. 
 
 Onboarding reuses local images and pulls missing ones for `linux/amd64`; it never builds an image or falls back to building after a pull failure. Existing containers retain their image. Private registries may require `docker login`.
 
-The compute host needs a local Docker daemon, compatible NVIDIA drivers and NVIDIA Container Toolkit for GPU use. The image contains only runtime dependencies and tool binaries. Onboarding prepares a code snapshot from the installed release and pinned upstream archives, and prepares or verifies OpenDDE, SolubleMPNN, ESM2 650M and common data. Code and Harness tool weights are mounted read-only at `/workspace` and `/weights`; in local folding mode the OpenDDE data directory is mounted read-only at `/opendde`. The image contains no model choices or checkpoint paths; the code supplies them when launching a tool.
+The compute host needs a local Docker daemon, compatible NVIDIA drivers and NVIDIA Container Toolkit for GPU use. The image contains only runtime dependencies and tool binaries. Onboarding prepares a code snapshot from the installed release and pinned upstream archives, and prepares or verifies OpenDDE, SolubleMPNN, ESM2 650M and common data. Code and Harness tool weights are mounted read-only at `/workspace` and `/weights`; in local folding mode OpenDDE data is mounted read-only at `/opendde`, or under `/weights` when it is stored inside the Harness weights root. The image contains no model choices or checkpoint paths; the code supplies them when launching a tool.
 
 Code snapshots live under `runtime-code/` in the Harness weights root
 (`~/.cache/opendde-harness/runtime-code/`, or under `OPENDDE_HARNESS_WEIGHTS_DIR`) by
@@ -69,7 +113,7 @@ For remote services, see [onboarding](onboarding.md#connect-to-existing-service)
 
 ### Registry access and offline transfer
 
-If Docker Hub is unreachable, obtain an owner-approved alternative registry reference and select it in onboarding. Onboarding does not silently use third-party mirrors or change Docker daemon settings. Access to a base-image mirror does not guarantee access to this repository. Keep credentials out of image references.
+If Docker Hub is unreachable, obtain an owner-approved alternative registry reference and set `OPENDDE_HARNESS_COMPUTE_IMAGE` before onboarding. Onboarding does not silently use third-party mirrors or change Docker daemon settings. Access to a base-image mirror does not guarantee access to this repository. Keep credentials out of image references.
 
 For offline transfer, the publisher exports the tested image:
 
@@ -78,7 +122,7 @@ docker save --output opendde-harness.tar aurekaresearch/opendde-harness:v1
 sha256sum opendde-harness.tar
 ```
 
-Transfer the archive, verify its checksum against the publisher's trusted value, then run `docker load --input opendde-harness.tar` on the compute host and select the loaded reference in onboarding. Transfer the matching code snapshot and weights directory separately; the image archive contains neither. Point `OPENDDE_HARNESS_CODE_CACHE` at the transferred cache parent so the installed release can verify and reuse its snapshot offline. A local tag alone is not proof of provenance.
+Transfer the archive, verify its checksum against the publisher's trusted value, then run `docker load --input opendde-harness.tar` on the compute host and set `OPENDDE_HARNESS_COMPUTE_IMAGE` to the loaded reference before onboarding. Transfer the matching code snapshot and weights directory separately; the image archive contains neither. Point `OPENDDE_HARNESS_CODE_CACHE` at the transferred cache parent so the installed release can verify and reuse its snapshot offline. A local tag alone is not proof of provenance.
 
 ## Download model assets
 
@@ -125,24 +169,9 @@ Options:
 
 The OpenDDE checkpoint downloads first, followed by common data and shared models. Every file streams over HTTPS with a progress bar (size, speed, ETA), resumes an interrupted transfer where it stopped, and is verified against its SHA256 while it downloads; verified files are reused and mismatched existing files are reported without being overwritten. Proxies come from the usual `https_proxy` variables. Hugging Face URLs fall back to `HF_ENDPOINT` (or `hf-mirror.com`) when `huggingface.co` is unreachable; the `hf` CLI and `curl` are not needed. SolubleMPNN weights are fetched from `ipd.graylab.jhu.edu` first, then the project's Hugging Face repository, then `files.ipd.uw.edu`; every source is verified against the same SHA256. Large local MSA/template databases are not included.
 
-The source installer's `sh install.sh --assets-only` delegates to `ddeharness compute prepare --assets-only`. Asset preparation does not reinstall the client or start Docker. Onboarding uses the same preparation functions. Data stays outside the image and is mounted read-only.
+Asset preparation does not reinstall the client or start Docker. Onboarding uses the same preparation functions. Data stays outside the image and is mounted read-only.
 
-## Update and uninstall
-
-For a PyPI installation, exit the TUI and run `uv tool upgrade opendde-harness`.
-This updates the client package without rebuilding the tool environment or
-changing code mounted by a running compute container. The updated code snapshot
-is used the next time the container starts; run `ddeharness compute stop` to
-retire the running one early, or leave it to exit when idle.
-
-Exit the TUI and preserve local edits before updating your source installation:
-
-```bash
-git pull --ff-only
-sh install.sh
-```
-
-To install edits already in the checkout, omit `git pull`. Configuration and results are preserved; client updates do not replace images or stop a running container. Use `ddeharness onboard` to change settings.
+## Uninstall
 
 After stopping active tasks and closing the TUI, remove the client with:
 
@@ -152,7 +181,7 @@ uv tool uninstall opendde-harness
 
 This leaves configuration, results, compute services, model data and the source checkout intact. Back up anything needed before removing those separately. Do not remove shared Docker resources, GPU drivers or system runtimes as part of client cleanup.
 
-Application settings live in `~/.opendde_harness/config.json`, or the directory selected by `OPENDDE_HARNESS_HOME`. Protect this file because it may contain credentials. The same directory holds the rest of the client's state:
+Application settings live in `~/.opendde_harness/config.json`. `OPENDDE_HARNESS_HOME` does not relocate this file or the protein-design task root; it overrides selected runtime directories such as Node.js, compute state, and tracing. Use `OPENDDE_HARNESS_PROTEIN_DESIGN_ROOT` for task state. Protect the configuration file because it may contain credentials. Default locations include:
 
 ```text
 ~/.opendde_harness/
@@ -161,11 +190,11 @@ Application settings live in `~/.opendde_harness/config.json`, or the directory 
                              user_memory/, seeded from the bundled templates
   memory/                    Long-term memory store
   compute/local.json         The running local compute instance
-  protein_design/<task_id>/  Task state and results
+  protein_design/<task_id>/  Task state and worker logs
   runtime/                   Private Node.js runtime, when one was installed
   logs/                      Client logs, including memory-server.log
 ```
 
-Model weights and OpenDDE data live outside this directory, under the two roots above.
+Original compute outputs live on the compute host. Captured dashboard structures and metrics are stored in tracing data. Model weights and OpenDDE data live under the two roots above.
 
-Installer checks verify CLI/TUI startup, not GPU inference. Onboarding verifies service readiness and authentication before saving compute settings. See [troubleshooting](troubleshooting.md) for installation, image-pull and mount failures.
+The verification commands check CLI/TUI startup, not GPU inference. Onboarding verifies service readiness and authentication before saving compute settings. See [troubleshooting](troubleshooting.md) for installation, image-pull and mount failures.

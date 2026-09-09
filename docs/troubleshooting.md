@@ -9,7 +9,7 @@ until you have checked whether the previous request is still running.
 | Symptom | What to check |
 | --- | --- |
 | `ddeharness: command not found` | Open a new shell after installation and check `command -v ddeharness`; ensure the uv tool binary directory is on PATH. |
-| TUI bundle built, then Python installation fails | `built .../ui-tui/dist/entry.js` only confirms frontend compilation. Fix the Python dependency/index error and rerun `sh install.sh --client-only`; a failed base-package fallback is not a successful installation. |
+| TUI bundle built, then Python installation fails | `built .../ui-tui/dist/entry.js` only confirms frontend compilation. Fix the Python dependency/index error and rerun `uv tool install --python 3.12 --reinstall .` from the source checkout. |
 | Client updated but compute image unchanged | Expected: client installation does not change compute. Pull the publisher's new image and rerun `ddeharness onboard` after the running container's tasks finish. |
 | Image pull fails | Confirm the full published image reference, registry access, credentials and disk space. Set `OPENDDE_HARNESS_COMPUTE_IMAGE` before onboarding a new container. The default image is `aurekaresearch/opendde-harness:v1`. No automatic build fallback occurs. |
 | Config fails schema validation with unknown keys | Keys from earlier releases are not migrated. Remove the named keys from `~/.opendde_harness/config.json`, or run `ddeharness onboard` to write a fresh one. The error names the full key path. |
@@ -21,7 +21,7 @@ until you have checked whether the previous request is still running.
 | ESM2 or SolubleMPNN unavailable | These weights live on the host, not in the image. Run `ddeharness compute prepare --assets-only` and check the Harness weights root (`~/.cache/opendde-harness`, or `OPENDDE_HARNESS_WEIGHTS_DIR`); `ddeharness doctor --verify-hashes` reports which required file is missing or mismatched. |
 | Docker or NVIDIA runtime unavailable | Install/start Docker and configure NVIDIA Container Toolkit on the compute host. The client installer does not provision these system components. |
 | MSA search times out | Inspect the existing job and upstream response before retrying. Confirm alignment files and depth before binding them to the design. |
-| Design task fails at cycle 0 on a ProTrek call | The default endpoint is `http://search-protrek.com/`; the upstream service serves no TLS, so an `https://` value in `PROTREK_ENDPOINT` hangs until the connect timeout. Check that first, then whether the compute container has any route to it. Optional services no longer fail a run, so update the compute code first. Then check `ddeharness doctor --compute-only`, which prints one line per optional external service, and give the container egress: export `http_proxy`/`https_proxy` before `ddeharness onboard` (a host loopback proxy is rewritten to `host.docker.internal`), or set `compute_docker.env` in `~/.opendde_harness/config.json`. Set `PROTREK_ENDPOINT=""` to disable the search instead. |
+| Design task fails at cycle 0 on a ProTrek call | The configured default is `http://search-protrek.com/`; use the protocol supported by your service instead of only changing the URL scheme. Check that first, then whether the compute container has any route to it. Optional services no longer fail a run, so update the compute code first. Then check `ddeharness doctor --compute-only`, which prints one line per optional external service, and give the container egress: export `http_proxy`/`https_proxy` before `ddeharness onboard` (a host loopback proxy is rewritten to `host.docker.internal`), or set `plugins.config["protein-design"].compute_docker.env` in `~/.opendde_harness/config.json` after onboarding, then restart idle compute with the saved settings. Set `PROTREK_ENDPOINT=""` to disable the search instead. |
 | Target MSA search reports the server is unreachable | The error names the endpoint and the proxy option. Confirm the container's egress the same way as above, then rerun; `MMSEQS_SERVICE_HOST_URL` selects a private MMseqs service. |
 | Provider rejects a request | Record the model, operation and sanitized error. Verify the provider supports the requested parameters and tools; do not silently change scientific settings. |
 | Missing dashboard structure or I/O | Check task artifacts and recorded events. Historical payloads cannot be recovered merely by refreshing the UI. |
@@ -40,10 +40,12 @@ While it runs, read its log on the compute host:
 
 ```bash
 ddeharness doctor --compute-only
-docker logs --tail=100 opendde-compute-<code-id>
+docker logs --tail=100 CONTAINER_NAME
 ```
 
-Once it has exited the log is gone with the container; reproduce the failure
+Replace `CONTAINER_NAME` with the name printed by `doctor`, such as
+`opendde-compute-` followed by its code ID. Once the container has exited, its
+Docker log is gone; reproduce the failure
 by starting a task or rerunning onboarding, which waits up to 90 seconds for
 readiness and prints the service's last error. Check readiness and authentication through onboarding
 at the configured Harness compute URL. For an older custom or Compose

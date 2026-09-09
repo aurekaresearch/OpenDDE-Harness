@@ -1,6 +1,7 @@
 [project]
 name = "opendde-harness"
 version = "0.0.1"
+readme = "README.md"
 description = "OpenDDE Harness - antibody design harness: agent runtime, protein-design plugin, and compute service"
 requires-python = ">=3.12"
 license =  "Apache-2.0"
@@ -129,6 +130,7 @@ include = [
     "ui-tui/dist/entry.js",
     "hatch_build.py",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
 ]
 
@@ -179,11 +181,6 @@ ignore = ["E501"]
 "opendde_harness/cli/doctor_commands.py" = ["S101"]
 "opendde_harness/cli/onboard_commands.py" = ["S101"]
 "opendde_harness/memory_engine/contract_test.py" = ["S101"]
-
-# scripts/: dev utilities; partial-path subprocess.
-"scripts/check_commit_file.py" = ["S607"]
-"scripts/check_commit_messages.py" = ["S607"]
-"scripts/check_large_files.py" = ["S607"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -17,7 +17,6 @@ from rich.console import Console
 
 from opendde_harness.cli._download import DownloadError, download_file, new_client
 
-# Pinned Node.js release. install.sh and install.ps1 read this line; keep its format.
 NODE_VERSION = "22.20.0"
 NODE_DIST = "https://nodejs.org/dist"
 DISABLE_ENV = "OPENDDE_HARNESS_NO_NODE_INSTALL"
@@ -118,7 +117,9 @@ def install_node(
             digest = expected_sha256(fetch(f"{NODE_DIST}/v{NODE_VERSION}/SHASUMS256.txt"), archive)
             download([url], staging / archive, sha256=digest, description=archive, console=console)
         except (httpx.HTTPError, DownloadError, NodeRuntimeError, OSError) as exc:
-            raise NodeRuntimeError(f"Node.js download or verification failed for {url}: {exc}. {_MANUAL_OPTIONS}") from exc
+            raise NodeRuntimeError(
+                f"Node.js download or verification failed for {url}: {exc}. {_MANUAL_OPTIONS}"
+            ) from exc
         try:
             _extract(staging / archive, staging)
         except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
@@ -131,7 +132,9 @@ def install_node(
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     try:
-        version = subprocess.run([str(binary), "--version"], capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+        version = subprocess.run(
+            [str(binary), "--version"], capture_output=True, text=True, timeout=10, check=True
+        ).stdout.strip()
     except (OSError, subprocess.SubprocessError) as exc:
         shutil.rmtree(destination, ignore_errors=True)
         raise NodeRuntimeError(

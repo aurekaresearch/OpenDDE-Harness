@@ -23,7 +23,10 @@ while [[ "${1:-}" == --* ]]; do
     shift
 done
 metadata=$(python3 -c 'import hashlib,json,sys; p=json.load(open(sys.argv[1])); print(p["id"],p["image"],p["cuda_image"],p["uv_image"],p["foldmason_revision"],hashlib.sha256(json.dumps(p,sort_keys=True,separators=(",", ":")).encode()).hexdigest(),sep="\n")' "$script_dir/environment.json")
-mapfile -t environment <<< "$metadata"
+environment=()
+while IFS= read -r value; do
+    environment+=("$value")
+done <<< "$metadata"
 [[ ${#environment[@]} -eq 6 && "${environment[0]}" =~ ^[a-z0-9][a-z0-9._-]*$ && "${environment[4]}" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid environment.json" >&2; exit 2; }
 image_names=("${@:-${environment[1]}}")
 mirror_prefix="${DOCKER_MIRROR_PREFIX-m.daocloud.io}"

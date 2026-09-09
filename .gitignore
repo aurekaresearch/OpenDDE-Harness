@@ -52,39 +52,4 @@ tmp.sh
 # SkillForge dense retrieval cache (auto-built per-deployment, never tracked)
 .skill_index/
 .cache/skill_index/
-
-# Large benchmark datasets — download via `hf download gilfastino/PROBE` on demand
-benchmarks/proactivity_eval/data/probe/inputs/
-benchmarks/proactivity_eval/data/probe/outputs/
-benchmarks/proactivity_eval/data/probe/*.zip
-benchmarks/proactivity_eval/data/probe/.cache/
-
-# Eval run artifacts (benchmark products — reproducible via runners, no need to track)
-benchmarks/clawbench/results/
-benchmarks/pinchbench/benchmark.log
-benchmarks/pinchbench/results/*.json
-benchmarks/proactivity_eval/output/**/*.json
-benchmarks/proactivity_eval/output/**/*.md
-benchmarks/proactivity_eval/output/**/*.log
-benchmarks/proactivity_eval/output/**/*.jsonl
-
-# Local-only Streamlit inspector for output/ (depends on gitignored eval data)
-benchmarks/proactivity_eval/viewer/
-
-# Runner per-user config overrides (tracked: runners.config.yaml)
-benchmarks/proactivity_eval/runners.config.local.yaml
-benchmarks/proactivity_eval/runners/benchmarks/*/*.local.yaml
-benchmarks/proactivity_eval/runners/agents/*/*.local.yaml
-
-# Discovery-case simulator artifacts — regenerated per sim run, not fixtures
-benchmarks/proactivity_eval/data/discovery/*/sessions/
-benchmarks/proactivity_eval/data/discovery/*/.learnings/
-benchmarks/proactivity_eval/data/discovery/*/memory/*.lock
-
-# Discovery-case simulator: agent tool-use outputs from sim runs
-# (LLM emits these into the workspace; vary per run, not fixtures)
-benchmarks/proactivity_eval/data/discovery/*/auth_*.md
-benchmarks/proactivity_eval/data/discovery/*/auth_*.py
-benchmarks/proactivity_eval/data/discovery/*/cache_*.md
-benchmarks/proactivity_eval/data/discovery/*/rate_limit_*.py
-benchmarks/proactivity_eval/data/discovery/*/weekly_status_*.md
+.ruff_cache/

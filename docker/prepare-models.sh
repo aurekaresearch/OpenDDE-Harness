@@ -8,7 +8,8 @@ destination="${1:?Expected an empty staging directory}"
 mpnn_dir="${SOLUBLE_MPNN_WEIGHTS:-$project_root/external/ligandmpnn/model_params}"
 esm_cache="${ESM_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}}"
 opendde_root="${OPENDDE_ROOT_DIR:-$HOME/.cache/opendde}"
-checkpoint="${OPENDDE_CHECKPOINT:-$opendde_root/checkpoint/opendde.pt}"
+checkpoint="${OPENDDE_CHECKPOINT:-$opendde_root/checkpoint/opendde_abag.pt}"
+checkpoint_name="$(basename "$checkpoint")"
 common_dir="${OPENDDE_COMMON_DIR:-$opendde_root/common}"
 esm_repo="models--facebook--esm2_t33_650M_UR50D"
 esm_source="$esm_cache/$esm_repo/snapshots/$ESM_REV"
@@ -31,11 +32,11 @@ done
 printf '%s' "$ESM_REV" > "$destination/huggingface/$esm_repo/refs/main"
 cp "$script_dir/model-checksums.sha256" "$destination/SHA256SUMS"
 (cd "$destination" && sha256sum --check SHA256SUMS)
-cp -L "$checkpoint" "$destination/checkpoint/opendde.pt"
+cp -L "$checkpoint" "$destination/checkpoint/$checkpoint_name"
 for name in "${common_names[@]}"; do
     cp -L "$common_dir/$name" "$destination/common/$name"
 done
 cp "$script_dir/ESM-LICENSE.txt" "$destination/ESM-LICENSE.txt"
-(cd "$destination" && sha256sum checkpoint/opendde.pt common/* >> SHA256SUMS)
+(cd "$destination" && sha256sum "checkpoint/$checkpoint_name" common/* >> SHA256SUMS)
 chmod -R a+rX "$destination"
-echo "Prepared external OpenDDE, SolubleMPNN, ESM-2 650M and common data. Mount this directory read-only at /weights."
+echo "Prepared external OpenDDE, SolubleMPNN, ESM-2 650M and common data. Mount this directory read-only at /weights and /opendde for local folding."

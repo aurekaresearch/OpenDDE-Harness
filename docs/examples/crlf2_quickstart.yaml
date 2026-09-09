@@ -1,7 +1,7 @@
 # OpenDDE Harness TUI protein-design quickstart using a validated CRLF2-VHH complex.
 #
-# Copy the quickstart TUI prompt from this directory's README.md after compute is ready.
-# Outputs are task-scoped automatically under ~/.opendde_harness/protein_design/<task_id>/.
+# After compute setup, ask the TUI to review and run this YAML by its absolute path.
+# Task state defaults to ~/.opendde_harness/protein_design/<task_id>/; compute outputs live on the compute host.
 # Long-term cases and learned skills use protein-design/CRLF2 because target.name
 # below is CRLF2. The target name is used exactly as written.
 
@@ -27,7 +27,7 @@ design:
   router_skill_probabilities:
     cdr-point-mutation: 0.65
     cdr-full-redesign: 0.10
-    antibody-inverse-folding: 0.15  # SolubleMPNN; prepare its checkpoint in the compute image.
+    antibody-inverse-folding: 0.15  # SolubleMPNN; prepare its checkpoint on the compute host.
     esm2-guided-mutation: 0.10
 
   esm_device: cuda:0
@@ -35,7 +35,7 @@ design:
     enabled: false
 
 fold:
-  # All bundled design examples use OpenDDE for the primary search fold.
+  # These local-folding settings need adaptation for API mode; see docs/protein-design.md.
   model: opendde
   gpus: "0,1,2,3,4,5,6,7"
   enable_batch_inference: true

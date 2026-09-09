@@ -99,7 +99,7 @@ load-balanced; if no registry exists, the plugin-level `compute_url` (default
 
 ### Place jobs on GPUs inside one worker
 
-One compute worker sees every GPU of its host and leases them per job. A fold
+One compute worker sees the GPUs exposed to its container and leases them per job. A fold
 holds its GPUs exclusively; ESM-2 and SolubleMPNN take one GPU each and share it
 with other short jobs, up to `OPENDDE_HARNESS_SHARED_JOBS_PER_GPU` (default 2),
 but never with a running fold. Jobs on disjoint GPUs run at the same time.
@@ -127,10 +127,12 @@ the same inventory as `compute.gpus`.
 An unused service exits after `OPENDDE_HARNESS_COMPUTE_IDLE_SECONDS` (default
 600) without work, so its GPUs return to the host.
 
-For a remote worker, set `OPENDDE_HARNESS_PROTEIN_DESIGN_HOST` to the server's
-trusted cluster interface (it defaults to `127.0.0.1`), and set the same
-non-empty `OPENDDE_HARNESS_PROTEIN_DESIGN_TOKEN` on the service and
-`compute_token` in OpenDDE Harness. Do not expose this API directly to an
+When serving compute directly on a prepared Linux host with `ddeharness compute
+serve`, set `OPENDDE_HARNESS_PROTEIN_DESIGN_HOST` to its trusted cluster interface
+(the default is `127.0.0.1`). Set the same non-empty
+`OPENDDE_HARNESS_PROTEIN_DESIGN_TOKEN` on the service and `compute_token` in the
+client. Locally managed containers remain bound to host loopback; an environment
+variable alone does not expose their port remotely. Do not expose this API directly to an
 untrusted network.
 
 ## Start compute
@@ -166,8 +168,8 @@ containers only after active tasks finish.
 ### Use the hosted OpenDDE folding API
 
 OpenDDE itself does not have to be installed on the compute worker when folding
-uses the asynchronous job API. The Harness compute service still runs the gate,
-ESM-2, population, and structure-analysis operations, while fold/refold requests
+uses the asynchronous job API. The Harness compute service still runs ESM2, SolubleMPNN, structural analysis,
+and population storage. The client applies gates and admission decisions, while fold/refold requests
 are submitted remotely and their ZIP artifacts are copied into the task output:
 
 ```yaml
@@ -187,9 +189,10 @@ fold:
 The URL can instead be supplied to the compute service as
 `OPENDDE_HARNESS_OPENDDE_API_URL`. The wizard no longer asks for an upstream API
 token and the compute service sends none; the hosted folding API is unauthenticated.
-The remote service owns GPU scheduling and MSA/template
-preparation, so `gpus`, local MSA paths, and local OpenDDE model paths do not
-control remote execution.
+The remote service owns GPU scheduling and MSA/template preparation. Local GPU
+and model paths do not control remote folding. Local `pairedMsaPath` or
+`unpairedMsaPath` values and `use_msa: false` are rejected in API mode; remove
+local MSA settings when adapting an example.
 
 For API folding, use onboarding's API mode or connect to an existing prepared
 compute service. A newly created local container still needs the prepared
@@ -206,7 +209,7 @@ missing confidence artifacts cause scoring to fail, not fall back to ipTM.
 
 ## Use from OpenDDE Harness
 
-In the TUI, ask to run a named example, provide a YAML path, or describe a new antibody design. The `protein-design` Skill first calls the read-only `protein_design_context` tool for verified example paths and credential-free compute/folding defaults. The CLI equivalent is `ddeharness protein-design context --json`. Existing example settings are reused; new designs require resolving missing target facts and scaffold choices. Only unresolved choices are asked, not three mandatory review rounds. The final validated configuration is summarized with an explicit question approving it and authorizing launch. Only an affirmative reply lets the agent call `protein_design_start` with `user_confirmed: true`. Context and validation do not check live service readiness or bind a worker. Status, adjustment, stop, candidates, and confirmed target-only MSA tools remain available. Each task runs in a detached worker under `~/.opendde_harness/protein_design/<task_id>`; closing or restarting the TUI does not stop it. Long folding work runs as an asynchronous compute job and the task records design cases through the configured long-term memory backend.
+In the TUI, ask to run a named example, provide a YAML path, or describe a new antibody design. The `protein-design` Skill first calls the read-only `protein_design_context` tool for verified example paths and credential-free compute/folding defaults. The CLI equivalent is `ddeharness protein-design context --json`. Existing example settings are reused; new designs require resolving missing target facts and scaffold choices. Only unresolved choices are asked, not three mandatory review rounds. The final validated configuration is summarized with an explicit question approving it and authorizing launch. Only an affirmative reply lets the agent call `protein_design_start` with `user_confirmed: true`. Context queries `/health` for GPU information without starting a service or binding a worker. Validation checks configuration only; neither is a full readiness check. Status, adjustment, stop, candidates, and confirmed target-only MSA tools remain available. Each task runs in a detached worker under `~/.opendde_harness/protein_design/<task_id>`; closing or restarting the TUI does not stop it while the client host remains running. Long folding work runs as an asynchronous compute job and the task records design cases through the configured long-term memory backend.
 
 Bundled YAML examples live in the repository's `docs/examples/` and
 are available through the TUI or CLI: `crlf2_quickstart.yaml` and
@@ -215,7 +218,7 @@ without requiring an example README or searching the whole filesystem.
 The final question combines configuration approval and launch authorization.
 
 The same reviewed YAML can be launched without the TUI, from the repository root
-(these CLI commands start directly without interactive confirmation):
+(`validate` only checks; `start` launches without interactive confirmation):
 
 ```bash
 ddeharness protein-design validate --config docs/examples/crlf2_quickstart.yaml
@@ -272,8 +275,11 @@ The CLI launcher does not perform this interactive preparation step.
 
 ## External services
 
-Two of the compute service's lookups leave the container. Both are optional
-enrichment: when they are unreachable, the design run continues without them.
+ProTrek and the target MSA service are external lookups used by the compute
+service. Optional enrichment can report an unavailable result without stopping
+the design. An explicitly requested target MSA search is required by default and
+reports an error when it cannot complete. API folding also uses an external
+service and is required when that folding mode is selected.
 
 | Service | Default endpoint | Used by | Setting |
 | --- | --- | --- | --- |
@@ -287,8 +293,8 @@ sees plain text saying the search is unavailable, and the cycle is neither
 retried nor counted as failed. Only an explicitly requested target MSA search
 fails loudly, and its error names the endpoint and the proxy option.
 
-The ProTrek endpoint is plain HTTP: the upstream service serves no TLS, and an
-`https://` URL hangs until the connect timeout rather than failing fast. The
+The configured ProTrek default uses plain HTTP. Use the protocol supported by
+your deployment; changing the scheme alone does not enable TLS. The
 request carries only the query sequence, or the query structure file for a
 structure search; no task identifiers, credentials or design context leave the
 container. Point `PROTREK_ENDPOINT` at a private deployment to keep the traffic
@@ -314,15 +320,22 @@ variables before running `ddeharness onboard`.
 `PROTREK_ENDPOINT`, `MMSEQS_SERVICE_HOST_URL`, `OPENDDE_HARNESS_MSA_SERVER_MODE`
 and `OPENDDE_HARNESS_MSA_SEARCH_TIMEOUT` are passed through from the host when
 they are set. To pin them regardless of the host environment, add an explicit
-mapping under `compute_docker` in `~/.opendde_harness/config.json`:
+mapping under `plugins.config["protein-design"].compute_docker` in
+`~/.opendde_harness/config.json`. Merge this into the existing configuration:
 
 ```json
 {
-  "compute_docker": {
-    "env": {
-      "PROTREK_ENDPOINT": "",
-      "MMSEQS_SERVICE_HOST_URL": "https://msa.internal.example/api/msa",
-      "https_proxy": "http://proxy.internal.example:3128"
+  "plugins": {
+    "config": {
+      "protein-design": {
+        "compute_docker": {
+          "env": {
+            "PROTREK_ENDPOINT": "",
+            "MMSEQS_SERVICE_HOST_URL": "https://msa.internal.example/api/msa",
+            "https_proxy": "http://proxy.internal.example:3128"
+          }
+        }
+      }
     }
   }
 }
@@ -331,7 +344,9 @@ mapping under `compute_docker` in `~/.opendde_harness/config.json`:
 Those values win over the host environment. Variables onboarding owns itself
 (the compute token, `PYTHONPATH`, `PROTEIN_DESIGN_OUTPUT_PATH` and the
 `STRUCTPRED_*` paths) are rejected. Settings changes apply the next time the
-container starts.
+container starts. Add this mapping after onboarding: the local wizard currently
+rebuilds `compute_docker` without retaining `env`. Stop the idle container with
+`ddeharness compute stop`, then let the next task start it with these overrides.
 
 ## Long-term memory scope
 
@@ -387,9 +402,7 @@ best effort and cannot fail the scientific design run.
 
 ## Validation
 
-The integration tests cover the REST contract, asynchronous fold jobs,
-provider-backed structured output retry, deterministic orchestration,
-population updates, memory hooks, bundled tool discovery, and packaged skill
-discovery. Scientific regression runs additionally compare format compliance,
-fold success, candidate ranking, and selection distributions against frozen
-reference manifests.
+Run `uv run pytest -q` from the source checkout. The tests cover REST contracts,
+job scheduling, structured-output handling, orchestration, memory hooks, and
+plugin discovery. Real model inference and external-service availability require
+validation on the intended compute deployment.

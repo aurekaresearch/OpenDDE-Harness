@@ -1,74 +1,79 @@
-# Release build — DRAFT.
-#
-# Goal: produce a wheel that ships a fresh, self-contained TUI bundle
-# (ui-tui/dist/entry.js) so `pip`/`uv tool install` yields a working
-# `ddeharness tui` with no source checkout and no npm build on the user's machine.
-#
-# This is the "self-maintaining" piece: every tagged release rebuilds
-# entry.js from the current ui-tui/ source, so the packaged TUI can never drift
-# behind the Python code. Do NOT commit dist/entry.js to git — it is a build
-# artifact produced here.
-#
-# Trigger: push a version tag (v1.2.3) or run manually.
-name: release
+name: Release version tag
 
 on:
   push:
     tags:
-      - "v*"
-  workflow_dispatch: {}
+      - "v*.*.*"
+
+permissions:
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-wheel:
+  build:
+    name: Validate and build once
+    if: github.repository == 'aurekaresearch/OpenDDE-Harness'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      # 1) Node toolchain to build the TUI bundle.
+      - name: Require a release commit from main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.12"
+
+      - name: Validate release metadata and render notes
+        run: >-
+          uv run --no-project --python 3.12 python scripts/render_release_notes.py
+          --tag "$GITHUB_REF_NAME" --output release/RELEASE_NOTES.md
+
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: ui-tui/package-lock.json
 
-      # 2) Build the self-contained bundle into ui-tui/dist/entry.js.
-      #    esbuild bundles react/ink in — no node_modules ships in the wheel.
-      - name: Build TUI bundle
-        working-directory: ui-tui
+      - name: Install dependencies
         run: |
-          npm ci
-          npm run build
-          test -f dist/entry.js  # fail fast if the bundle didn't land
+          npm ci --prefix ui-tui
+          uv sync --locked --extra dev --dev
 
-      # 3) Build the wheel directly from the checkout so the freshly generated
-      #    ui-tui/dist/entry.js is visible to Hatch's conditional build hook.
-      #    Then build the sdist separately. A combined `uv build` first creates
-      #    an sdist and then builds the wheel from that sdist, which drops this
-      #    gitignored bundle before the wheel hook can include it.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
-
-      - name: Build wheel + sdist
+      - name: Test release source
         run: |
-          uv build --wheel
-          uv build --sdist
+          make lint-python
+          uv run pytest -q
+          npm run lint --prefix ui-tui
+          npm run lint:rpc --prefix ui-tui
+          npm run type-check --prefix ui-tui
+          npm test --prefix ui-tui
 
-      # 4) Sanity gate: the wheel MUST contain the bundle and MUST NOT carry
-      #    node_modules or ui-tui sources (keeps the wheel lean and the smoke honest).
-      - name: Verify wheel contents
+      - name: Build TUI and release distributions
+        run: |
+          npm run build --prefix ui-tui
+          uv build --out-dir release/packages --no-create-gitignore
+          uvx twine check --strict release/packages/*
+
+      - name: Verify distribution contents
         run: |
           python3 - <<'PY'
-          import configparser, glob, sys, zipfile
-          whl = sorted(glob.glob("dist/*.whl"))[-1]
+          import configparser, glob, tarfile, zipfile
+          whl = sorted(glob.glob("release/packages/*.whl"))[-1]
           archive = zipfile.ZipFile(whl)
           names = archive.namelist()
           assert "opendde_harness/ui-tui/dist/entry.js" in names, "entry.js missing from wheel"
           assert not any("node_modules" in n for n in names), "node_modules leaked into wheel"
-          # The only ui-tui/ entry must be the bundle — no TS source, no stray files.
           ui = [n for n in names if "ui-tui/" in n]
           assert ui == ["opendde_harness/ui-tui/dist/entry.js"], f"unexpected ui-tui entries: {ui}"
           entries = next(n for n in names if n.endswith(".dist-info/entry_points.txt"))
@@ -80,99 +85,100 @@ jobs:
               assert f"opendde_harness/cli/{name}" in names, f"runtime preparation resource missing: {name}"
           assert not any(n.startswith(("external/opendde/", "external/ligandmpnn/", "external/plip/", "external/foldmason/")) for n in names), "upstream checkout leaked into wheel"
           assert not any(n.endswith((".pt", ".ckpt", ".safetensors")) for n in names), "model weights leaked into wheel"
-          print(f"OK: {whl} ships only entry.js under ui-tui/, no node_modules")
+          with tarfile.open(glob.glob("release/packages/*.tar.gz")[0]) as sdist:
+              assert any(n.count("/") == 1 and n.endswith("/CHANGELOG.md") for n in sdist.getnames()), "CHANGELOG.md missing from sdist"
+          print(f"OK: {whl} ships only entry.js under ui-tui/, no node_modules; sdist includes CHANGELOG.md")
           PY
 
-      # 4b) Export the locked dependency set as a constraints file. The install
-      #     scripts pass this to `uv tool install -c` so a one-click install gets
-      #     the exact versions we lock and test, instead of re-resolving to the
-      #     newest versions allowed by pyproject (which drifts, and can pull a
-      #     source-only build with no wheel on the user's platform). --locked
-      #     fails the release if uv.lock is stale vs pyproject, so we never ship
-      #     constraints that conflict with the wheel's own metadata.
-      - name: Export locked constraints
-        run: uv export --locked --all-extras --no-hashes --no-emit-project -o dist/opendde-harness-constraints.txt
+      - name: Export locked constraints and checksums
+        run: |
+          uv export --locked --no-dev --no-hashes --no-emit-project -o release/opendde-harness-constraints.txt
+          (cd release/packages && sha256sum *) > release/SHA256SUMS
 
-      - name: Test installed CLI and TUI outside the checkout
+      - name: Test installed wheel and sdist outside the checkout
         env:
-          UV_TOOL_DIR: ${{ runner.temp }}/ddeharness-smoke/tools
-          UV_TOOL_BIN_DIR: ${{ runner.temp }}/ddeharness-smoke/bin
           UV_LINK_MODE: copy
+        shell: bash
         run: |
-          wheels=("$GITHUB_WORKSPACE"/dist/*.whl)
-          uv tool install --python 3.12 -c dist/opendde-harness-constraints.txt "${wheels[0]}"
-          cd "$RUNNER_TEMP"
-          "$UV_TOOL_BIN_DIR/ddeharness" --version
-          "$UV_TOOL_BIN_DIR/ddeharness" --help
-          "$UV_TOOL_BIN_DIR/ddeharness" tui --check
+          shopt -s nullglob
+          wheels=("$GITHUB_WORKSPACE"/release/packages/*.whl)
+          sdists=("$GITHUB_WORKSPACE"/release/packages/*.tar.gz)
+          if (( ${#wheels[@]} != 1 || ${#sdists[@]} != 1 )); then
+            echo "Expected exactly one wheel and one source archive" >&2
+            exit 1
+          fi
+          for kind in wheel sdist; do
+            if [[ "$kind" == wheel ]]; then
+              artifact="${wheels[0]}"
+            else
+              artifact="${sdists[0]}"
+            fi
+            export UV_TOOL_DIR="$RUNNER_TEMP/ddeharness-$kind/tools"
+            export UV_TOOL_BIN_DIR="$RUNNER_TEMP/ddeharness-$kind/bin"
+            uv tool install --python 3.12 -c "$GITHUB_WORKSPACE/release/opendde-harness-constraints.txt" "$artifact"
+            (
+              cd "$RUNNER_TEMP"
+              "$UV_TOOL_BIN_DIR/ddeharness" --version
+              "$UV_TOOL_BIN_DIR/ddeharness" --help
+              "$UV_TOOL_BIN_DIR/ddeharness" tui --check
+            )
+          done
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: dist
-          path: dist/*
+          name: release-${{ github.ref_name }}
+          path: release
+          if-no-files-found: error
+          retention-days: 14
 
-      # 5) On a version tag, publish a DRAFT GitHub Release with the built
-      #    wheel + sdist attached. install.sh resolves the wheel from the
-      #    latest Release asset, so a human reviews the draft and clicks
-      #    Publish to make it live. Manual dispatch (no tag) stops after the
-      #    artifact upload above.
-      - name: Check tag matches pyproject version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          tag="${{ github.ref_name }}"
-          v=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
-          base="${tag#v}"; base="${base%%-*}"   # v0.1.3-rc1 -> 0.1.3
-          [ "$base" = "$v" ] || { echo "tag $tag does not match pyproject version $v"; exit 1; }
+  publish-pypi:
+    name: Publish immutable PyPI files
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/opendde-harness
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ github.ref_name }}
+          path: release
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: release/packages
 
+  github-release:
+    name: Create draft GitHub Release from the same build
+    needs: [build, publish-pypi]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ github.ref_name }}
+          path: release
       - name: Create draft GitHub Release with assets
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
         run: |
-          tag="${{ github.ref_name }}"
-          repo="${{ github.repository }}"
+          tag="$GITHUB_REF_NAME"
           ver="${tag#v}"
-          today="$(date -u +%Y-%m-%d)"
-          # prerelease tags (contain a hyphen, e.g. v0.1.3-rc1) must never become
-          # /releases/latest, which install.sh serves to curl|sh users.
-          pre=""
-          case "$tag" in *-*) pre="--prerelease" ;; esac
-          # Prefill notes from the template; the summary and Highlights stay TODO
-          # for a human to fill in the draft before publishing.
-          sed "s/__VERSION__/$ver/g; s/__TAG__/$tag/g" \
-            .github/release-notes-template.md > "$RUNNER_TEMP/notes.md"
-          # Detect an existing release via the LIST endpoint: the tag endpoint is
-          # published-only and the Actions token cannot see a draft through it
-          # (cli/cli #3037), so a re-run would 422 on create. Delete a stale draft
-          # (this keeps the git tag) and recreate; leave a published release alone.
-          rel=$(gh api "repos/$repo/releases?per_page=100" --jq "map(select(.tag_name==\"$tag\"))[0] // {}")
-          id=$(printf '%s' "$rel" | jq -r '.id // empty')
-          isdraft=$(printf '%s' "$rel" | jq -r '.draft // false')
-          if [ -n "$id" ] && [ "$isdraft" = "true" ]; then
-            gh api -X DELETE "repos/$repo/releases/$id"
-            id=""
+          pre=()
+          if [[ "$ver" =~ (a|b|rc)[0-9]+$ ]]; then
+            pre=(--prerelease)
           fi
-          if [ -z "$id" ]; then
-            draft_url=$(gh release create "$tag" dist/*.whl dist/*.tar.gz dist/opendde-harness-constraints.txt \
-              --title "OpenDDE Harness $ver ($today)" --notes-file "$RUNNER_TEMP/notes.md" --draft $pre)
-            # A draft lives at releases/tag/untagged-<hash> and keeps serving that
-            # stale page after publication, with no redirect to the real tag. Print
-            # both URLs so nobody shares the draft one by copying the address bar.
-            {
-              echo "### Release $tag"
-              echo ""
-              echo "- Draft (temporary, do not share): $draft_url"
-              echo "- Public URL once published: https://github.com/$repo/releases/tag/$tag"
-            } >> "$GITHUB_STEP_SUMMARY"
+          existing=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq "map(select(.tag_name==\"$tag\"))[0].id // empty")
+          if [ -z "$existing" ]; then
+            gh release create "$tag" release/packages/* release/opendde-harness-constraints.txt release/SHA256SUMS \
+              --verify-tag --title "OpenDDE Harness $ver" \
+              --notes-file release/RELEASE_NOTES.md --draft "${pre[@]}"
           else
-            echo "Release $tag already published (id=$id); leaving as-is."
-            echo "Release $tag already published: https://github.com/$repo/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+            echo "Release $tag already exists; leaving it unchanged."
           fi
-
-      # (Optional, wire up when ready) publish to PyPI on tag:
-      # - name: Publish to PyPI
-      #   if: startsWith(github.ref, 'refs/tags/v')
-      #   run: uv publish
-      #   env:
-      #     UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}

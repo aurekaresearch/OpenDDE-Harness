@@ -1,6 +1,13 @@
 # OpenDDE Harness
 
-![tui](docs/assets/tui_2.png)
+
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+![Status](https://img.shields.io/badge/status-preview-orange)
+[![PyPI](https://img.shields.io/pypi/v/opendde-harness.svg?cacheSeconds=300)](https://pypi.org/project/opendde-harness/)
+
+
+![tui](docs/assets/tui.png)
 
 Harness for agentic antibody design: prepare targets, optimize CDR sequences, predict structures with OpenDDE, and inspect results. Supports VHH, scFv and paired VH/VL binders while preserving configured fixed residues.
 
@@ -8,60 +15,130 @@ Harness for agentic antibody design: prepare targets, optimize CDR sequences, pr
 - Generate antibody sequences through LLM reasoning and structural verification.
 - Agentic evolutional discovery for antibody design.
 
-[Technical report ](docs/assets/OpenDDE_harness.pdf) · [Installation](docs/installation.md) · [Onboarding](docs/onboarding.md) · [Design workflow](docs/design-workflow.md) · [Examples](docs/examples/) · [Troubleshooting](docs/troubleshooting.md)
+> [!NOTE]
+> OpenDDE Harness is an early preview, and you may encounter bugs. If something
+> goes wrong, please [open an issue](https://github.com/aurekaresearch/OpenDDE-Harness/issues)
+> with steps to reproduce it and your `ddeharness doctor --json` output.
+> Your feedback helps us fix problems and improve the tool together.
 
-## Quick Start
 
-### 1. Install the client
+## News
 
-The PyPI distribution is **`opendde-harness`**; the installed command is **`ddeharness`**.
-Once the release is published, install its wheel with:
+- **2026-09-09: Introducing OpenDDE Harness (preview) for agentic antibody design! Read the [technical report](docs/assets/OpenDDE_harness_tech_report.pdf).**
+    - Design VHH, scFv, and paired VH/VL binders with LLM-guided sequence optimization and OpenDDE structure prediction.
+    - Get started with the [installation guide](docs/installation.md), [onboarding](docs/onboarding.md), and [design examples](docs/examples/).
+    - Inspect candidate sequences, structures, and design progress in the [tracing dashboard](docs/tracing-board.md).
+
+See the [changelog](CHANGELOG.md) for release details.
+
+## Installation
+
+Use a Linux or macOS client with Python 3.12 or newer. Native Windows is not
+currently supported. Use
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/) to install the
+`opendde-harness` package and its `ddeharness` command in an isolated environment.
+Choose one of the following methods; no environment activation is needed.
+
+### Install from PyPI
 
 ```bash
 uv tool install --python 3.12 opendde-harness
-ddeharness --version
 ```
 
-The release wheel includes the built TUI, which runs on Node.js 22+. When the client has no Node.js 22+, the first `ddeharness` run installs a private Node.js runtime under `~/.opendde_harness/runtime/` after printing a notice; set `OPENDDE_HARNESS_NODE` to use your own Node executable, or `OPENDDE_HARNESS_NO_NODE_INSTALL=1` to forbid the automatic installation.
-For a source installation:
+The release wheel includes the built terminal UI.
 
-On Linux x86-64, with Git, curl and repository access:
+To update a PyPI installation, close the TUI and run:
+
+```bash
+uv tool upgrade opendde-harness
+```
+
+### Install from source
+
+Install Git, uv, and Node.js 22 or newer with npm, then run:
 
 ```bash
 git clone https://github.com/aurekaresearch/OpenDDE-Harness.git
-cd opendde_harness
-uv tool install .
+cd OpenDDE-Harness
+uv tool install --python 3.12 .
 ```
 
-The installer prepares uv, Python 3.12 and Node.js as needed (a source build needs Node.js with npm before the client exists, so the installer provisions it; a wheel install leaves that to the first run), builds the terminal interface, and installs the standalone `ddeharness` command. No environment activation is needed. It does not pull/start Docker or download compute models.
+The package build compiles and includes the terminal UI automatically. To update,
+close the TUI, preserve any local edits, and run from the checkout:
 
-### 2. Prepare model assets
+```bash
+git pull --ff-only
+uv tool install --python 3.12 --reinstall .
+```
 
-On the compute host, after client installation:
+### After installation
+
+After either installation, verify the client:
+
+```bash
+ddeharness --version
+ddeharness --help
+ddeharness tui --check
+```
+
+If the command is not found, run `uv tool update-shell` and open a new terminal.
+Updates preserve configuration, results, and model data. Running compute
+containers keep their current code until they exit; later starts use the updated
+code. See the [installation guide](docs/installation.md) for runtime overrides,
+compute environments, and model download options.
+
+### Uninstall
+
+Close the TUI and remove the client with:
+
+```bash
+uv tool uninstall opendde-harness
+```
+
+Configuration, results, model data, and compute services are retained.
+
+## Quick Start
+
+### 1. Configure the client and compute
 
 ```bash
 ddeharness onboard
 ```
 
-This prepares the weights required by the configured folding mode outside the image. Without a configured mode, OpenDDE defaults to API access and only SolubleMPNN and ESM2 are prepared. Add `--mode local` to prepare OpenDDE checkpoint/common data. Onboarding can prepare these resources as part of setup.
+Follow the wizard to configure your LLM provider, optional memory, and a local
+Docker environment or existing Linux compute service. Choose API or local OpenDDE
+folding; both use the Harness compute service.
 
-The image contains only tool dependencies and binaries. Runtime code is prepared automatically from the installed release and pinned upstream sources, then mounted read-only. See [installation options](docs/installation.md) for custom data locations.
+Local compute requires Linux x86-64 and Docker; CUDA also requires NVIDIA drivers
+and NVIDIA Container Toolkit. See [onboarding](docs/onboarding.md) for setup and
+model preparation details.
 
-Local compute requires Linux x86-64 and Docker. Choose CPU or CUDA during onboarding; CUDA additionally requires compatible NVIDIA drivers and NVIDIA Container Toolkit. The same environment image serves both modes. A configured remote Linux compute service can be used without managing Docker on the client. macOS local compute is not supported.
+After setup, check your configuration, memory service, and compute readiness:
 
-Onboarding checks the environment contract, prepares versioned code and model assets, and starts the compute container after confirmation. From then on the container starts on demand when a task needs it and removes itself after 10 minutes idle; `ddeharness compute stop` stops it early. Onboarding never builds an image. The default tool environment is `aurekaresearch/opendde-harness:v1`; multiple Harness releases can reuse it. Code upgrades create a new directory and never modify code used by running containers.
+```bash
+ddeharness doctor
+```
 
-See [onboarding](docs/onboarding.md) for local/API folding and remote services.
+Use `ddeharness doctor --probe` to send a test message to your LLM, or
+`ddeharness doctor --compute-only` to check just the compute service. When
+reporting a problem, include `ddeharness doctor --json` output and your command
+or design request. See [troubleshooting](docs/troubleshooting.md) for common issues.
 
-### 4. Start a design
+### 2. Start a design
 
-In `ddeharness`, describe your task:
+Launch the terminal UI:
+
+```bash
+ddeharness
+```
+
+Then describe your task:
 
 > Design a VHH against human CRLF2. Verify the target and epitope, keep the framework fixed, and design CDRs. Show the plan and start only after I confirm.
 
 CLI-based design workflows are also supported. See the [CLI usage guide](docs/cli.md).
 
-### 5. Inspect results
+### 3. Inspect results
 
 ```bash
 ddeharness tracing
@@ -73,64 +150,12 @@ Open the printed URL and select **Protein design** to inspect sequences, structu
 
 ![Design progress, agent activity and candidate lineage](docs/assets/tracing_board_2.png)
 
-Tasks continue after the TUI closes. Default results are stored under `~/.opendde_harness/protein_design/<task_id>/`. See the [dashboard guide](docs/tracing-board.md).
-
-## Update or uninstall
-
-For a PyPI installation, exit the TUI and run:
-
-```bash
-uv tool upgrade opendde-harness
-```
-
-The updated client prepares a new code snapshot when needed and reuses a compatible
-tool environment. A running compute container keeps its original code until it exits when idle; the next start uses the new snapshot.
-
-Exit the TUI and preserve local edits before updating the source installation:
-
-```bash
-git pull --ff-only
-sh install.sh
-```
-
-This updates the client without changing configuration or a running container. Compute image updates are separate; the next container start uses the selected image.
-
-To remove only the client:
-
-```bash
-uv tool uninstall opendde-harness
-```
-
-Configuration, results, model data and compute services are retained. See [installation](docs/installation.md#update-and-uninstall).
-
-## Architecture & Structure
-
-The Python client runs agents and task orchestration; the Node.js terminal UI is its frontend. An on-demand Docker service runs scientific operations and exits when idle. The browser tracing board displays task state and results.
-
-```text
-opendde_harness/
-  agent/                     Agent runtime
-  cli/                       CLI and onboarding
-  config/                    Configuration models and updates
-  context_engine/            Context assembly
-  memory_engine/             Memory subsystems and SkillForge skills
-  plugin/memory/             Long-term memory backend
-  plugin/protein_design/     Workflow, task tools and compute API
-  providers/                 LLM integrations
-  sandbox/                   Command execution for the exec tool
-  security/                  Network and untrusted-content guards
-  session/                   Conversation sessions
-  spine/                     Turn scheduling backbone
-  templates/                 Workspace file templates
-  token_wise/                Token accounting around LLM calls
-  tracing/                   Traces and browser dashboard
-  tui_rpc/                   Terminal UI communication
-  utils/                     Shared helpers
-ui-tui/                      Terminal frontend
-docker/                      Maintainer-only image build files and checks
-docs/                        User and developer guides
-tests/                       Automated tests
-```
+Started design tasks run in background processes and continue after the TUI
+closes while the client host remains running. Task state and worker logs default
+to `~/.opendde_harness/protein_design/<task_id>/`; set
+`OPENDDE_HARNESS_PROTEIN_DESIGN_ROOT` to change the task root. With remote compute,
+original structure files are stored on the compute host, and the dashboard uses
+structures captured in the client's tracing data. See the [dashboard guide](docs/tracing-board.md).
 
 ## Development & License
 
@@ -139,6 +164,12 @@ See the [repository rules](AGENTS.md) and [compute image build instructions](doc
 Licensed under [Apache-2.0](LICENSE); see [third-party notices](LICENSES/README.md). TUI and memory foundations are adapted from [Raven](https://github.com/EverMind-AI/Raven), and long-term memory is served by [EverOS](https://github.com/EverMind-AI/EverOS). Models may have separate terms.
 
 Computational results require experimental validation. Model calls and compute may incur costs.
+
+## Citation and Acknowledgements
+
+If you use OpenDDE Harness in your work, please cite this software and the technical report linked above. When using OpenDDE for structure prediction, also cite the [OpenDDE technical report](https://arxiv.org/abs/2607.03787) and follow its [citation and acknowledgement guidance](https://github.com/aurekaresearch/OpenDDE#citation-and-acknowledgements). Cite the original methods for other models and tools used in your experiments, including SolubleMPNN and ESM2 when applicable.
+
+We acknowledge [Raven](https://github.com/EverMind-AI/Raven), [EverOS](https://github.com/EverMind-AI/EverOS), and the upstream projects listed in the [third-party notices](LICENSES/README.md). Their software and model licenses continue to apply.
 
 ## Partnership and Collaboration
 

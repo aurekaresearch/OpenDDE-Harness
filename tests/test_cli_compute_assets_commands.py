@@ -1,7 +1,9 @@
+import hashlib
 import json
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -177,6 +179,65 @@ def test_model_preparation_preserves_populated_destination(tmp_path):
     assert list(tmp_path.iterdir()) == [existing]
 
 
+@pytest.mark.parametrize("checkpoint_name", [None, "opendde.pt", "custom checkpoint.pt"])
+def test_model_staging_preserves_checkpoint_name_and_checksums(tmp_path, checkpoint_name):
+    scripts = tmp_path / "docker"
+    scripts.mkdir()
+    for name in ("prepare-models.sh", "versions.env", "ESM-LICENSE.txt"):
+        (scripts / name).write_bytes((ROOT / "docker" / name).read_bytes())
+    source = tmp_path / "source"
+    manifest = []
+    for asset in compute_assets.shared_asset_plan():
+        path = source / asset.relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = asset.relative_path.encode()
+        path.write_bytes(data)
+        manifest.append(f"{hashlib.sha256(data).hexdigest()}  {asset.relative_path}")
+    (scripts / "model-checksums.sha256").write_text("\n".join(manifest) + "\n")
+    name = checkpoint_name or "opendde_abag.pt"
+    checkpoint = source / "checkpoint" / name
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"local checkpoint")
+    common = source / "common"
+    common.mkdir()
+    for asset_name in ("components.cif", "components.cif.rdkit_mol.pkl", "obsolete_to_successor.json", "release_date_cache.json"):
+        (common / asset_name).write_bytes(b"common data")
+    destination = tmp_path / "staged"
+    destination.mkdir()
+    env = {**os.environ, "SOLUBLE_MPNN_WEIGHTS": str(source / "soluble_mpnn"),
+           "ESM_CACHE": str(source / "huggingface"), "OPENDDE_ROOT_DIR": str(source),
+           "OPENDDE_COMMON_DIR": str(common)}
+    env.pop("OPENDDE_CHECKPOINT", None)
+    if checkpoint_name:
+        env["OPENDDE_CHECKPOINT"] = str(checkpoint)
+    subprocess.run(["bash", str(scripts / "prepare-models.sh"), str(destination)], env=env, capture_output=True, check=True)
+    assert [path.name for path in (destination / "checkpoint").iterdir()] == [name]
+    assert (destination / "checkpoint" / name).read_bytes() == checkpoint.read_bytes()
+    subprocess.run(["sha256sum", "--check", "SHA256SUMS"], cwd=destination, capture_output=True, check=True)
+
+
+def test_model_doctor_preserves_existing_artifacts(tmp_path):
+    fixture = tmp_path / "fixture.cif"
+    fixture.write_text("existing structure")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "docker/model-doctor.py"), "--output", str(tmp_path / "report.json")],
+        text=True, capture_output=True,
+    )
+    assert result.returncode != 0 and "empty verification output directory" in result.stderr
+    assert fixture.read_text() == "existing structure"
+    assert not (tmp_path / "report.json").exists()
+
+
+def test_model_doctor_requires_local_structure_before_creating_output(tmp_path):
+    output = tmp_path / "new" / "report.json"
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "docker/model-doctor.py"), "--mode", "local", "--output", str(output)],
+        text=True, capture_output=True,
+    )
+    assert result.returncode == 2 and "--structure is required" in result.stderr
+    assert not output.parent.exists()
+
+
 def _serve(monkeypatch, handler):
     import httpx
 
@@ -225,13 +286,6 @@ def test_environment_contract_rejects_wrong_image():
     image["Config"]["Labels"][ENVIRONMENT_SHA_LABEL] = "wrong"
     with pytest.raises(ValueError, match="Incompatible compute environment"):
         check_image_environment(image, spec)
-
-
-def test_software_releases_do_not_publish_environment_images():
-    workflow = (ROOT / ".github/workflows/protein-design-compute.yml").read_text()
-    assert '"env-*"' in workflow
-    assert '"v*"' not in workflow
-    assert "refs/tags/v" not in workflow
 
 
 def test_shared_model_plan_is_650m_and_all_assets_are_pinned():

@@ -160,7 +160,7 @@ def find_node() -> Tuple[Optional[str], Optional[Tuple[int, int, int]]]:
         # versioned dir name. The on-disk layout differs by OS: POSIX tarballs
         # nest the binary under bin/ (node-v22.x.y-darwin-arm64/bin/node) while
         # the Windows zip puts node.exe at the top level
-        # (node-v22.x.y-win-x64/node.exe) — install.ps1 provisions the latter.
+        # (node-v22.x.y-win-x64/node.exe).
         runtime_root = Path(os.environ.get("OPENDDE_HARNESS_HOME", Path.home() / ".opendde_harness")) / "runtime"
         if runtime_root.is_dir():
             if _is_windows():
@@ -347,6 +347,7 @@ _TUI_INIT_CRASH_TYPES: tuple[type[BaseException], ...] = (
 
 _TUI_PROGRESS_SINK = None
 
+
 def _build_tui_agent_loop():
     """Construct the AgentLoop singleton served by ``turn.send``.
 
@@ -510,6 +511,7 @@ async def _run_rpc_server_until_done(
 
     agent_loop = None
     build_error: RpcError | None = None
+
     def _protein_design_progress(event) -> None:
         payload = (
             event.compact_payload()
@@ -518,9 +520,7 @@ async def _run_rpc_server_until_done(
             if hasattr(event, "model_dump")
             else event
         )
-        asyncio.create_task(
-            emitter.broadcast({"type": "protein_design.progress", "payload": payload})
-        )
+        asyncio.create_task(emitter.broadcast({"type": "protein_design.progress", "payload": payload}))
 
     global _TUI_PROGRESS_SINK
     _TUI_PROGRESS_SINK = _protein_design_progress
@@ -946,7 +946,9 @@ def tui(
         return
 
     node_path, version = find_node()
-    if (node_path is None or version is None or version < _MIN_NODE_VERSION) and not node_runtime.provisioning_disabled():
+    if (
+        node_path is None or version is None or version < _MIN_NODE_VERSION
+    ) and not node_runtime.provisioning_disabled():
         from opendde_harness.cli.onboard_commands import _config_language
 
         try:
@@ -1010,8 +1012,7 @@ def tui(
     no_rpc = check or print_colors or preview_colors
 
     # Only the interactive launch needs a configured provider: the no-RPC
-    # diagnostics never start a session (install.sh runs --check before the
-    # first onboarding).
+    # diagnostics never start a session.
     if not no_rpc:
         from opendde_harness.cli.onboard_commands import ensure_ready_to_start
 
@@ -1070,9 +1071,8 @@ def tui(
             print(
                 f"✗ TUI 构建产物缺失：{_PACKAGED_DIST_ENTRY}（或源码树 {_UI_TUI_DIR / 'dist' / 'entry.js'}）\n"
                 f"  开发者请运行：cd {_UI_TUI_DIR} && npm install && npm run build\n"
-                "  用户请克隆已认证的私有仓库 "
-                "https://github.com/aurekaresearch/OpenDDE-Harness-beta "
-                "并运行 ./install.sh\n",
+                "  重新安装发行包：uv tool install --python 3.12 --reinstall opendde-harness\n"
+                "  或在源码根目录运行：uv tool install --python 3.12 --reinstall .\n",
                 file=sys.stderr,
             )
             raise typer.Exit(code=2)

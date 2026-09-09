@@ -121,8 +121,8 @@ class SolubleMPNNClient:
         seed: int | None = None,
     ) -> None:
         import torch
-
         from external.ligandmpnn.model_utils import ProteinMPNN
+
         from opendde_harness.cli.compute_environment import resolve_device
 
         device = resolve_device(device)
@@ -164,7 +164,6 @@ class SolubleMPNNClient:
         num_sequences: int = 10,
     ) -> list[dict[str, Any]]:
         import torch
-
         from external.ligandmpnn.data_utils import (
             alphabet,
             featurize,

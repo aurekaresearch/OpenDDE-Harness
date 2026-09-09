@@ -1,7 +1,7 @@
 # OpenDDE Harness TUI protein-design quickstart.
 #
-# Use the TUI prompt in this directory's README.md with this YAML's absolute path.
-# Outputs are task-scoped automatically under ~/.opendde_harness/protein_design/<task_id>/.
+# Ask the TUI to review and run this YAML by its absolute path.
+# Task state defaults to ~/.opendde_harness/protein_design/<task_id>/; compute outputs live on the compute host.
 # Long-term cases and learned skills use protein-design/CACNG1 because target.name
 # below is CACNG1. The target name is used exactly as written.
 
@@ -36,7 +36,7 @@ design:
     enabled: false
 
 fold:
-  # All bundled design examples use OpenDDE for the primary search fold.
+  # These local-folding settings need adaptation for API mode; see docs/protein-design.md.
   model: opendde
   gpus: "0,1,2,3,4,5,6,7"
   enable_batch_inference: true

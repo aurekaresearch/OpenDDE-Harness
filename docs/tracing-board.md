@@ -1,7 +1,9 @@
 # Tracing Dashboard
 
-Run `ddeharness tracing --port 4318`, open http://127.0.0.1:4318 and choose
-**Protein design**. For a remote host, forward the port using
+Run `ddeharness tracing --port 4318`, open the printed URL and choose
+**Protein design**. If another process occupies the requested port, the command
+can choose the next free one. When the client and viewer run on a remote host,
+forward the actual viewer port with SSH; for port 4318, use
 `ssh -L 4318:127.0.0.1:4318 USER@HOST` (replace USER and HOST).
 
 ## Candidate workspace
@@ -59,6 +61,10 @@ Waiting events may show pending output; missing historical payloads cannot be
 reconstructed by the viewer. For absent structures, inspect the task's artifacts and
 compute access rather than interpreting an empty viewer as a folding failure.
 
-Default task artifacts: `~/.opendde_harness/protein_design/<task_id>/`.
+Task state and worker logs default to
+`~/.opendde_harness/protein_design/<task_id>/`, overridden by
+`OPENDDE_HARNESS_PROTEIN_DESIGN_ROOT`. Dashboard events and captured structures
+live under `~/.opendde_harness/traces/logs/`, overridden by
+`OPENDDE_HARNESS_TRACING_DIR`. Original structure files are on the compute host.
 See [setup and monitoring](protein-design.md#monitor-a-design-task) and
 [example configurations](examples/).

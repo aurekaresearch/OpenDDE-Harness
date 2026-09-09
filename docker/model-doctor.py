@@ -28,8 +28,10 @@ def main():
     parser.add_argument("--structure", type=Path, help="Small two-chain structure for full tool validation")
     parser.add_argument("--output", type=Path, required=True, help="Final JSON report in a fresh output directory")
     args = parser.parse_args()
-    if args.output.exists():
-        raise ValueError("Use a new verification output path; existing reports are preserved")
+    if args.mode == "local" and args.structure is None:
+        parser.error("--structure is required for local inference validation")
+    if args.output.parent.exists() and any(args.output.parent.iterdir()):
+        raise ValueError("Use an empty verification output directory; existing artifacts are preserved")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     os.environ["OPENDDE_HARNESS_COMPUTE_DEVICE"] = args.device
     os.environ["OPENDDE_HARNESS_PROTEIN_FOLD_EXECUTION_MODE"] = args.mode
@@ -37,7 +39,8 @@ def main():
     from opendde_harness.cli.compute_environment import check_runtime_environment, resolve_device
 
     root = Path(os.environ.get("OPENDDE_HARNESS_WEIGHTS_DIR", "/weights")).resolve()
-    for key, value in model_environment(str(root)).items():
+    opendde_root = Path(os.environ.get("OPENDDE_ROOT_DIR", "/opendde")).resolve()
+    for key, value in model_environment(str(root), str(opendde_root)).items():
         os.environ.setdefault(key, value)
     socket.socket.connect = reject_network
     socket.create_connection = reject_network
@@ -74,7 +77,7 @@ def main():
     def assets():
         result = inspect_assets(
             root,
-            opendde_root=Path(os.environ.get("OPENDDE_ROOT_DIR", "/opendde")),
+            opendde_root=opendde_root,
             with_opendde=args.mode == "local",
             verify_hashes=True,
         )
@@ -181,8 +184,6 @@ def main():
                     require(len(list((args.output.parent / "fold").rglob("*_sample_*.cif"))) == 5, "OpenDDE did not produce exactly five structures")
                     return result
                 check("opendde_local_prediction_and_scoring", fold)
-        elif args.mode == "local":
-            raise ValueError("--structure is required for local inference validation")
     except Exception as exc:
         report["checks"].append({"name": "fixture", "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
     finally:

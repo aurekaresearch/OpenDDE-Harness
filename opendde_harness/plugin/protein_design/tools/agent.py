@@ -21,8 +21,10 @@ from opendde_harness.plugin.protein_design.core.external import (
     PROTREK_SERVICE,
     ExternalServiceUnavailableError,
     connection_reason,
+    short_reason,
     unavailable_message,
 )
+from opendde_harness.plugin.protein_design.servers.client import ProteinDesignComputeError
 
 
 class ProteinDesignToolError(RuntimeError):
@@ -124,6 +126,14 @@ class ProteinDesignToolRegistry:
                 value = await model_call(context, arguments, model, method)
             except ExternalServiceUnavailableError as exc:
                 return _unavailable_tool_result(service, exc.reason, exc.endpoint)
+            except ProteinDesignComputeError as exc:
+                # The service answered, and refused. A rejected argument is the
+                # common case: an agent with no structure to search called this
+                # with a placeholder path, the task-boundary check returned 400,
+                # and the whole design died in its first phase. Hand the refusal
+                # back as a result the agent can read and move past, which is
+                # what "optional" is supposed to mean.
+                return _unavailable_tool_result(service, short_reason(exc), None)
             except Exception as exc:
                 reason = connection_reason(exc)
                 if reason is None:
@@ -176,7 +186,8 @@ class ProteinDesignToolRegistry:
             ),
             definition(
                 "protrek_structure_search",
-                "Search verified protein structure neighbours.",
+                "Search verified protein structure neighbours. structure_path must be a "
+                "structure file this task produced; skip this tool when the task has none.",
                 ProtrekStructureSearchRequest,
                 "search_protrek_structure",
                 optional_service=PROTREK_SERVICE,

@@ -86,6 +86,11 @@ _OPENROUTER_ATTRIBUTION: dict[str, str] = {
 }
 
 
+def _requires_reasoning_key(original_model: str, resolved_model: str) -> bool:
+    """Whether this target rejects an assistant turn with no reasoning_content key."""
+    return "deepseek" in f"{original_model} {resolved_model}".lower()
+
+
 def _thinking_blocks(blocks: Any) -> list[dict] | None:
     """Anthropic thinking blocks from one chunk, as plain dicts.
 
@@ -622,7 +627,10 @@ class LiteLLMProvider(LLMProvider):
 
     @staticmethod
     def _sanitize_messages(
-        messages: list[dict[str, Any]], extra_keys: frozenset[str] = frozenset()
+        messages: list[dict[str, Any]],
+        extra_keys: frozenset[str] = frozenset(),
+        *,
+        require_reasoning_key: bool = False,
     ) -> list[dict[str, Any]]:
         """Strip non-standard keys and ensure assistant messages have a content key."""
         allowed = _ALLOWED_MSG_KEYS | extra_keys
@@ -650,6 +658,14 @@ class LiteLLMProvider(LLMProvider):
 
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
+
+            # DeepSeek's thinking mode refuses a conversation whose assistant
+            # turn arrives without the key at all, even when the model itself
+            # produced no reasoning for that turn -- which it does after a tool
+            # result. An empty value satisfies it, verified against the live
+            # API, and it repairs turns recorded before this was understood.
+            if require_reasoning_key and clean.get("role") == "assistant":
+                clean.setdefault("reasoning_content", "")
         return sanitized
 
     def _cache_marked(
@@ -689,7 +705,9 @@ class LiteLLMProvider(LLMProvider):
         hosted search is refused."""
         messages, tools = self._cache_marked(original_model, messages, tools, responses=responses)
         messages = self._sanitize_messages(
-            self._sanitize_empty_content(messages), extra_keys=self._extra_msg_keys(original_model, model)
+            self._sanitize_empty_content(messages),
+            extra_keys=self._extra_msg_keys(original_model, model),
+            require_reasoning_key=_requires_reasoning_key(original_model, model),
         )
         kwargs: dict[str, Any] = {
             "model": model,

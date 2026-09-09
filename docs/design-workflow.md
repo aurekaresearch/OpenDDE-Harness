@@ -35,7 +35,7 @@ Target + binder + constraints                Router limits legal skills
                                   (next cycle)
 ```
 
-Each cycle follows the same simple contract:
+Once an initial population is available, a search cycle follows this contract:
 
 1. Select a parent from the retained population.
 2. Let the Router expose only legal design skills.
@@ -64,7 +64,7 @@ All design skills use a shared proposal contract. The Router controls legality a
 OpenDDE Harness has two layers:
 
 - **Local client environment:** TUI and CLI, agents, configuration validation, gates, population logic, long-term memory, tracing, and the dashboard.
-- **On-demand Docker compute service:** OpenDDE folding and GPU-heavy protein tools. The container starts when a task needs it, runs every backend directly inside that one container without starting nested model containers, and removes itself when idle.
+- **Harness compute service:** local OpenDDE folding, upstream API folding requests, and protein tools. A locally managed container starts when a task needs it, runs auxiliary backends inside the container without nested model containers, and removes itself when idle. Existing remote services are managed on their compute hosts.
 
 A task binds to one compute URL. Different tasks may therefore use Docker services on different GPU servers while remaining visible in one TUI and tracing dashboard.
 

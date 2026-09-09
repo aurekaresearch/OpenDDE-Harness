@@ -6,7 +6,10 @@ from typer.testing import CliRunner
 from opendde_harness.cli import onboard_commands, tui_commands
 
 NOT_CONFIGURED = "OpenDDE Harness is not configured. Run `ddeharness onboard`."
-MINIMAL_CONFIG = {"agents": {"defaults": {"model": "openai/gpt-4o-mini"}}, "providers": {"openai": {"apiKey": "sk-test"}}}
+MINIMAL_CONFIG = {
+    "agents": {"defaults": {"model": "openai/gpt-4o-mini"}},
+    "providers": {"openai": {"apiKey": "sk-test"}},
+}
 
 
 @pytest.fixture
@@ -34,7 +37,9 @@ def launch(monkeypatch):
 
 def test_non_tty_first_run_exits_without_launching(home, launch, monkeypatch, capsys):
     monkeypatch.setattr(tui_commands, "_stdout_isatty", lambda: False)
-    monkeypatch.setattr(onboard_commands, "run_wizard", lambda **kwargs: pytest.fail("wizard must not run without a TTY"))
+    monkeypatch.setattr(
+        onboard_commands, "run_wizard", lambda **kwargs: pytest.fail("wizard must not run without a TTY")
+    )
     result = CliRunner().invoke(tui_commands.tui_app, [])
     assert result.exit_code == 1
     assert NOT_CONFIGURED in result.output + capsys.readouterr().out
@@ -79,7 +84,13 @@ def test_configured_install_skips_the_wizard(home, launch, monkeypatch):
 
 
 def test_unusable_default_model_hints_and_launches(home, launch, monkeypatch, capsys):
-    write_config(home, {"agents": {"defaults": {"model": "anthropic/claude-sonnet-5"}}, "providers": {"openai": {"apiKey": "sk-test"}}})
+    write_config(
+        home,
+        {
+            "agents": {"defaults": {"model": "anthropic/claude-sonnet-5"}},
+            "providers": {"openai": {"apiKey": "sk-test"}},
+        },
+    )
     monkeypatch.setattr(tui_commands, "_stdout_isatty", lambda: True)
     monkeypatch.setattr(onboard_commands, "run_wizard", lambda **kwargs: pytest.fail("wizard must not run"))
     result = CliRunner().invoke(tui_commands.tui_app, [])
@@ -98,6 +109,16 @@ def test_check_smoke_path_needs_no_config(home, monkeypatch):
     result = CliRunner().invoke(tui_commands.tui_app, ["--check"])
     assert result.exit_code == 0
     assert len(calls) == 1
+
+
+def test_missing_bundle_recommends_current_install_commands(home, launch, monkeypatch):
+    monkeypatch.setattr(tui_commands, "resolve_dist_entry", lambda: None)
+    result = CliRunner().invoke(tui_commands.tui_app, ["--check"])
+    assert result.exit_code == 2
+    assert "uv tool install --python 3.12 --reinstall opendde-harness" in result.output
+    assert "uv tool install --python 3.12 --reinstall ." in result.output
+    assert "install.sh" not in result.output
+    assert "OpenDDE-Harness-beta" not in result.output
 
 
 def test_missing_node_is_provisioned_before_launch(home, launch, monkeypatch):
@@ -125,7 +146,13 @@ def test_node_provisioning_failure_exits_with_its_message(home, launch, monkeypa
     monkeypatch.delenv(node_runtime.DISABLE_ENV, raising=False)
     monkeypatch.delenv("OPENDDE_HARNESS_NODE", raising=False)
     monkeypatch.setattr(tui_commands, "find_node", lambda: (None, None))
-    monkeypatch.setattr(node_runtime, "install_node", lambda **kwargs: (_ for _ in ()).throw(node_runtime.NodeRuntimeError("download failed for https://nodejs.org/x")))
+    monkeypatch.setattr(
+        node_runtime,
+        "install_node",
+        lambda **kwargs: (_ for _ in ()).throw(
+            node_runtime.NodeRuntimeError("download failed for https://nodejs.org/x")
+        ),
+    )
     result = CliRunner().invoke(tui_commands.tui_app, [])
     assert result.exit_code == 1
     assert "download failed for https://nodejs.org/x" in result.output
@@ -154,7 +181,9 @@ def test_tui_exit_asks_idle_compute_to_stop_best_effort(home, launch, monkeypatc
     write_config(home, {**MINIMAL_CONFIG, "plugins": {"config": {"protein-design": protein_design}}})
     monkeypatch.setattr(tui_commands, "_stdout_isatty", lambda: False)
     monkeypatch.setattr(onboard_commands, "run_wizard", lambda **kwargs: pytest.fail("wizard must not run"))
-    monkeypatch.setattr(local_service, "read_state", lambda: {"container": "opendde-compute-abc", "url": "http://127.0.0.1:18089"})
+    monkeypatch.setattr(
+        local_service, "read_state", lambda: {"container": "opendde-compute-abc", "url": "http://127.0.0.1:18089"}
+    )
     requests = []
 
     def request_shutdown(url, token, *, if_idle, timeout=5.0):

@@ -1,7 +1,7 @@
 default_language_version:
   python: python3.12
 
-exclude: '^(benchmarks/.*/(data|results|output)/.*|ui-tui/src/rpc/generated\.ts)$'
+exclude: '^ui-tui/src/rpc/generated\.ts$'
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -22,16 +22,9 @@ repos:
         args: [--maxkb=1024]
       - id: check-merge-conflict
       - id: detect-private-key
-        exclude: ^tests/test_runtime_checkpoint_deep\.py$
 
   - repo: local
     hooks:
-      - id: conventional-commit-message
-        name: conventional commit message
-        entry: env PYTHONPATH=. python3 scripts/check_commit_file.py
-        language: system
-        stages: [commit-msg]
-
       - id: eslint-ui-tui
         name: eslint (ui-tui)
         entry: bash -c '[ -d ui-tui/node_modules ] || exit 0; cd ui-tui && npm run lint'
@@ -45,17 +38,3 @@ repos:
         language: system
         pass_filenames: false
         files: '^ui-tui/src/.*\.(ts|tsx)$'
-
-      - id: eslint-bridge
-        name: eslint (bridge)
-        entry: bash -c '[ -d bridge/node_modules ] || exit 0; cd bridge && npm run lint'
-        language: system
-        pass_filenames: false
-        files: '^bridge/src/.*\.(ts|tsx)$'
-
-      - id: prettier-bridge
-        name: prettier (bridge)
-        entry: bash -c '[ -d bridge/node_modules ] || exit 0; cd bridge && npx prettier --check "src/**/*.{ts,tsx}"'
-        language: system
-        pass_filenames: false
-        files: '^bridge/src/.*\.(ts|tsx)$'

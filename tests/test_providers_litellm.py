@@ -187,3 +187,35 @@ def test_replayed_non_streaming_answer_keeps_tool_signatures():
     call = deltas[0].tool_call_delta["tool_calls"][0]
 
     assert call["provider_specific_fields"] == {"thought_signature": "sig-1"}
+
+
+def test_deepseek_always_gets_the_reasoning_key(clean_env):
+    """Thinking mode refuses an assistant turn with no reasoning_content key at all."""
+    provider = LiteLLMProvider(api_key="sk", default_model="deepseek/deepseek-v4-flash", api_mode="chat")
+    history = [
+        {"role": "user", "content": "status?"},
+        # Recorded before the fix, and after a tool result the model returns no
+        # reasoning of its own: the key was simply absent.
+        {"role": "assistant", "content": "checking", "tool_calls": [{"id": "c1", "function": {"name": "s", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "running"},
+    ]
+
+    kwargs, _ = provider._request_kwargs(
+        provider.default_model, provider._resolve_model(provider.default_model), history, None,
+        max_tokens=100, temperature=0.2, reasoning_effort=None, tool_choice=None, responses=False, stream=False,
+    )
+    assistant = [m for m in kwargs["messages"] if m["role"] == "assistant"]
+
+    assert all("reasoning_content" in m for m in assistant)
+
+
+def test_other_vendors_keep_their_messages_untouched(clean_env):
+    provider = LiteLLMProvider(api_key="sk", default_model="openai/gpt-5", api_mode="chat")
+    history = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+
+    kwargs, _ = provider._request_kwargs(
+        provider.default_model, provider._resolve_model(provider.default_model), history, None,
+        max_tokens=100, temperature=0.2, reasoning_effort=None, tool_choice=None, responses=False, stream=False,
+    )
+
+    assert all("reasoning_content" not in m for m in kwargs["messages"])
