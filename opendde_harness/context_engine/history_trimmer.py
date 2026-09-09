@@ -52,16 +52,18 @@ class TrimOutcome:
     history: list[dict[str, Any]]
     included_ids: list[int]
     estimated_tokens: int
-    max_prompt_tokens: int
+    max_prompt_tokens: int | None  # None: the window is unknown, nothing was enforced
     source: str
     warnings: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return self.estimated_tokens <= self.max_prompt_tokens
+        return self.max_prompt_tokens is None or self.estimated_tokens <= self.max_prompt_tokens
 
     @property
     def over_by(self) -> int:
+        if self.max_prompt_tokens is None:
+            return 0
         return max(0, self.estimated_tokens - self.max_prompt_tokens)
 
 
@@ -73,7 +75,7 @@ class HistoryTrimmer:
         provider: LLMProvider,
         model: str,
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
-        context_window_tokens: int,
+        context_window_tokens: int | None,
     ) -> None:
         self.provider = provider
         self.model = model
@@ -191,12 +193,26 @@ class HistoryTrimmer:
         return errors
 
     @staticmethod
-    def _first_droppable(ids: list[int], protected_ids: set[int]) -> int | None:
-        """Position of the first non-protected id (falls back to 0)."""
+    def _first_droppable(messages: list[dict[str, Any]], ids: list[int], protected_ids: set[int]) -> int | None:
+        """Position of the first id whose whole exchange is unprotected, or None.
+
+        Protected messages are never dropped, even to fit. Dropping them used
+        to be the last resort, which in a budget smaller than the protected
+        head shipped an empty history while reporting the prompt as fitting;
+        a head a few hundred tokens over the reservation is a request the
+        provider almost always accepts, since the reservation is the whole
+        output ceiling, and one it refuses is handled by the loop's overflow
+        recovery -- with the conversation still in it. Judged on the exchange
+        rather than the message: a drop removes the whole exchange, so a tool
+        result answering a protected assistant turn is protected with it.
+        """
         for pos, mid in enumerate(ids):
-            if mid not in protected_ids:
-                return pos
-        return 0 if ids else None
+            if mid in protected_ids:
+                continue
+            if HistoryTrimmer._tool_exchange(messages, mid) & protected_ids:
+                continue
+            return pos
+        return None
 
     # ------------------------------------------------------------------
     # Budget-driven trimming
@@ -229,11 +245,23 @@ class HistoryTrimmer:
             messages,
             self.get_tool_definitions(),
         )
-        max_prompt = max(1, self.context_window_tokens - reserved_output)
+        # No window, no trimming: dropping history to fit a number nobody
+        # measured is worse than sending it all and letting the provider's
+        # overflow error say so, which the loop handles by shrinking in place.
+        max_prompt = (
+            None if self.context_window_tokens is None else max(1, self.context_window_tokens - reserved_output)
+        )
         warnings: list[str] = []
         trimmed_ids = list(canon)
-        while estimated > max_prompt and trimmed_ids:
-            drop_idx = self._first_droppable(trimmed_ids, protected_ids)
+        # Each pass drops at least one id, so the loop is bounded by the
+        # history's length; the bound is written down so a future change to
+        # the closure cannot make it spin. The re-estimate inside is cheap:
+        # every message's count comes from the content cache, so a pass costs
+        # a hash per message rather than an encode of the whole prompt.
+        for _ in range(len(canon)):
+            if max_prompt is None or estimated <= max_prompt or not trimmed_ids:
+                break
+            drop_idx = self._first_droppable(session_messages, trimmed_ids, protected_ids)
             if drop_idx is None:
                 break
             dropped = trimmed_ids[drop_idx]

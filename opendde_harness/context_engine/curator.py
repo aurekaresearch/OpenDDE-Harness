@@ -9,6 +9,7 @@ validates and builds the final messages used by the main agent.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import uuid
@@ -345,7 +346,7 @@ class CuratorAssembler:
         provider: LLMProvider,
         model: str,
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
-        context_window_tokens: int,
+        context_window_tokens: int | None,
     ):
         self.provider = provider
         self.model = model
@@ -367,7 +368,7 @@ class CuratorAssembler:
         self.model = model
         self.trimmer.set_provider(provider, model)
 
-    def set_context_window(self, tokens: int) -> None:
+    def set_context_window(self, tokens: int | None) -> None:
         """Follow a ``/model`` switch: the trimmer must budget against the
         new model's window, not the one it was built with."""
         self.context_window_tokens = tokens
@@ -476,7 +477,7 @@ class CuratorCheckBudgetTool(_CuratorTool):
 
     async def execute(self, **kwargs: Any) -> str:
         plan = _plan_from_kwargs(kwargs)
-        return self._json(self.assembler.validate_candidate(self.state, plan))
+        return self._json(await asyncio.to_thread(self.assembler.validate_candidate, self.state, plan))
 
 
 class CuratorArchiveMessagesTool(_CuratorTool):
@@ -752,7 +753,7 @@ class CuratorBuildContextTool(_CuratorTool):
 
     async def execute(self, **kwargs: Any) -> str:
         plan = _plan_from_kwargs(kwargs)
-        validation = self.assembler.validate_candidate(self.state, plan)
+        validation = await asyncio.to_thread(self.assembler.validate_candidate, self.state, plan)
         if validation.get("ok"):
             self.state.final_plan = plan
             self.state.final_validation = validation

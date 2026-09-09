@@ -17,6 +17,7 @@ from rich.console import Console
 
 from opendde_harness.cli._download import DownloadError, download_file, new_client
 
+# Pinned Node.js release. install.sh and install.ps1 read this line; keep its format.
 NODE_VERSION = "22.20.0"
 NODE_DIST = "https://nodejs.org/dist"
 DISABLE_ENV = "OPENDDE_HARNESS_NO_NODE_INSTALL"

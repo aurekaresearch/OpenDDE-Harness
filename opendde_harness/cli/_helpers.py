@@ -110,10 +110,12 @@ def make_provider(config: Config):
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
 
-    from opendde_harness.providers.registry import endpoints_unsupported_reason, find_by_name
+    from opendde_harness.providers.registry import default_wire, endpoints_unsupported_reason, find_by_name
 
     spec = find_by_name(provider_name) if provider_name else None
     client = spec.client if spec else ""
+    wire = (p.wire if p else None) or default_wire(provider_name)
+    model_overlays = config.providers.model_overlays()
 
     if p and p.endpoints:
         reason = endpoints_unsupported_reason(provider_name)
@@ -159,7 +161,8 @@ def make_provider(config: Config):
                     default_model=model,
                     extra_headers=ep.extra_headers,
                     provider_name=provider_name,
-                    api_mode=p.api_mode if p else "responses",
+                    wire=wire,
+                    model_overlays=model_overlays,
                     extra_body=wire_overrides(provider_name, model) or None,
                     model_overrides=config.agents.defaults.model_overrides,
                 )
@@ -181,7 +184,8 @@ def make_provider(config: Config):
                 default_model=model,
                 extra_headers=eps[0].extra_headers,
                 provider_name=provider_name,
-                api_mode=p.api_mode if p else "responses",
+                wire=wire,
+                model_overlays=model_overlays,
                 extra_body=extra_body,
                 model_overrides=config.agents.defaults.model_overrides,
             )
@@ -193,7 +197,8 @@ def make_provider(config: Config):
                 default_model=model,
                 extra_headers=p.extra_headers if p else None,
                 provider_name=provider_name,
-                api_mode=p.api_mode if p else "responses",
+                wire=wire,
+                model_overlays=model_overlays,
                 extra_body=extra_body,
                 model_overrides=config.agents.defaults.model_overrides,
             )
@@ -203,6 +208,8 @@ def make_provider(config: Config):
         temperature=defaults.temperature,
         reasoning_effort=defaults.reasoning_effort,
         timeout=defaults.llm_call_timeout,
+        first_token_timeout=defaults.llm_first_token_timeout,
+        idle_timeout=defaults.llm_idle_timeout,
     )
     return provider
 
@@ -229,6 +236,8 @@ def make_lazy_provider(config: Config):
             temperature=defaults.temperature,
             reasoning_effort=defaults.reasoning_effort,
             timeout=defaults.llm_call_timeout,
+            first_token_timeout=defaults.llm_first_token_timeout,
+            idle_timeout=defaults.llm_idle_timeout,
         ),
         initial_endpoint_label=initial_endpoint_label,
     )

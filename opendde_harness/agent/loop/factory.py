@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from opendde_harness.agent.loop.recovery import RecoveryLimits, limits_from_defaults
 from opendde_harness.config.features import ContextConfig, MemoryConfig, RuntimeConfig, SkillForgeConfig
-from opendde_harness.config.schema import Config, ExecToolConfig, ToolSearchConfig
+from opendde_harness.config.schema import Config, ExecToolConfig, ModelOverlay, ToolSearchConfig
 
 if TYPE_CHECKING:
     from opendde_harness.agent.hook import CompositeHook
@@ -30,15 +30,18 @@ if TYPE_CHECKING:
 class AgentLoopSettings:
     """Everything an :class:`AgentLoop` reads from config.
 
-    ``model=None`` means the provider's default. ``context_window_tokens``
-    of ``None``/``0`` means "resolve from the model"; a positive value pins
-    the window. ``skill_forge=None`` leaves the LLM-backed skill stages
-    (query rewriter, gate) unbuilt.
+    ``model=None`` means the provider's default. ``model_overlays`` is every
+    provider section's ``modelOverlay`` keyed by ``wire.merge_key`` (see
+    ``ProvidersConfig.model_overlays``), carried so a live model switch can
+    find the new model's own declaration -- the window and output ceiling are
+    resolved per model from it and the bundled tables, never pinned globally.
+    ``skill_forge=None`` leaves the LLM-backed skill stages (query rewriter,
+    gate) unbuilt.
     """
 
     model: str | None = None
     max_iterations: int = 40
-    context_window_tokens: int | None = None
+    model_overlays: dict[str, ModelOverlay] = field(default_factory=dict)
     empty_recovery: RecoveryLimits = field(default_factory=RecoveryLimits)
     max_concurrent_subagents: int = 4
     max_subagent_spawns_per_hour: int = 30
@@ -62,7 +65,7 @@ class AgentLoopSettings:
         return cls(
             model=defaults.model,
             max_iterations=defaults.max_tool_iterations,
-            context_window_tokens=defaults.context_window_tokens,
+            model_overlays=config.providers.model_overlays(),
             empty_recovery=limits_from_defaults(defaults),
             max_concurrent_subagents=defaults.max_concurrent_subagents,
             max_subagent_spawns_per_hour=defaults.max_subagent_spawns_per_hour,

@@ -53,6 +53,39 @@ def _trim(limit_messages: int, ids: list[int], protected: set[int]):
         module.estimate_prompt_tokens_chain = original
 
 
+def test_unknown_window_ships_everything_and_reports_nothing_enforced():
+    trimmer = _Trimmer(0)
+    trimmer.context_window_tokens = None
+
+    import opendde_harness.context_engine.history_trimmer as module
+
+    original = module.estimate_prompt_tokens_chain
+    module.estimate_prompt_tokens_chain = lambda provider, model, messages, tools: (10**9, "count")
+    try:
+        messages, outcome = trimmer.trim(
+            session_messages=MESSAGES,
+            ids=list(range(len(MESSAGES))),
+            protected_ids=set(),
+            reserved_output=0,
+            build_messages=lambda history: list(history),
+        )
+    finally:
+        module.estimate_prompt_tokens_chain = original
+
+    # Nothing to trim against, so nothing is dropped: an invented window used
+    # to cut real history here.
+    assert outcome.included_ids == list(range(len(MESSAGES)))
+    assert outcome.max_prompt_tokens is None
+    assert outcome.ok and outcome.over_by == 0 and outcome.warnings == []
+
+
+def test_protected_messages_survive_a_budget_they_do_not_fit():
+    _, outcome = _trim(1, list(range(len(MESSAGES))), {0, 1, 2})
+
+    assert outcome.included_ids == [0, 1, 2]
+    assert not outcome.ok and outcome.over_by > 0
+
+
 def test_dropping_takes_the_whole_exchange():
     _, outcome = _trim(4, list(range(len(MESSAGES))), set())
 
@@ -67,3 +100,12 @@ def test_history_still_starts_at_a_user_message():
 
     assert HistoryTrimmer.structural_errors(outcome.history) == []
     assert not outcome.history or outcome.history[0]["role"] == "user"
+
+
+def test_a_tool_result_answering_a_protected_call_is_protected_with_it():
+    """Protecting the assistant call but not its result used to drop both:
+    the result was droppable and its exchange took the call along."""
+    _, outcome = _trim(1, list(range(len(MESSAGES))), {0, 1})
+
+    assert 1 in outcome.included_ids and 2 in outcome.included_ids
+    assert HistoryTrimmer.structural_errors(outcome.history) == []

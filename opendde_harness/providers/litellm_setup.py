@@ -32,15 +32,18 @@ def _preserve_responses_api_usage(
 ) -> Callable[..., Any]:
     """Undo LiteLLM's invalid Responses streaming usage mutation.
 
-    LiteLLM 1.85.0's ``Logging._get_assembled_streaming_response`` converts a
-    typed ``ResponseAPIUsage`` to Chat-Completions usage and assigns the dumped
-    dictionary back to ``ResponsesAPIResponse.usage``. The field is declared
-    as ``ResponseAPIUsage``; background logging later calls ``model_dump()``
-    and Pydantic correctly reports the incompatible value.
+    ``Logging._get_assembled_streaming_response`` (still, on 1.100.0) converts
+    a typed ``ResponseAPIUsage`` to Chat-Completions usage and assigns the
+    dumped dictionary back to ``ResponsesAPIResponse.usage``. The field is
+    declared as ``ResponseAPIUsage``; background logging later calls
+    ``model_dump()`` and Pydantic reports the incompatible value on every
+    streamed Responses call.
 
-    Keep the original Responses usage object on the assembled response. The
-    current LiteLLM cost and standard-logging helpers already accept
-    ``ResponseAPIUsage`` directly, so token accounting remains intact.
+    Keep the original Responses usage object on the assembled response.
+    LiteLLM's cost and standard-logging helpers accept ``ResponseAPIUsage``
+    directly, so token accounting remains intact. Re-check on each bump by
+    running a streamed Responses call with this patch off; delete it once
+    the warning is gone.
     """
 
     @wraps(original)
@@ -66,7 +69,7 @@ def _preserve_responses_api_usage(
 
 
 def _patch_litellm_responses_usage_mutation() -> None:
-    """Install the narrow LiteLLM 1.x Responses compatibility fix once."""
+    """Install the Responses usage fix once."""
     from litellm.litellm_core_utils.litellm_logging import Logging
     from litellm.types.llms.openai import ResponseAPIUsage
 
@@ -100,6 +103,82 @@ def _point_oauth_tokens_at_opendde_harness() -> None:
     oauth_dir = get_oauth_dir()
     os.environ.setdefault("GITHUB_COPILOT_TOKEN_DIR", str(oauth_dir / "github_copilot"))
     os.environ.setdefault("CHATGPT_TOKEN_DIR", str(oauth_dir / "chatgpt"))
+
+
+#: What the first request imports lazily on top of ``import litellm``: the
+#: OpenAI SDK's resource and type trees and a handful of LiteLLM internals,
+#: 261 modules measured on a cold process, about three seconds of file reads
+#: -- on the event loop, at the moment the user sends their first message.
+#: Recorded from a real first call rather than guessed; a module that no
+#: longer exists is skipped, so a LiteLLM bump cannot break the warm-up.
+_FIRST_REQUEST_MODULES = (
+    "openai.lib.streaming",
+    "openai.resources",
+    "openai.resources.audio",
+    "openai.resources.batches",
+    "openai.resources.beta",
+    "openai.resources.chat",
+    "openai.resources.completions",
+    "openai.resources.containers",
+    "openai.resources.embeddings",
+    "openai.resources.evals",
+    "openai.resources.files",
+    "openai.resources.fine_tuning",
+    "openai.resources.images",
+    "openai.resources.models",
+    "openai.resources.moderations",
+    "openai.resources.skills",
+    "openai.resources.uploads",
+    "openai.resources.vector_stores",
+    "openai.resources.videos",
+    "openai.types.beta",
+    "openai.types.chat",
+    "openai.types.containers",
+    "openai.types.evals",
+    "openai.types.fine_tuning",
+    "openai.types.skills",
+    "openai.types.uploads",
+    "openai.types.vector_stores",
+    "litellm._service_logger",
+    "litellm.integrations.prometheus_services",
+    "litellm.litellm_core_utils.get_supported_openai_params",
+    "litellm.litellm_core_utils.llm_request_utils",
+    "litellm.llms.litellm_proxy",
+    "litellm.llms.litellm_proxy.chat",
+    "litellm.llms.litellm_proxy.chat.transformation",
+    "litellm.llms.openai_like.dynamic_config",
+    "litellm.llms.vertex_ai.vertex_ai_partner_models.anthropic",
+    "litellm.llms.vertex_ai.vertex_ai_partner_models.anthropic.output_params_utils",
+    "litellm.llms.vertex_ai.vertex_ai_partner_models.anthropic.transformation",
+    "litellm.proxy._experimental",
+    "litellm.proxy._experimental.mcp_server",
+    "litellm.proxy._experimental.mcp_server.utils",
+    "litellm.proxy.openai_files_endpoints",
+    "litellm.proxy.openai_files_endpoints.common_utils",
+    "litellm.responses.mcp",
+    "litellm.responses.mcp.chat_completions_handler",
+    "litellm.responses.mcp.litellm_proxy_mcp_handler",
+    "litellm.types.integrations.prometheus",
+    "litellm.types.litellm_core_utils",
+    "litellm.types.litellm_core_utils.streaming_chunk_builder_utils",
+)
+
+
+def warm_first_request_imports() -> None:
+    """Import what the first request would, so it does not happen on the loop.
+
+    Called from the lazy provider's prewarm thread after the provider is
+    built. Idempotent: an already-imported module costs a dict lookup.
+    """
+    import importlib
+
+    for name in _FIRST_REQUEST_MODULES:
+        if name in sys.modules:
+            continue
+        try:
+            importlib.import_module(name)
+        except Exception:
+            continue
 
 
 def import_litellm():

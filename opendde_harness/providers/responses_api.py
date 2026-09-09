@@ -170,46 +170,181 @@ def responses_tool_choice(choice: str | dict[str, Any] | None) -> str | dict[str
     return choice
 
 
-def responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+#: The ``thinking_blocks`` entry a Responses-wire provider writes for one
+#: response and reads back on the next request. One block per response, not
+#: one per reasoning item: the loop folds every non-redacted block of a delta
+#: into a single entry, so N blocks would keep N-1 items' worth of nothing.
+#: ``provider`` says which backend signed the items, since one backend's
+#: ``rs_*`` items are refused by another.
+REASONING_BLOCK_TYPE = "reasoning"
+PROVIDER_OPENAI = "openai"
+PROVIDER_CODEX = "openai_codex"
+
+
+def reasoning_block(
+    items: list[dict[str, Any]], order: list[str], messages: dict[str, str], *, provider: str
+) -> dict[str, Any] | None:
+    """The block carrying a response's reasoning items, or None when it had none.
+
+    ``order`` is the id of every output item as the response emitted them;
+    the next request replays in that order, because the backend pairs each
+    ``rs_*`` item with the item that followed it and refuses a broken pair.
+    ``messages`` maps each output message's id to its text, since a response
+    can carry several messages with reasoning between them and each has to
+    be replayed under its own id for the pairing to hold.
+    """
+    if not items:
+        return None
+    return {
+        "type": REASONING_BLOCK_TYPE,
+        "provider": provider,
+        "thinking": reasoning_text(items),
+        "items": items,
+        "order": order,
+        "messages": dict(messages),
+    }
+
+
+def message_text(item: Any) -> str:
+    """The text of one output message item."""
+    return "".join(
+        str(value_of(part, "text", "") or "")
+        for part in (value_of(item, "content", []) or [])
+        if value_of(part, "type", "") == "output_text"
+    )
+
+
+def _message_item(message_id: str, text: str) -> dict[str, Any]:
+    return {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": text}],
+        "status": "completed",
+        "id": message_id,
+    }
+
+
+def reasoning_text(items: list[dict[str, Any]]) -> str:
+    texts: list[str] = []
+    for item in items:
+        for part in (item.get("summary") or []) + (item.get("content") or []):
+            text = part.get("text") if isinstance(part, dict) else None
+            if text:
+                texts.append(text)
+    return "\n\n".join(texts)
+
+
+def reasoning_block_of(message: dict[str, Any], *, provider: str) -> dict[str, Any] | None:
+    """This provider's own reasoning block on an assistant message, or None."""
+    for block in message.get("thinking_blocks") or []:
+        if isinstance(block, dict) and block.get("type") == REASONING_BLOCK_TYPE and block.get("provider") == provider:
+            return block
+    return None
+
+
+def join_tool_call_id(call_id: str, item_id: str | None) -> str:
+    """The stored id for a Responses call: ``call|item`` when it has an item id."""
+    return f"{call_id}|{item_id}" if item_id else call_id
+
+
+def split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:
+    """``call_id`` and the ``fc_*`` item id a Responses call carried, if any.
+
+    A Responses function call has two ids -- the ``call_id`` a result answers
+    and the item id the backend pairs reasoning with -- stored as one
+    ``call|item`` string so the Chat-shaped history can hold both.
+    """
+    if isinstance(tool_call_id, str) and tool_call_id:
+        if "|" in tool_call_id:
+            call_id, item_id = tool_call_id.split("|", 1)
+            return call_id, item_id or None
+        return tool_call_id, None
+    return "call_0", None
+
+
+def responses_assistant_items(message: dict[str, Any], idx: int, *, provider: str) -> list[dict[str, Any]]:
+    """One assistant turn as the Responses API wants it replayed.
+
+    Every output item in the order the response emitted it, reasoning items
+    included -- the order pi replays, and it is not cosmetic: the backend
+    pairs every ``rs_*`` item with the item that followed it and refuses a
+    request where the pair is broken, and it is the replayed reasoning that
+    lets the model continue its own plan across a tool call rather than start
+    over. A turn stored without an order (one produced by another provider or
+    on another wire) replays as text then calls, and carries no item ids, so
+    the backend has no pairing to validate. A reasoning item nothing followed
+    -- a response cut before its item arrived -- is not sent, since alone it
+    is refused as unpaired.
+    """
+    reasoning = reasoning_block_of(message, provider=provider)
+    # Item ids are this backend's to validate: a turn another backend produced
+    # replays without them, or the pairing check refuses ids it never issued.
+    own_turn = reasoning is not None
+    reasoning = reasoning or {}
+    by_id: dict[str, dict[str, Any]] = {}
+    for item in reasoning.get("items") or []:
+        if isinstance(item, dict) and item.get("id"):
+            by_id[item["id"]] = item
+
+    content = message.get("content")
+    text = content if isinstance(content, str) else _text_of(content)
+    replayed = reasoning.get("messages") if own_turn else None
+    if isinstance(replayed, dict) and replayed:
+        for message_id, message_body in replayed.items():
+            by_id[str(message_id)] = _message_item(str(message_id), str(message_body))
+    elif text:
+        by_id[f"msg_{idx}"] = _message_item(f"msg_{idx}", text)
+    for n, tool_call in enumerate(message.get("tool_calls") or []):
+        if not isinstance(tool_call, dict):
+            continue
+        fn = tool_call.get("function") or {}
+        arguments = fn.get("arguments", "{}")
+        if not isinstance(arguments, str):
+            arguments = json.dumps(arguments, ensure_ascii=False)
+        call_id, item_id = split_tool_call_id(tool_call.get("id"))
+        item = {
+            "type": "function_call",
+            "call_id": call_id or f"call_{idx}_{n}",
+            "name": fn.get("name") or "",
+            "arguments": arguments or "{}",
+        }
+        if item_id and own_turn:
+            item["id"] = item_id
+        by_id[item_id or f"fc_{idx}_{n}"] = item
+
+    ordered = [by_id.pop(item_id) for item_id in reasoning.get("order") or [] if item_id in by_id]
+    ordered += sorted(by_id.values(), key=lambda item: item["type"] != "message")
+    while ordered and ordered[-1]["type"] == "reasoning":
+        ordered.pop()
+    return ordered
+
+
+def _text_of(content: Any) -> str:
+    if not isinstance(content, list):
+        return "" if content is None else str(content)
+    return "\n".join(
+        str(part.get("text", "")) for part in content if isinstance(part, dict) and part.get("type") == "text"
+    )
+
+
+def responses_input(messages: list[dict[str, Any]], *, provider: str = PROVIDER_OPENAI) -> list[dict[str, Any]]:
     """Translate persisted Chat history, including tool turns, to input items."""
     items: list[dict[str, Any]] = []
-    for message in messages:
+    for idx, message in enumerate(messages):
         role = message.get("role")
         content = message.get("content")
         if role == "tool":
-            items.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": message.get("tool_call_id", ""),
-                    "output": responses_tool_output(content),
-                }
-            )
-            continue
-
-        tool_calls = message.get("tool_calls") if role == "assistant" else None
-        if content not in (None, "", []):
+            call_id, _ = split_tool_call_id(message.get("tool_call_id"))
+            items.append({"type": "function_call_output", "call_id": call_id, "output": responses_tool_output(content)})
+        elif role == "assistant":
+            replayed = responses_assistant_items(message, idx, provider=provider)
+            # An empty assistant turn stays a turn: provider sanitation has
+            # already supplied a valid content value where one is required.
+            items.extend(replayed or [{"role": role, "content": content or ""}])
+        elif content not in (None, "", []):
             items.append({"role": role, "content": responses_content(content)})
-        elif not tool_calls:
-            # Preserve empty ordinary messages; provider sanitation has already
-            # supplied a valid content value where one is required.
+        else:
             items.append({"role": role, "content": content or ""})
-
-        if isinstance(tool_calls, list):
-            for tool_call in tool_calls:
-                if not isinstance(tool_call, dict):
-                    continue
-                function = tool_call.get("function") or {}
-                arguments = function.get("arguments", "{}")
-                if not isinstance(arguments, str):
-                    arguments = json.dumps(arguments, ensure_ascii=False)
-                items.append(
-                    {
-                        "type": "function_call",
-                        "call_id": tool_call.get("id", ""),
-                        "name": function.get("name", ""),
-                        "arguments": arguments,
-                    }
-                )
     return items
 
 

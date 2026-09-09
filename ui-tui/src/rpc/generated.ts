@@ -26,6 +26,7 @@ export type JsonValue = string | number | boolean | null | unknown[] | {};
 export type TurnEvent =
   | MessageStartEvent
   | EpisodeStartEvent
+  | TurnRetryEvent
   | TokenDeltaEvent
   | ThinkingDeltaEvent
   | ToolStartEvent
@@ -153,6 +154,10 @@ export interface ModelOptionProvider {
   needs_api_base: boolean;
   warning: string;
   /**
+   * The wire this provider's endpoint is configured for, offered for the picker to switch; absent when the driver has only one wire.
+   */
+  wire?: 'responses' | 'chat';
+  /**
    * Keyed by the model id as it appears in `models`.
    */
   model_labels?: {
@@ -198,6 +203,10 @@ export interface UsageSnapshot {
   context_used?: number;
   context_max?: number;
   context_percent?: number;
+  /**
+   * Which tier sized context_max; "unknown" with a zero context_max means no table lists the model.
+   */
+  context_source?: string;
 }
 /**
  * This interface was referenced by `OpenDDEHarnessRpcRoot`'s JSON-Schema
@@ -279,6 +288,19 @@ export interface EpisodeStartEvent {
   type: 'episode.start';
   payload: {
     index: number;
+  };
+}
+/**
+ * This interface was referenced by `OpenDDEHarnessRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnRetryEvent".
+ */
+export interface TurnRetryEvent {
+  type: 'turn.retry';
+  payload: {
+    attempt: number;
+    total: number;
+    reason: string;
+    discard: boolean;
   };
 }
 /**
@@ -798,6 +820,7 @@ export interface ModelSaveKeyParams {
   slug: string;
   api_key?: string;
   api_base?: string;
+  wire?: 'responses' | 'chat';
   session_id?: string;
 }
 /**

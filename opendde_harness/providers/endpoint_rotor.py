@@ -15,10 +15,11 @@ A stream in progress is never switched mid-flight. Rotation only ever
 happens before the caller has seen a token: an exception or an error-shaped
 terminal delta arriving before the first real delta means nothing has been
 said yet, so trying the next endpoint costs nothing. Once a normal first
-delta has been handed to the caller, part of an answer already exists;
-resuming it from a different endpoint would either duplicate or contradict
-what was already sent, so a failure past that point is raised as-is and the
-stream ends there, same as any single-endpoint provider's stream would.
+delta has been handed to the caller, part of an answer already exists, and
+resuming it from a different endpoint would duplicate or contradict what was
+sent; a failure past that point is raised as-is. The agent loop owns that
+retry: it discards the shown text and re-runs the whole call, and the
+endpoint that dropped is marked failed here so the re-run lands elsewhere.
 """
 
 from __future__ import annotations
@@ -146,11 +147,10 @@ class EndpointRotorProvider(LLMProvider):
         """Push generation settings down to every inner.
 
         ``make_provider`` builds this instance and only then assigns
-        ``provider.generation = GenerationSettings(...)`` from config (see
-        ``per_model_provider.py``'s ``PerModelProvider.__init__`` for the same
-        push-down at construction time) -- without this setter that assignment
-        would land on the rotor alone and every inner would keep answering
-        temperature/max_tokens/timeout from its own untouched default.
+        ``provider.generation = GenerationSettings(...)`` from config -- without
+        this setter that assignment would land on the rotor alone and every
+        inner would keep answering temperature/max_tokens/timeout from its own
+        untouched default.
 
         ``getattr(self, "_inners", [])`` covers the one call that happens
         before ``self._inners`` exists: the base class's own ``__init__``
@@ -334,8 +334,17 @@ class EndpointRotorProvider(LLMProvider):
 
                 self._mark_success(i)
                 yield first
-                async for delta in agen:
-                    yield delta
+                try:
+                    async for delta in agen:
+                        if delta.finish_reason == "error":
+                            classification = delta.error_classification or self.classify_error(content=delta.content)
+                            if _rotates(classification):
+                                self._mark_failure(i)
+                        yield delta
+                except Exception as exc:
+                    if _rotates(self.classify_error(exc)):
+                        self._mark_failure(i)
+                    raise
                 return
 
         if isinstance(last_failure, Exception):
@@ -365,9 +374,9 @@ class EndpointRotorProvider(LLMProvider):
     def model_overrides(self) -> dict[str, dict[str, Any]]:
         """Delegates to the first endpoint's inner, same reasoning as ``can_serve``:
         every inner was built from this same section, so the overrides are one
-        answer, not one per endpoint. Without this, ``PerModelProvider``'s
-        ``getattr(fallback, "model_overrides", None)`` silently read nothing
-        back whenever ``fallback`` was a rotor -- the shape a multi-endpoint
+        answer, not one per endpoint. Without this, a wrapper's
+        ``getattr(provider, "model_overrides", None)`` silently read nothing
+        back whenever the provider was a rotor -- the shape a multi-endpoint
         section builds -- and per-model overrides went missing on exactly the
         configs that had several endpoints to rotate."""
         return self._inners[0].model_overrides

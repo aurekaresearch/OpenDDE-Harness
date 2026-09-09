@@ -20,6 +20,7 @@ from opendde_harness.spine.events import (
     TurnEnded,
     TurnEvent,
     TurnFailed,
+    TurnRetry,
     TurnStarted,
     Usage,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "Deliverable",
     "Emit",
     "EpisodeStart",
+    "TurnRetry",
     "Media",
     "MediaOut",
     "Notice",

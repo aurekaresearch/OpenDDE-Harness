@@ -153,7 +153,7 @@ class ContextAssembler(ContextEngine):
             if hook is not None:
                 await hook(session_key, outcome, usage)
 
-    def set_context_window(self, tokens: int) -> None:
+    def set_context_window(self, tokens: int | None) -> None:
         # Delegate to any builder that sized itself against the window at
         # construction (only the Curator does; seg1-5 carry no budget).
         for builder in self._builders:

@@ -243,6 +243,9 @@ export interface TerminalResizeResponse {
 // arrives on the wire invisible to the component reading this type. The drift
 // test beside this file fails if a generated property is missing here.
 export interface ModelOptionProvider {
+  // The wire the endpoint is configured for (chat / responses); absent when
+  // the provider's driver has only one wire and there is nothing to switch.
+  wire?: string
   auth_type?: string
   authenticated?: boolean
   is_current?: boolean
@@ -346,6 +349,11 @@ export type GatewayEvent =
   | { payload?: { text?: string }; session_id?: string; type: 'thinking.delta' }
   | { payload?: undefined; session_id?: string; type: 'message.start' }
   | { payload?: { index?: number }; session_id?: string; type: 'episode.start' }
+  | {
+      payload?: { attempt?: number; discard?: boolean; reason?: string; total?: number }
+      session_id?: string
+      type: 'turn.retry'
+    }
   | { payload?: { kind?: string; text?: string }; session_id?: string; type: 'status.update' }
   | { payload: { line: string }; session_id?: string; type: 'gateway.stderr' }
   | {

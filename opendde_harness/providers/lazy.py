@@ -88,7 +88,12 @@ class LazyProvider(LLMProvider):
             try:
                 self._built()
             except Exception:
-                pass
+                return
+            # The first request's lazy imports are the other half of the cost
+            # this thread exists to hide; measured at ~3s on the loop cold.
+            from opendde_harness.providers.litellm_setup import warm_first_request_imports
+
+            warm_first_request_imports()
 
         threading.Thread(target=_run, name="litellm-prewarm", daemon=True).start()
 

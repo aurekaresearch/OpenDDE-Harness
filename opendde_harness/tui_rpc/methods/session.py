@@ -34,7 +34,6 @@ from loguru import logger
 
 from opendde_harness.cli.update_notice import update_notice
 from opendde_harness.config.loader import load_config
-from opendde_harness.providers.rates import resolve_context_window
 from opendde_harness.session.export import default_export_path, write_transcript
 from opendde_harness.session.manager import SessionManager, new_chat_id
 from opendde_harness.tui_rpc.errors import TurnInProgressError
@@ -97,46 +96,41 @@ def _enumerate_skills(agent_loop: "AgentLoop | None") -> dict[str, list[str]]:
     return {source: sorted(names) for source, names in grouped.items()}
 
 
-async def _baseline_usage(
-    agent_loop: "AgentLoop | None",
-    config: "Config",
-) -> dict[str, Any]:
+async def _baseline_usage(agent_loop: "AgentLoop | None") -> dict[str, Any]:
     """Banner ``info.usage`` subfield — boot baseline (no turn has run yet).
 
     All counters are zero at session.create: a fresh session_key carries no
     prior LLM calls. Each turn's ``message.complete`` event updates them
-    post-turn. ``context_max`` follows the same ladder ``AgentLoop`` uses: a
-    pinned ``context_window_tokens`` wins outright; otherwise the model's real
-    window (live from the provider table when LiteLLM lags, e.g. OpenRouter),
-    or 0 when neither is known — the UI's empty state, not a borrowed number.
-    Usage starts at zero for a fresh session by design. Resume reuses the
-    zero baseline; counters refresh on the next turn.
+    post-turn. ``context_max`` is the loop's own ladder (``resolve_window``):
+    the model's overlay, then the bundled tables, or 0 when none knows — the UI's empty state, not a borrowed
+    number; ``context_source`` says which. Usage starts at zero for a fresh
+    session by design. Resume reuses the zero baseline; counters refresh on
+    the next turn.
 
     Cost is the exception: on a subscription there is no per-token figure, so the
     banner says so rather than opening at $0.00. Zero here read as free until the
     first turn replaced it, which is the answer this session will never have.
 
-    ``resolve_context_window`` defaults to ``allow_fetch=True``, so a cold
-    OpenRouter model can reach for a synchronous 10s HTTP call; this handler
-    runs on the event loop (an RPC method), so that call is pushed to a
-    thread rather than blocking every other session in flight.
+    No tier reaches the network, but the LiteLLM tier may import it (~2-7s
+    in a fresh process); this handler runs on the event loop (an RPC method),
+    so the walk is pushed to a thread rather than blocking every other
+    session in flight.
     """
-    from opendde_harness.providers.rates import is_plan_billed
+    from opendde_harness.providers.rates import SOURCE_UNKNOWN, is_plan_billed
 
     model = getattr(agent_loop, "model", None)
-    configured = config.agents.defaults.context_window_tokens
-    if configured:
-        context_max = configured
-    elif model:
-        context_max = await asyncio.to_thread(resolve_context_window, model) or 0
+    if agent_loop is not None and model:
+        resolved = await asyncio.to_thread(agent_loop.resolve_window)
+        context_max, context_source = resolved.tokens or 0, resolved.source
     else:
-        context_max = 0
+        context_max, context_source = 0, SOURCE_UNKNOWN
     return {
         "input": 0,
         "output": 0,
         "cost_usd": None if model and is_plan_billed(str(model)) else 0.0,
         "calls": 0,
         "context_max": context_max,
+        "context_source": context_source,
         "context_used": 0,
         "context_percent": 0,
     }
@@ -152,7 +146,7 @@ async def _default_session_info(
     zero usage, ``lazy=True``); version is always real (cached at module load).
     """
     model_id = config.agents.defaults.model
-    usage = await _baseline_usage(agent_loop, config)
+    usage = await _baseline_usage(agent_loop)
     info: dict[str, Any] = {
         "model": model_id,
         "model_id": model_id,

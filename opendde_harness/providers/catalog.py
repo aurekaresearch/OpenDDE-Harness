@@ -1,31 +1,41 @@
-"""What a model is called and what it is for, for the surfaces people read.
+"""What a model is called, what it costs, and how much context it takes.
 
 A picker showing `anthropic/claude-sonnet-4-6` is showing an identifier. What a
 person choosing a model wants is its name, roughly what it is good at, how much
 context it takes and how recent it is -- none of which LiteLLM's table carries,
 because that table exists to price and route.
 
-So there are two catalogue sources and they answer different questions:
+So there are two catalogue sources, and the ladder in ``providers.rates`` asks
+them in a fixed order:
 
 * LiteLLM's own table decides prices and limits used in a request. It ships with
   the dependency and needs no network. It also carries capability flags, which
   OpenDDE Harness deliberately does not read: its `supports_prompt_caching` asks whether a
   model caches at all, while what a request needs to know is whether the provider
   accepts `cache_control` blocks -- `ProviderSpec`'s field of the same name.
-* the models.dev snapshot decides labels, and prices a finished call. It carries
-  a name, a one-line description, and the vendor's published cost per model.
-  Context windows and capability flags are deliberately absent: those shape the
-  *next* request -- a window sizes trimming, a flag picks a wire shape -- and a
-  second source for them is a second answer.
+* the models.dev snapshot decides labels, prices a finished call, and answers
+  for a window LiteLLM's table does not carry. It holds a row per provider
+  (name, description, the provider's own cost, and the limit *as that provider
+  serves the model*) and, under ``_models``, the vendor's native limit per
+  canonical model id -- an upper bound, asked only after the provider row.
 
-Keeping the split is the point rather than an implementation detail. The snapshot
-is community-maintained data; if it goes stale, wrong, or missing, the cost is a
-model shown by its id instead of its name, or a total that is off. It can never
-cause a wrong request, because nothing that shapes one reads it.
+The snapshot answering for a window at all is a deliberate change of position.
+It used to be kept out on the grounds that a community-maintained file which
+goes stale or wrong would shape the next request rather than cost a label. What
+that bought in practice was a constant: every model the LiteLLM table lacked --
+which included the shipped default -- was sized at 65,536 tokens, which is
+wrong for all of them and drove the trimmer and the curator's slow path at a
+fraction of the real window. The concern that motivated the exclusion -- a
+self-hosted ``hosted_vllm/qwen3-32b`` reading OpenRouter's ``qwen/qwen3-32b``
+-- is real, and it is met by the matching rule rather than by discarding the
+data: every lookup here is an exact key match on the id as stored, with no
+cross-provider, wire-prefix or basename fallback, so a deployment the snapshot
+has no row for is answered with nothing and the caller says so.
 
-The snapshot ships with OpenDDE Harness so a fresh install labels models offline and tests
-never reach the network. Regenerate with
-``scripts/refresh_models_dev_snapshot.py``.
+The snapshot ships with OpenDDE Harness so a fresh install works offline and tests never
+reach the network; the machines it has to run on cannot reach the catalogue's
+site, so nothing at runtime fetches it. Regenerate with
+``scripts/refresh_models_dev_snapshot.py`` and commit the result.
 """
 
 from __future__ import annotations
@@ -39,6 +49,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from opendde_harness.config.schema import ModelOverlay
 
 SNAPSHOT = Path(__file__).parent / "data" / "models_dev.json"
@@ -114,22 +126,132 @@ def model_cost(model: str) -> dict | None:
     Keyed by provider, which is the point: reading a price out of a flat
     cross-vendor table answers a self-hosted deployment with a hosted vendor's
     figure. ``model`` is a stored id, so the provider it names is the one asked.
+    Costs are published per million tokens.
+    """
+    entry = _provider_row(model)
+    cost = entry.get("cost") if entry else None
+    return cost if isinstance(cost, dict) else None
 
-    Prices are the one runtime number this file carries, and only because they
-    are reported after a call rather than used to shape one -- see the module
-    docstring for where that line is drawn.
+
+#: Rows for a provider models.dev does not list, kept by hand the way pi
+#: keeps its Codex catalogue: the ChatGPT backend serves OpenAI's models
+#: behind a 272k window (128k for the spark tier) and a 128k output ceiling,
+#: whatever the API's own row for the same id says -- and the API row says
+#: 1,050,000, which is the direction that refuses requests. Exact ids only,
+#: like every other table here: a slug not listed is unknown, not 272k.
+#: Keyed by the registry's provider name, then by the vendor id.
+_CODEX_LIMIT = {"context": 272_000, "output": 128_000}
+_CODEX_SPARK_LIMIT = {"context": 128_000, "output": 128_000}
+_BUILTIN_ROWS: dict[str, dict[str, dict]] = {
+    "openai_codex": {
+        "gpt-6-astra": {"limit": _CODEX_LIMIT, "reasoning": True},
+        "gpt-5.3-codex-spark": {"limit": _CODEX_SPARK_LIMIT, "reasoning": True},
+        "gpt-5.4": {"limit": _CODEX_LIMIT, "reasoning": True},
+        "gpt-5.4-mini": {"limit": _CODEX_LIMIT, "reasoning": True},
+        "gpt-5.5": {"limit": _CODEX_LIMIT, "reasoning": True},
+        "gpt-5.6-luna": {"limit": _CODEX_LIMIT, "reasoning": True},
+        "gpt-5.6-sol": {"limit": _CODEX_LIMIT, "reasoning": True},
+        "gpt-5.6-terra": {"limit": _CODEX_LIMIT, "reasoning": True},
+    },
+}
+
+
+def builtin_limit(model: str) -> dict | None:
+    """The limit this harness declares for a provider no catalogue lists, or None."""
+    return _limit_of(_builtin_row(model))
+
+
+def _builtin_row(model: str) -> dict | None:
+    from opendde_harness.providers.registry import find_by_model, split_model_id
+
+    if not split_model_id(model)[0]:
+        return None
+    spec = find_by_model(model)
+    rows = _BUILTIN_ROWS.get(spec.name) if spec else None
+    return rows.get(_vendor_id(spec.name, model)) if rows else None
+
+
+def served_limit(model: str) -> dict | None:
+    """The limit the provider named by this id serves the model with, or None.
+
+    A reseller may cap a model's window below the vendor's own figure, and
+    models.dev records that on the provider's row -- so this is asked before
+    :func:`native_limit`, and only ever about the provider the id names.
+    """
+    return _limit_of(_provider_row(model))
+
+
+def native_limit(model: str) -> dict | None:
+    """The vendor's own limit for this model, from the canonical table, or None.
+
+    Matched by exact key only, over the ids LiteLLM's table files this model
+    under -- the stored id, or the vendor's own spelling for a regional
+    instance of that vendor. Nothing else: no prefix stripping, no basename
+    match, no case folding, and not the id the request goes out under. The
+    wire id names the *driver*, and for a custom endpoint, a gateway or a
+    reseller that is another vendor's namespace: ``custom/gpt-5.6-terra``
+    goes out as ``openai/gpt-5.6-terra``, and reading OpenAI's native window
+    for it answered a relay that caps at 262k with 1,050,000 -- nothing was
+    trimmed and every request past the cap was refused. Under-estimating a
+    window wastes context; over-estimating one is a hard 400 on every request,
+    so such an endpoint is unknown here and declared through its overlay.
+    """
+    from opendde_harness.providers.wire import metadata_candidates
+
+    if not model:
+        return None
+    table = _snapshot().get("_models")
+    if not isinstance(table, dict):
+        return None
+    for key in metadata_candidates(model):
+        entry = table.get(key)
+        if isinstance(entry, dict):
+            return _limit_of(entry)
+    return None
+
+
+def model_reasoning(model: str) -> bool | None:
+    """Whether the catalogue says this model can reason; None when it has no row.
+
+    Provider row first, vendor row second, like the limits: a relay may serve
+    a family's thinking variant under its own id, and the vendor's row is the
+    answer for a provider the catalogue does not carry.
+    """
+    from opendde_harness.providers.wire import metadata_candidates
+
+    rows = (_builtin_row(model), _provider_row(model), *(_native_row(key) for key in metadata_candidates(model or "")))
+    for entry in rows:
+        if isinstance(entry, dict) and isinstance(entry.get("reasoning"), bool):
+            return entry["reasoning"]
+    return None
+
+
+def _native_row(key: str) -> dict | None:
+    table = _snapshot().get("_models")
+    entry = table.get(key) if isinstance(table, dict) else None
+    return entry if isinstance(entry, dict) else None
+
+
+def _limit_of(entry: dict | None) -> dict | None:
+    limit = entry.get("limit") if isinstance(entry, dict) else None
+    return limit if isinstance(limit, dict) and limit else None
+
+
+def _provider_row(model: str) -> dict | None:
+    """This model's row under the provider its id names, or None.
+
+    The id has to name its provider. `find_by_model` falls back to keyword
+    matching for a bare id, which reads across vendors: "qwen3-32b" matched
+    DashScope and was priced at DashScope's rate whoever was actually serving
+    it. That is the same borrowing the openrouter tier was gated to stop, one
+    tier down.
+
+    A bare id left by an older version therefore reads as unknown. That is not
+    worth a compatibility path: both surfaces that write a model now store it
+    qualified, so picking the model once restores the figure.
     """
     from opendde_harness.providers.registry import canonical_provider_name, find_by_model, split_model_id
 
-    # The id has to name its provider. `find_by_model` falls back to keyword
-    # matching for a bare id, which reads across vendors: "qwen3-32b" matched
-    # DashScope and was priced at DashScope's rate whoever was actually serving
-    # it. That is the same borrowing the openrouter tier was gated to stop, one
-    # tier down.
-    #
-    # A bare id left by an older version therefore prices as unknown. That is not
-    # worth a compatibility path: both surfaces that write a model now store it
-    # qualified, so picking the model once restores the figure.
     if not split_model_id(model)[0]:
         return None
     spec = find_by_model(model)
@@ -137,8 +259,28 @@ def model_cost(model: str) -> dict | None:
     if not provider:
         return None
     entry = _snapshot().get(canonical_provider_name(provider), {}).get("models", {}).get(_vendor_id(provider, model))
-    cost = entry.get("cost") if isinstance(entry, dict) else None
-    return cost if isinstance(cost, dict) else None
+    return entry if isinstance(entry, dict) else None
+
+
+def overlay_for(overlays: "Mapping[str, ModelOverlay]", model: str) -> "ModelOverlay | None":
+    """The overlay declared for this stored id, from a map keyed by ``merge_key``.
+
+    The provider is the one the id names, resolved the way routing resolves it,
+    so a declaration under a section is found for every spelling of that
+    section's ids -- and never for another provider's, which is what keeps a
+    window declared for a self-hosted model from answering for a hosted one of
+    the same name.
+    """
+    from opendde_harness.providers.registry import find_by_model, split_model_id
+    from opendde_harness.providers.wire import merge_key
+
+    if not overlays or not model:
+        return None
+    spec = find_by_model(model)
+    provider = spec.name if spec else split_model_id(model)[0]
+    if not provider:
+        return None
+    return overlays.get(merge_key(provider, model))
 
 
 def _with_overlay(row: ModelRow, overlay: "ModelOverlay | None") -> ModelRow:

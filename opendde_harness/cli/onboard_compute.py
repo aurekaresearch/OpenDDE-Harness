@@ -824,7 +824,7 @@ def probe_external_services(url: str, token: str, *, timeout: float = 10) -> lis
 
 def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, timeout: float = 10) -> dict[str, Any]:
     from opendde_harness.cli.compute_assets import inspect_assets, opendde_root, weights_root
-    from opendde_harness.cli.compute_code import runtime_code_dir, runtime_code_identity, verify_runtime_code
+    from opendde_harness.cli.compute_code import managed_code_status
 
     if config.get("compute_workers"):
         from opendde_harness.plugin.protein_design.servers.compute_pool import ComputeWorker
@@ -938,14 +938,13 @@ def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, time
             )
         if saved.get("code_mode") == "managed":
             # Managed code is not saved in the config; its directory follows the
-            # release, so ask for it rather than reading an empty package_root.
-            report["code"] = record(
-                "runtime_code",
-                lambda: verify_runtime_code(
-                    runtime_code_dir(),
-                    runtime_code_identity(),
-                ),
-            )
+            # release, and the service prepares it at start, so readiness means
+            # "startable without a download", not "already copied".
+            status = record("runtime_code", managed_code_status)
+            if status:
+                report["code"] = status["identity"]
+                if not status["prepared"]:
+                    report["checks"][-1]["note"] = "prepared at first start from cached sources"
         elif not Path(saved.get("package_root") or "", "external/opendde/runner/inference.py").is_file():
             report["checks"].append(
                 {

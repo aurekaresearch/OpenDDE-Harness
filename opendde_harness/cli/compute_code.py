@@ -89,6 +89,49 @@ def runtime_code_dir(cache_root: Path | None = None) -> Path:
     return _code_destination((cache_root or default_code_cache()).expanduser().resolve(), runtime_code_identity())
 
 
+def managed_code_status(cache_root: Path | None = None) -> dict[str, Any]:
+    """This release's managed runtime code: verified, or startable without a download.
+
+    The service prepares managed code itself when it starts, so a snapshot
+    that does not exist yet is not a fault as long as every pinned source is
+    cached (an archive under ``sources/``, or an earlier snapshot that holds
+    the same revision). What needs the user is a snapshot that exists and
+    fails verification, or a machine with nothing cached -- only then is
+    ``ddeharness compute prepare`` the remedy. Every source edit of an
+    editable install changes the identity, so this distinction is what keeps
+    a developer from re-running prepare by hand after each change.
+    """
+    identity = runtime_code_identity()
+    cache_root = (cache_root or default_code_cache()).expanduser().resolve()
+    destination = _code_destination(cache_root, identity)
+    if destination.exists() or destination.is_symlink():
+        verify_runtime_code(destination, identity)
+        return {"identity": identity, "path": str(destination), "prepared": True}
+    missing = [name for name, revision in identity["sources"].items() if not _source_cached(cache_root, name, revision)]
+    if missing:
+        raise ValueError(
+            "Runtime code for this release is not prepared and its pinned sources are not cached "
+            f"({', '.join(missing)}); run ddeharness compute prepare."
+        )
+    return {"identity": identity, "path": str(destination), "prepared": False}
+
+
+def _source_cached(cache_root: Path, name: str, revision: str) -> bool:
+    archive = cache_root / "sources" / f"{name}-{revision}.tar.gz"
+    if archive.is_file() and archive.stat().st_size > 0:
+        return True
+    if not cache_root.is_dir():
+        return False
+    for snapshot in _snapshots(cache_root):
+        try:
+            manifest = json.loads((snapshot / MANIFEST).read_text())
+            if manifest["identity"]["sources"].get(name) == revision and (snapshot / "external" / name).is_dir():
+                return True
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return False
+
+
 def _code_destination(cache_root: Path, identity: dict[str, Any]) -> Path:
     version = re.sub(r"[^A-Za-z0-9._-]", "_", identity["harness_version"])
     return cache_root / f"{version}-{identity['id'][:20]}"

@@ -719,6 +719,12 @@
           "schema": { "type": "string" }
         },
         {
+          "name": "wire",
+          "description": "Wire the endpoint serves: chat (/v1/chat/completions) or responses (/v1/responses). Only read for a provider whose driver has both.",
+          "required": false,
+          "schema": { "type": "string", "enum": ["responses", "chat"] }
+        },
+        {
           "name": "session_id",
           "required": false,
           "schema": { "type": "string" }
@@ -1373,6 +1379,11 @@
           "total_models": { "type": "integer" },
           "needs_api_base": { "type": "boolean" },
           "warning": { "type": "string" },
+          "wire": {
+            "type": "string",
+            "enum": ["responses", "chat"],
+            "description": "The wire this provider's endpoint is configured for, offered for the picker to switch; absent when the driver has only one wire."
+          },
           "model_labels": {
             "type": "object",
             "description": "Keyed by the model id as it appears in `models`.",
@@ -1419,7 +1430,11 @@
           "cost_usd": { "type": "number" },
           "context_used": { "type": "integer" },
           "context_max": { "type": "integer" },
-          "context_percent": { "type": "integer" }
+          "context_percent": { "type": "integer" },
+          "context_source": {
+            "type": "string",
+            "description": "Which tier sized context_max; \"unknown\" with a zero context_max means no table lists the model."
+          }
         }
       },
       "CliResult": {
@@ -1520,6 +1535,25 @@
             "required": ["index"],
             "properties": {
               "index": { "type": "integer" }
+            }
+          }
+        }
+      },
+      "TurnRetryEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "const": "turn.retry" },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["attempt", "total", "reason", "discard"],
+            "properties": {
+              "attempt": { "type": "integer" },
+              "total": { "type": "integer" },
+              "reason": { "type": "string" },
+              "discard": { "type": "boolean" }
             }
           }
         }
@@ -1705,6 +1739,7 @@
         "oneOf": [
           { "$ref": "#/components/schemas/MessageStartEvent" },
           { "$ref": "#/components/schemas/EpisodeStartEvent" },
+          { "$ref": "#/components/schemas/TurnRetryEvent" },
           { "$ref": "#/components/schemas/TokenDeltaEvent" },
           { "$ref": "#/components/schemas/ThinkingDeltaEvent" },
           { "$ref": "#/components/schemas/ToolStartEvent" },
@@ -1720,6 +1755,7 @@
           "mapping": {
             "message.start": "#/components/schemas/MessageStartEvent",
             "episode.start": "#/components/schemas/EpisodeStartEvent",
+            "turn.retry": "#/components/schemas/TurnRetryEvent",
             "token.delta": "#/components/schemas/TokenDeltaEvent",
             "thinking.delta": "#/components/schemas/ThinkingDeltaEvent",
             "tool.start": "#/components/schemas/ToolStartEvent",

@@ -38,6 +38,7 @@ const normalize = (raw: string) =>
 
 const ENTER = '\r'
 const DOWN = '[B'
+const RIGHT = '[C'
 
 const ESCAPE = String.fromCharCode(27)
 
@@ -351,6 +352,46 @@ describe('ModelPicker', () => {
       'model.save_key',
       expect.objectContaining({ api_base: 'https://api.example.com', api_key: 'sk-test', slug: 'custom' })
     )
+
+    h.unmount()
+  })
+
+  it('offers the wire for an endpoint whose driver has two, and saves the switch', async () => {
+    const h = mount([anthropic, { ...custom, wire: 'chat' }])
+    await delay(60)
+
+    await h.type(DOWN)
+    await h.type(ENTER)
+    await h.type(ENTER)
+
+    expect(h.frame()).toContain('Wire: Chat Completions (/v1/chat/completions)')
+
+    // Arrows flip it; a letter would land in the key field.
+    await h.type(RIGHT)
+    expect(h.frame()).toContain('Responses (/v1/responses)')
+
+    await h.type('sk-test')
+    await h.type(ENTER)
+    await h.type('https://relay.example/v1')
+    await h.type(ENTER)
+
+    expect(h.gw.request).toHaveBeenCalledWith(
+      'model.save_key',
+      expect.objectContaining({ wire: 'responses', api_base: 'https://relay.example/v1', slug: 'custom' })
+    )
+
+    h.unmount()
+  })
+
+  it('offers no wire switch when the driver has only one', async () => {
+    const h = mount([anthropic, custom])
+    await delay(60)
+
+    await h.type(DOWN)
+    await h.type(ENTER)
+    await h.type(ENTER)
+
+    expect(h.frame()).not.toContain('Wire:')
 
     h.unmount()
   })

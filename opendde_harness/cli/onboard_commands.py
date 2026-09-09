@@ -745,6 +745,42 @@ def _prompt_base_url(default: str = "https://", *, allow_back: bool = False) -> 
     return url
 
 
+def _prompt_wire(*, allow_back: bool = False) -> Any:
+    """Ask which wire a custom endpoint serves. Returns ``_BACK`` when backing out.
+
+    Asked rather than probed: neither wire can be told from an address, and a
+    wrong one is a hard error on every request. Chat Completions is first and
+    default because it is what nearly every relay implements.
+    """
+    questionary = _require_questionary()
+    from opendde_harness.cli._styles import OPENDDE_HARNESS_STYLE
+
+    choices: list[Any] = [
+        questionary.Choice(
+            _t(
+                "Chat Completions  (POST /v1/chat/completions, most relays)",
+                "Chat Completions(POST /v1/chat/completions,多数中转支持)",
+            ),
+            value="chat",
+        ),
+        questionary.Choice(
+            _t("Responses  (POST /v1/responses, OpenAI-native)", "Responses(POST /v1/responses,OpenAI 原生)"),
+            value="responses",
+        ),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(_t("Back", "返回"), value=_BACK))
+    chosen = questionary.select(
+        _t("Wire protocol the endpoint serves:", "端点支持的接口协议:"),
+        choices=choices,
+        style=OPENDDE_HARNESS_STYLE,
+        qmark=_QMARK,
+    ).ask()
+    if chosen is None:
+        raise typer.Exit(1)
+    return chosen
+
+
 def _prompt_custom_model(*, allow_back: bool = False) -> Any:
     """Select manual model entry for an endpoint without a model catalogue."""
     return _select_model_id([], allow_back=allow_back)
@@ -1306,6 +1342,7 @@ def _configure_one_provider(
     non_interactive: bool,
     warnings: list[str],
     skip_test: bool = False,
+    wire: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """Drive one provider through pick → credentials → verify → model → test.
 
@@ -1330,8 +1367,8 @@ def _configure_one_provider(
         --api-key by design -- ended the whole wizard on a usage error, losing
         the later steps this loop exists to keep.
         """
-        nonlocal flag_provider, api_key, base_url, model
-        flag_provider = api_key = base_url = model = None
+        nonlocal flag_provider, api_key, base_url, model, wire
+        flag_provider = api_key = base_url = model = wire = None
 
     while True:
         if flag_provider:
@@ -1390,6 +1427,7 @@ def _configure_one_provider(
             base_url=base_url,
             model=model,
             non_interactive=non_interactive,
+            wire=wire,
         )
         if custom_model is _BACK:
             # User backed out of the first credential field — rewind to the
@@ -1442,6 +1480,7 @@ def _collect_credentials(
     base_url: Optional[str],
     model: Optional[str],
     non_interactive: bool,
+    wire: Optional[str] = None,
 ) -> Any:
     """Auth setup: OAuth browser flow or api_key write. Returns the custom
     model id when the provider is ``custom`` (locked in here), ``None`` for a
@@ -1534,12 +1573,14 @@ def _collect_credentials(
         prompts: list[Callable[[], Any]] = [lambda: _prompt_api_key(provider, allow_back=True)]
         if is_custom:
             prompts.append(lambda: _prompt_base_url(allow_back=True))
+            prompts.append(lambda: _prompt_wire(allow_back=True))
         collected = _collect_fields(prompts)
         if collected is None:
             return _BACK
         api_key = collected[0]
         if is_custom:
             base_url = collected[1]
+            wire = collected[2]
     else:
         if not api_key:
             if non_interactive:
@@ -1550,6 +1591,8 @@ def _collect_credentials(
                 if non_interactive:
                     raise typer.BadParameter("--base-url is required when --provider=custom in non-interactive mode")
                 base_url = _prompt_base_url()
+            if not wire and not non_interactive:
+                wire = _prompt_wire()
             if not model and non_interactive:
                 raise typer.BadParameter("--model is required when --provider=custom in non-interactive mode")
 
@@ -1557,6 +1600,10 @@ def _collect_credentials(
     custom_model: Optional[str] = None
     if is_custom:
         fields["api_base"] = base_url
+        # Unset in non-interactive mode leaves the spec's default (chat) in
+        # force rather than writing a value the user never chose.
+        if wire:
+            fields["wire"] = wire
         custom_model = model
     elif base_url:
         fields["api_base"] = base_url
@@ -1818,7 +1865,9 @@ def _manage_existing_providers(*, non_interactive: bool) -> None:
                     stored = ""
                 retyped_key = _prompt_api_key(target)
                 retyped_url = _prompt_base_url(stored or "https://")
-                _write_provider_fields(target, {"api_key": retyped_key, "api_base": retyped_url})
+                _write_provider_fields(
+                    target, {"api_key": retyped_key, "api_base": retyped_url, "wire": _prompt_wire()}
+                )
             else:
                 _write_provider_fields(target, {"api_key": _prompt_api_key(target)})
             console.print(
@@ -1896,6 +1945,7 @@ def _step1_provider(
     non_interactive: bool,
     warnings: list[str],
     skip_test: bool = False,
+    wire: Optional[str] = None,
 ) -> object:
     """Step 1 screen. Returns ``_BACK`` only when the user backs out of the
     first-run picker on the welcome screen (handled by the runner)."""
@@ -1917,6 +1967,7 @@ def _step1_provider(
             non_interactive=non_interactive,
             warnings=warnings,
             skip_test=skip_test,
+            wire=wire,
         )
         if result is None:
             return _BACK
@@ -2110,6 +2161,7 @@ def run_wizard(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
+    wire: Optional[str] = None,
     skip_memory: bool = False,
     skip_protein_design: bool = False,
     non_interactive: bool = False,
@@ -2137,6 +2189,7 @@ def run_wizard(
             api_key=api_key,
             base_url=base_url,
             model=model,
+            wire=wire,
             skip_memory=skip_memory,
             skip_protein_design=skip_protein_design,
             non_interactive=non_interactive,
@@ -2166,6 +2219,7 @@ def _run_wizard_body(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
+    wire: Optional[str] = None,
     skip_memory: bool = False,
     skip_protein_design: bool = False,
     non_interactive: bool = False,
@@ -2220,6 +2274,7 @@ def _run_wizard_body(
             non_interactive=non_interactive,
             warnings=warnings,
             skip_test=skip_test,
+            wire=wire,
         ),
         lambda: onboard_memory._step4_memory(
             skip=skip_memory,
@@ -2325,6 +2380,11 @@ def register(app: typer.Typer) -> None:
             help="Server URL: required for a local deployment (ollama_chat / hosted_vllm), or a custom OpenAI-compatible endpoint",
         ),
         model: Optional[str] = typer.Option(None, "--model", help="Default model id (e.g. 'openai/gpt-4o-mini')"),
+        wire: Optional[str] = typer.Option(
+            None,
+            "--wire",
+            help="Wire a custom endpoint serves: 'chat' (/v1/chat/completions, the default) or 'responses' (/v1/responses)",
+        ),
         skip_memory: bool = typer.Option(False, "--skip-memory", help="Skip Step 2 (Persistent Memory)"),
         skip_protein_design: bool = typer.Option(
             False, "--skip-protein-design", help="Skip Step 3 (Protein Design compute settings)"
@@ -2347,11 +2407,14 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Configure LLM, memory and Protein Design compute."""
+        if wire is not None and wire not in ("chat", "responses"):
+            raise typer.BadParameter(f"--wire must be 'chat' or 'responses' (got {wire!r})")
         run_wizard(
             provider=provider,
             api_key=api_key,
             base_url=base_url,
             model=model,
+            wire=wire,
             skip_memory=skip_memory,
             skip_protein_design=skip_protein_design,
             non_interactive=non_interactive,

@@ -51,11 +51,14 @@ class ContextConfig(_Base):
     fast_path_threshold: float = 0.60
     """Curator Fast Path cutoff. Below this % of budget → zero-LLM pass-through."""
 
-    curator_model: str = "gemini-2.5-flash"
-    """Model used by the Curator agent loop (Slow Path). Kept small & fast."""
+    curator_model: str = ""
+    """Model for the Curator agent loop (Slow Path). Empty follows the agent's
+    own model, which every configured provider can serve; a pin names one
+    the provider must be able to route to."""
 
-    curator_timeout_seconds: float = 30.0
-    """Max wall time for one Curator slow-path invocation before fallback."""
+    curator_timeout_seconds: float = 60.0
+    """Max wall time for one Curator slow-path invocation before the
+    deterministic fallback takes over."""
 
     relevance_decay: float = 0.95
     """Per-turn decay factor for non-recent message relevance."""

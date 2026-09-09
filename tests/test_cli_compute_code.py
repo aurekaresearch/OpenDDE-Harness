@@ -304,3 +304,32 @@ def test_prepared_code_prunes_stale_snapshots(tmp_path, installed_code, monkeypa
     assert f"Removed stale runtime code: {stale[0]}\n" in capsys.readouterr().out
     assert compute_code.prepare_runtime_code(cache) == root
     assert (cache / "0.9.0-1").is_dir()
+
+
+def test_managed_code_is_ready_when_prepared_or_when_its_sources_are_cached(tmp_path, installed_code):
+    cache = tmp_path / "cache"
+    identity = compute_code.runtime_code_identity()
+
+    with pytest.raises(ValueError, match="compute prepare"):
+        compute_code.managed_code_status(cache)
+
+    (cache / "sources").mkdir(parents=True)
+    for name, revision in identity["sources"].items():
+        (cache / "sources" / f"{name}-{revision}.tar.gz").write_bytes(b"archive")
+    status = compute_code.managed_code_status(cache)
+    assert status["prepared"] is False and status["identity"]["id"] == identity["id"]
+
+    root = compute_code.prepare_runtime_code(cache)
+    status = compute_code.managed_code_status(cache)
+    assert status["prepared"] is True and status["path"] == str(root)
+
+
+def test_an_earlier_snapshot_holding_the_same_sources_counts_as_cached(tmp_path, installed_code, monkeypatch):
+    cache = tmp_path / "cache"
+    compute_code.prepare_runtime_code(cache)
+    # A source edit changes the release identity; the sources did not change.
+    (installed_code / "__init__.py").write_text("release = 2\n")
+
+    status = compute_code.managed_code_status(cache)
+
+    assert status["prepared"] is False

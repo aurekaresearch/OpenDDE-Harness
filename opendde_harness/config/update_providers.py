@@ -712,6 +712,52 @@ def remove_provider_model(
     return models
 
 
+def set_model_overlay(
+    name: str,
+    model: str,
+    fields: dict[str, Any],
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Patch one model's ``modelOverlay`` entry under a provider.
+
+    Matched by identity (``wire.merge_key``) so a declaration written against
+    a bare id is updated rather than duplicated; a new entry is keyed by the
+    stored spelling. Returns the entry as stored. Raises KeyError for an
+    unknown provider or field, ValidationError for a value the overlay rejects.
+    """
+    from opendde_harness.config.schema import ModelOverlay
+    from opendde_harness.providers.wire import merge_key, stored_model_id
+
+    name = canonical_provider_name(name)
+    cls = _provider_schema_cls(name)
+    unknown = [k for k in fields if k not in ModelOverlay.model_fields]
+    if unknown:
+        raise KeyError(f"Unknown overlay field(s) {unknown}. Available: {sorted(ModelOverlay.model_fields)}")
+
+    path = config_path or get_config_path()
+    data = read_raw_or_raise(path)
+    # A section that no longer validates is left alone: falling back to the
+    # defaults and writing them back erased the key, base URL and models to
+    # change one overlay field.
+    instance = cls.model_validate(_raw_section(data, name))
+
+    overlays = dict(getattr(instance, "model_overlay", None) or {})
+    target = merge_key(name, model)
+    key = next((k for k in overlays if merge_key(name, k) == target), stored_model_id(name, model))
+    current = overlays.get(key, ModelOverlay()).model_dump()
+    coerced = {k: coerce_value(v, ModelOverlay.model_fields[k].annotation) for k, v in fields.items()}
+    entry = ModelOverlay.model_validate({**current, **coerced})
+    overlays[key] = entry
+
+    working = instance.model_dump()
+    working["model_overlay"] = {k: v.model_dump() for k, v in overlays.items()}
+    validated = cls.model_validate(working)
+    _write_raw_section(data, name, validated.model_dump(by_alias=True))
+    write_json_atomic(path, data)
+    return entry.model_dump(by_alias=True, exclude_none=True)
+
+
 def _load_provider_endpoints(name: str, data: dict[str, Any]) -> tuple[type, list[ProviderEndpoint]]:
     """Deliberately lets ValidationError out instead of falling back to ``cls()``.
 

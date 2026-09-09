@@ -44,21 +44,36 @@ class AssembledContext:
 
 @dataclass
 class TokenBudget:
-    """Token budget breakdown for one turn."""
+    """Token budget breakdown for one turn.
 
-    context_length: int  # Model's context window
+    ``context_length`` and ``available_history`` are ``None`` when the model's
+    window is unknown -- no table carries it and the user declared none. Every
+    consumer checks for that explicitly rather than computing against a stand-in:
+    the trimmer does not trim, the curator takes its fast path, and
+    :attr:`threshold` reports no trigger. A number in their place used to be
+    65,536 for every such model, which trimmed and compacted real windows at a
+    fraction of their size.
+    """
+
+    context_length: int | None  # Model's context window; None when unknown
     reserved_output: int  # Reserved for completion
     reserved_tools: int  # Tool schemas + results in prompt
     reserved_system: int  # System prompt overhead
-    available_history: int  # What's left for session history + archive injection
+    available_history: int | None  # What's left for session history; None when unknown
 
     @property
     def total_reserved(self) -> int:
         return self.reserved_output + self.reserved_tools + self.reserved_system
 
     @property
-    def threshold(self) -> int:
-        """Compaction trigger (75% of available_history by default)."""
+    def known(self) -> bool:
+        return self.available_history is not None
+
+    @property
+    def threshold(self) -> int | None:
+        """Compaction trigger (75% of available_history by default); None when unknown."""
+        if self.available_history is None:
+            return None
         return int(self.available_history * 0.75)
 
 

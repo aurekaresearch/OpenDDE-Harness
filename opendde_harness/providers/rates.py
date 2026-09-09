@@ -7,14 +7,20 @@ next to the cost formula, which put a provider decision outside
 benchmark runner carried its own rate table, and the window resolution grew an
 OpenRouter fallback that answered for vendors OpenRouter does not serve.
 
-Two questions, deliberately answered from different places:
+Two questions, answered with different tolerances:
 
 * **rates** price a call after it happened. A wrong figure costs an inaccurate
-  total, so the ladder can reach for a community-maintained catalogue.
-* **the context window** sizes trimming, so it shapes the next request. Only the
-  tables that also route may answer it, and an unknown window is answered with
-  ``None`` -- the caller keeps its configured default, which is honest, where a
-  window borrowed from another vendor is silently wrong.
+  total, so the ladder can reach for a live catalogue.
+* **the context window** sizes trimming, so it shapes the next request. It is
+  answered only from tables that ship with the install -- a user's own
+  declaration, the bundled models.dev snapshot, LiteLLM's table -- by exact
+  key, and never from the network: the machines this runs on cannot reach a
+  catalogue site, and a fetch that fails there would degrade silently. An
+  unknown window is answered as unknown. It used to be answered with 65,536,
+  which was wrong for every model it applied to (the shipped default among
+  them) and drove the trimmer and the curator's slow path off a number nothing
+  had measured; the callers now treat an unknown window as "do not trim" and
+  say so, the way an unknown price reads as unknown rather than free.
 """
 
 from __future__ import annotations
@@ -24,16 +30,42 @@ import re
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import httpx
 from loguru import logger
 
 from opendde_harness.providers import model_catalog_cache
 
-#: One home for the window ladder's documented fallback: an unknown model gets
-#: this many tokens of headroom rather than a number invented at the call site.
-DEFAULT_CONTEXT_WINDOW_TOKENS = 65_536
+if TYPE_CHECKING:
+    from opendde_harness.config.schema import ModelOverlay
+
+#: How a resolved number was arrived at, kept beside it so every surface that
+#: prints one can say where it came from -- a window nothing measured used to
+#: print as "auto", indistinguishable from a real one.
+SOURCE_OVERLAY = "overlay"  # providers.<name>.modelOverlay, a per-model declaration
+SOURCE_LITELLM = "litellm"
+SOURCE_BUILTIN = "built-in"  # a row this harness keeps for a provider no catalogue lists
+SOURCE_SERVED = "models.dev/provider"  # the provider's own row: the limit as served
+SOURCE_NATIVE = "models.dev/model"  # the vendor's canonical row: the native limit
+SOURCE_ESTIMATED = "estimated"  # a fixed fallback, not this model's figure
+SOURCE_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class Resolved:
+    """A number and the tier that answered it. ``tokens`` is None only for an
+    unknown window; an output ceiling always resolves, to an estimate at worst."""
+
+    tokens: int | None
+    source: str
+
+    @property
+    def known(self) -> bool:
+        return self.tokens is not None and self.source not in (SOURCE_ESTIMATED, SOURCE_UNKNOWN)
+
 
 # Output ceiling for a model the catalogue does not know -- self-hosted
 # deployments, gateways, models newer than the table. Not a default in the
@@ -42,7 +74,9 @@ DEFAULT_CONTEXT_WINDOW_TOKENS = 65_536
 # breadth rather than for any single model: Claude Code defaults to 16000, the
 # Anthropic SDK suggests ~16000 non-streaming, and gpt-4o's real ceiling is
 # also 16384. Unmapped backends are OpenAI-compatible servers in practice,
-# which clamp an over-large value rather than rejecting it.
+# which clamp an over-large value rather than rejecting it. There is no
+# counterpart for the window: a request has to name a ceiling, but nothing has
+# to trim against a window nobody measured.
 DEFAULT_MAX_OUTPUT_TOKENS = 16384
 
 #: Rate pair: (prompt_cost_per_token, completion_cost_per_token) in USD.
@@ -51,13 +85,6 @@ DEFAULT_MAX_OUTPUT_TOKENS = 16384
 _FALLBACK_PRICING: dict[str, tuple[float, float]] = {
     # OpenRouter model pages (snapshot 2026-03)
     "z-ai/glm-4.5-air": (0.13e-6, 0.85e-6),  # $0.13/$0.85 per 1M
-}
-
-# Small, reviewed fallback for models OpenDDE Harness exposes as defaults before the
-# pinned LiteLLM catalogue learns them. Context windows affect request
-# trimming, so only first-party values for shipped defaults belong here.
-_FALLBACK_CONTEXT_WINDOWS: dict[str, int] = {
-    "minimax/MiniMax-M3": 1_000_000,
 }
 
 # Live OpenRouter price table, fetched lazily and cached 1h in-process.
@@ -203,45 +230,19 @@ def _try_litellm_rates(model: str, input_tokens: int, output_tokens: int) -> tup
     return None
 
 
-def _cache_only_openrouter_models() -> dict[str, dict]:
-    """Whatever OpenRouter table is already on hand, without a network call.
-
-    For a caller inside object construction or an asyncio event loop --
-    ``AgentLoop.__init__`` and a ``/model`` switch, both of which resolve a
-    context window before there is a request to size. Those callers want
-    whatever is already on hand: an in-process cache of any age answers, then
-    an on-disk cache of any age, then an empty table -- the network is never
-    touched, because a synchronous ``httpx.Client`` there would block startup
-    or freeze the running event loop for up to 10s. A stale answer only costs
-    a stale window; a blocked event loop costs the whole turn.
-    """
-    global _OPENROUTER_CACHE, _OPENROUTER_CACHE_TIME
-
-    if _OPENROUTER_CACHE:
-        return _OPENROUTER_CACHE
-    disk = model_catalog_cache.load()
-    if disk is not None:
-        _OPENROUTER_CACHE, _OPENROUTER_CACHE_TIME = disk
-        return _OPENROUTER_CACHE
-    return {}
-
-
-def _fetch_openrouter_models(*, allow_fetch: bool = True) -> dict[str, dict]:
+def _fetch_openrouter_models() -> dict[str, dict]:
     """Return OpenRouter's model table, fetched live and cached 1h in-process.
 
     Each entry is ``{"pricing": ..., "context_length": ...}``, double-keyed by
     the full id and the bare alias. On any network failure, returns the stale
     cache (or an empty dict) -- pricing must never raise into the cost path.
 
-    ``allow_fetch=False`` delegates to ``_cache_only_openrouter_models``; see
-    there for what it changes. The per-call usage path is the place that still
-    refreshes normally -- it already runs inside an ``await``, and is where a
-    stale price or window is supposed to catch up.
+    Reached only from the pricing path, which runs after a call inside an
+    ``await`` and is where a stale price is supposed to catch up. The window
+    path never comes here: a window shapes the next request and is answered
+    from the bundled tables alone (see ``resolve_context_window``).
     """
     global _OPENROUTER_CACHE, _OPENROUTER_CACHE_TIME
-
-    if not allow_fetch:
-        return _cache_only_openrouter_models()
 
     now = time.time()
     if _OPENROUTER_CACHE and (now - _OPENROUTER_CACHE_TIME) < _OPENROUTER_CACHE_TTL:
@@ -433,26 +434,22 @@ def _dotted_version_variants(key: str) -> list[str]:
     return variants
 
 
-def _lookup_openrouter_entry(model: str, *, allow_fetch: bool = True) -> dict | None:
+def _lookup_openrouter_entry(model: str) -> dict | None:
     """This model's row in OpenRouter's catalogue, or None.
 
-    Only for ids that name OpenRouter. The table was once consulted for every id,
+    Only for ids that name OpenRouter, so every other id returns None here by
+    design rather than by accident. The table was once consulted for every id,
     which reads across vendors: a self-hosted ``hosted_vllm/qwen3-32b`` matched
     OpenRouter's ``qwen/qwen3-32b`` and was reported at a price and a context
     window belonging to somebody else's deployment. What made it wrong was asking
     this table about a request that does not go to OpenRouter -- not the bare
     alias, which stays because within OpenRouter's own namespace a bare id names
     the same model the full one does.
-
-    ``allow_fetch=False`` reaches ``_cache_only_openrouter_models`` directly
-    rather than ``_fetch_openrouter_models(allow_fetch=False)`` -- the latter is
-    the name a test double stands in for with the fetch's old zero-argument
-    signature, and that double does not declare ``allow_fetch``.
     """
     if not model.startswith("openrouter/"):
         return None
     key = model.removeprefix("openrouter/")
-    table = _fetch_openrouter_models() if allow_fetch else _cache_only_openrouter_models()
+    table = _fetch_openrouter_models()
     for candidate in (key, *_dotted_version_variants(key)):
         entry = table.get(candidate)
         if entry is None and "/" in candidate:
@@ -566,49 +563,80 @@ def _try_litellm_max_output(model: str, *, allow_import: bool = True) -> int | N
     input side: in LiteLLM's table it *is* the output ceiling, and the two
     agree wherever both are present.
 
-    Both tiers are filtered through ``_trustworthy_ceiling``: the rows that get
-    this wrong answer the table and ``get_model_info`` alike, so guarding one
-    would hand back exactly what the other just rejected.
+    Read from the static table only, for the reason ``_try_litellm_context_window``
+    gives; filtered through ``_trustworthy_ceiling``.
     """
     if not allow_import and "litellm" not in sys.modules:
-        return None
-    try:
-        from opendde_harness.providers.litellm_setup import import_litellm
-
-        litellm = import_litellm()
-    except Exception:
         return None
 
     for candidate in _candidates(model):
         ceiling = _trustworthy_ceiling(_table_entry(candidate))
         if ceiling:
             return ceiling
-        if _may_prompt(candidate):
-            continue
-        try:
-            info = litellm.get_model_info(candidate)
-        except Exception:
-            continue
-        ceiling = _trustworthy_ceiling(info)
-        if ceiling:
-            return ceiling
     return None
 
 
-def resolve_max_output_tokens(model: str | None, *, allow_fetch: bool = True) -> int:
-    """How many output tokens to ask for. Never ``None`` -- the caller is about
-    to build a request with the result.
+def _snapshot_limit(model: str, field: str, lookup, source: str) -> Resolved | None:
+    value = _numeric(lookup(model), field)
+    return Resolved(int(value), source) if value else None
 
-    Table first, fixed fallback second, which is the shape LiteLLM's own
-    Anthropic path uses and for the same reason: one constant cannot fit every
-    model. Too large for a small model is a 400; too small for a large one
-    truncates silently, which is the failure this whole module's callers exist
-    to avoid. See ``DEFAULT_MAX_OUTPUT_TOKENS`` for how that fallback is
-    chosen; it only ever answers for a model the catalogue has no row for.
+
+def _builtin(model: str, field: str) -> Resolved | None:
+    """The harness's own row for a provider no catalogue lists (see catalog._BUILTIN_ROWS)."""
+    from opendde_harness.providers.catalog import builtin_limit
+
+    return _snapshot_limit(model, field, builtin_limit, SOURCE_BUILTIN)
+
+
+def _served(model: str, field: str) -> Resolved | None:
+    """The bundled snapshot's provider row: the limit as the named provider serves it."""
+    from opendde_harness.providers.catalog import served_limit
+
+    return _snapshot_limit(model, field, served_limit, SOURCE_SERVED)
+
+
+def _native(model: str, field: str) -> Resolved | None:
+    """The bundled snapshot's canonical row: the vendor's native limit, an upper bound."""
+    from opendde_harness.providers.catalog import native_limit
+
+    return _snapshot_limit(model, field, native_limit, SOURCE_NATIVE)
+
+
+def _declared(overlay: "ModelOverlay | None", field: str) -> int | None:
+    value = getattr(overlay, field, None) if overlay is not None else None
+    return int(value) if isinstance(value, int) and value > 0 else None
+
+
+def resolve_max_output_tokens(
+    model: str | None, *, overlay: "ModelOverlay | None" = None, allow_import: bool = True
+) -> Resolved:
+    """How many output tokens to ask for. ``tokens`` is never ``None`` -- the
+    caller is about to build a request with the result.
+
+    Declaration first, tables second, fixed fallback last, which is the shape
+    LiteLLM's own Anthropic path uses and for the same reason: one constant
+    cannot fit every model. Too large for a small model is a 400; too small for
+    a large one truncates silently, which is the failure this whole module's
+    callers exist to avoid. Same tier order as ``resolve_context_window`` and
+    for the same reasons. See ``DEFAULT_MAX_OUTPUT_TOKENS`` for how the
+    fallback is chosen; it only ever answers for a model no table has a row
+    for, and the result says so.
+
+    ``allow_import=False`` answers only from a LiteLLM already imported; see
+    ``_try_litellm_context_window``.
     """
+    declared = _declared(overlay, "max_output_tokens")
+    if declared:
+        return Resolved(declared, SOURCE_OVERLAY)
     if not model:
-        return DEFAULT_MAX_OUTPUT_TOKENS
-    return _try_litellm_max_output(model, allow_import=allow_fetch) or DEFAULT_MAX_OUTPUT_TOKENS
+        return Resolved(DEFAULT_MAX_OUTPUT_TOKENS, SOURCE_ESTIMATED)
+    served = _builtin(model, "output") or _served(model, "output")
+    if served:
+        return served
+    ceiling = _try_litellm_max_output(model, allow_import=allow_import)
+    if ceiling:
+        return Resolved(ceiling, SOURCE_LITELLM)
+    return _native(model, "output") or Resolved(DEFAULT_MAX_OUTPUT_TOKENS, SOURCE_ESTIMATED)
 
 
 def _try_litellm_context_window(model: str, *, allow_import: bool = True) -> int | None:
@@ -618,8 +646,7 @@ def _try_litellm_context_window(model: str, *, allow_import: bool = True) -> int
     that carry no ``max_input_tokens``. Not because the two mean the same
     thing, but because a model's window is never smaller than what it is
     allowed to emit, so the output ceiling is a safe lower bound -- and a lower
-    bound only over-trims, where this module's documented default (65536) would
-    over-estimate an 8k model by a factor of eight.
+    bound only over-trims.
 
     ``allow_import=False`` answers only from a LiteLLM already sitting in
     ``sys.modules``: importing it costs ~2-7s, and a caller passing this
@@ -630,91 +657,76 @@ def _try_litellm_context_window(model: str, *, allow_import: bool = True) -> int
     """
     if not allow_import and "litellm" not in sys.modules:
         return None
-    try:
-        from opendde_harness.providers.litellm_setup import import_litellm
-
-        litellm = import_litellm()
-    except Exception:
-        return None
 
     for candidate in _candidates(model):
-        # The table before the ask: it holds every model the interactive-login
-        # drivers are asked about in practice, and reading it cannot prompt.
+        # The table and nothing else: ``get_model_info`` is not a static
+        # lookup for every driver (ollama asks its server over HTTP, and the
+        # device-flow drivers can start a login), and this runs on the event
+        # loop at every model switch.
         window = _numeric(_table_entry(candidate), "max_input_tokens", "max_tokens")
         if window:
             return int(window)
-        if _may_prompt(candidate):
-            continue
-        try:
-            info = litellm.get_model_info(candidate)
-        except Exception:
-            continue
-        window = _numeric(info, "max_input_tokens", "max_tokens")
-        if window:
-            return int(window)
     return None
 
 
-def resolve_context_window(model: str, *, allow_fetch: bool = True) -> int | None:
-    """Return a model's real context window in tokens, or None.
+def resolve_context_window(
+    model: str | None,
+    *,
+    overlay: "ModelOverlay | None" = None,
+    allow_import: bool = True,
+) -> Resolved:
+    """The window to size trimming with, and where the number came from.
 
-    LiteLLM's static metadata first, then OpenRouter's catalogue for ids that
-    name OpenRouter. The snapshot is deliberately not a source: a window sizes
-    trimming, so a community-maintained file that goes stale or wrong would
-    shape the next request rather than cost a label. Unknown models return None
-    so the caller keeps its configured default.
+    The ladder, most specific first:
 
-    ``allow_fetch=False`` means "answer from what is already on hand": it
-    passes through to the OpenRouter tier (see ``_fetch_openrouter_models``)
-    and also tells the LiteLLM tier not to import LiteLLM on this caller's
-    behalf (see ``_try_litellm_context_window``) -- a caller cheap enough to
-    pass this is cheap enough not to pay a fresh import either.
+    1. the model's overlay -- ``providers.<name>.modelOverlay.<id>``. The user
+       describing their own deployment, and for a self-hosted model the only
+       source there is. The only declaration there is: a global pin was
+       retired because one number for every model the session switches to is
+       wrong for all but one of them;
+    2. a row this harness keeps for a provider no catalogue lists -- the
+       ChatGPT backend behind the Codex login, which serves OpenAI's models
+       with a window of its own (``_builtin``);
+    3. the bundled snapshot's provider row -- the window as the provider the
+       id names serves it (``_served``);
+    4. LiteLLM's static table. Below the snapshot's provider row, not above
+       it: measured on the 220 models both tables carry, they agree on 123,
+       and of the 97 disagreements 23 have LiteLLM larger -- MiniMax M2.5 at
+       1,000,000 against a real 204,800 -- which is the direction that refuses
+       requests. The table also lags releases by months, which is how the
+       shipped default came to be unknown;
+    5. the bundled snapshot's canonical row -- the vendor's native figure, an
+       upper bound (``_native``);
+    6. unknown. ``tokens`` is ``None`` and the source says so. Callers must not
+       trim, gate or compact against a number in its place: the constant that
+       used to stand here was wrong for every model it answered for and drove
+       the whole trimming chain at a fraction of the real window.
+
+    No tier reaches the network. ``allow_import=False`` additionally answers
+    only from a LiteLLM already in ``sys.modules`` -- importing it costs ~2-7s,
+    and a caller passing this (``AgentLoop`` construction, a ``/model`` switch
+    on the running event loop) wants the cheap tiers only. Once LiteLLM is
+    imported the check is free and the lookup proceeds as with ``True``.
     """
-    window = _try_litellm_context_window(model, allow_import=allow_fetch)
+    declared = _declared(overlay, "context_window_tokens")
+    if declared:
+        return Resolved(declared, SOURCE_OVERLAY)
+    if not model:
+        return Resolved(None, SOURCE_UNKNOWN)
+    served = _builtin(model, "context") or _served(model, "context")
+    if served:
+        return served
+    window = _try_litellm_context_window(model, allow_import=allow_import)
     if window:
-        return window
-
-    entry = _lookup_openrouter_entry(model, allow_fetch=allow_fetch)
-    if entry:
-        try:
-            length = int(entry.get("context_length") or 0)
-        except (TypeError, ValueError):
-            length = 0
-        if length:
-            return length
-    for candidate in _candidates(model):
-        if candidate in _FALLBACK_CONTEXT_WINDOWS:
-            return _FALLBACK_CONTEXT_WINDOWS[candidate]
-    return None
-
-
-def effective_context_window(model: str, configured: int | None, *, allow_fetch: bool = True) -> int:
-    """The context window to size trimming with -- the decision ladder's front door.
-
-    Explicit configuration wins outright: a user or caller who pinned a number
-    meant it as an override, not a hint. Absent that, the model's real window
-    from ``resolve_context_window`` answers; absent *that* too (an unmapped
-    model, or every source down), this module's documented default does --
-    never ``None``, since the caller is about to size a request with the
-    result.
-
-    ``resolve_context_window`` already folds every LiteLLM and network failure
-    into ``None`` rather than raising (see its tiers), so there is no
-    exception left here to catch.
-
-    ``allow_fetch=False`` passes straight through to ``resolve_context_window``;
-    see ``_fetch_openrouter_models`` for what it changes.
-    """
-    if configured:
-        return configured
-    return resolve_context_window(model, allow_fetch=allow_fetch) or DEFAULT_CONTEXT_WINDOW_TOKENS
+        return Resolved(window, SOURCE_LITELLM)
+    return _native(model, "context") or Resolved(None, SOURCE_UNKNOWN)
 
 
 def reset_openrouter_cache() -> None:
     """Clear the in-process OpenRouter catalog cache.
 
     Only useful for tests -- pair it with the ``model_catalog_cache._CACHE_PATH``
-    seam to exercise the disk tiers without touching the real ~/.opendde_harness/cache/.
+    seam to exercise the disk tier without touching the real ~/.opendde_harness/cache/.
     """
     global _OPENROUTER_CACHE, _OPENROUTER_CACHE_TIME, _WARM_AT
     _OPENROUTER_CACHE = {}

@@ -18,9 +18,14 @@ from opendde_harness.config.features import (
 
 
 class Base(BaseModel):
-    """Base model that accepts both camelCase and snake_case keys."""
+    """Accepts both camelCase and snake_case keys; rejects keys it does not know.
 
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    A key this release does not define is a typo or one an earlier release
+    wrote, and either is an error naming the key, never a value silently
+    dropped. Nothing is migrated: the config is the current schema.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
 
 class AgentDefaults(Base):
@@ -29,21 +34,20 @@ class AgentDefaults(Base):
     workspace: str = "~/.opendde_harness/workspace"
     model: str = "anthropic/claude-opus-4-5"
     provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
-    # No maxTokens here on purpose. A number in a config file cannot be right
-    # for every model -- too large is a 400, too small truncates silently --
-    # so the ceiling is resolved per model from the catalogue
-    # (providers/rates.resolve_max_output_tokens). An old config carrying the
-    # retired key is ignored rather than rejected: this model does not forbid
-    # extras.
-    # None (or 0) means "figure it out" -- resolved against the model's real
-    # window at construction time. A positive value pins the window, taking
-    # priority over whatever the model's own catalogue reports.
-    context_window_tokens: int | None = None
+    # No maxTokens and no contextWindowTokens here on purpose. A number in a
+    # config file cannot be right for every model -- too large is a 400, too
+    # small truncates or trims silently -- so both are resolved per model from
+    # the model's own overlay and the bundled tables (providers/rates). The
+    # place to declare either is `providers.<name>.modelOverlay.<id>`.
     temperature: float = 0.1
-    # Per-call wall-clock cap (seconds) for every LLM request (main loop and
-    # sub-agents). Bounds a stalled backend that trickles bytes without ever
-    # finishing, which an httpx per-read timeout never catches.
+    # Wall-clock cap (seconds) on a non-streamed LLM request (main loop and
+    # sub-agents). A streamed request is bounded per silence instead: the
+    # wait for its first event, then the gap between events. A stalled gateway
+    # then surfaces after the idle bound, not after ten minutes, and a reply
+    # that keeps arriving is never cut off for being long.
     llm_call_timeout: int = 600
+    llm_first_token_timeout: int = 300
+    llm_idle_timeout: int = 120
     max_tool_iterations: int = 40
     # Cap on subagent VMs running at once (excess spawns queue). ge=1: a
     # 0/negative cap would deadlock every subagent (Semaphore(0)).
@@ -62,8 +66,6 @@ class AgentDefaults(Base):
     post_tool_empty_max_nudges: int = 1
     thinking_prefill_max_retries: int = 2
     empty_content_max_retries: int = 3
-    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
-    memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     # Per-model request-parameter overrides, keyed by a substring of the model
     # name: {"kimi-k2.5": {"temperature": 1.0}}. Some models reject the usual
@@ -75,11 +77,6 @@ class AgentDefaults(Base):
     # structure can be written directly as extra_body: {...}.
     model_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
-    @property
-    def should_warn_deprecated_memory_window(self) -> bool:
-        """Return True when old memoryWindow is present without contextWindowTokens."""
-        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
-
 
 class AgentsConfig(Base):
     """Agent configuration."""
@@ -88,23 +85,38 @@ class AgentsConfig(Base):
 
 
 class ModelOverlay(Base):
-    """A name for a model no catalogue carries.
+    """What the user knows about a model that no catalogue carries.
 
     A self-hosted deployment serves whatever was put there, and a model released
     since the bundled snapshot is in no table yet, so the picker falls back to
-    showing the id. That is usually fine -- the id is the name the user gave
-    their own deployment -- but it leaves no way to label several of them.
+    showing the id and the loop to an unknown window. The id is usually a fine
+    name -- it is what the user called their own deployment -- but nothing else
+    about such a model can be looked up, and the user is the only source.
 
-    Only what a person states about presentation. Token accounting is not in
-    scope here -- `agents.defaults.contextWindowTokens` holds what a person can
-    state about it, and the output ceiling resolves per model with no knob at
-    all. What has no knob either is a *price* for an endpoint no catalogue
-    prices; such a deployment reports unknown spend rather than borrowing a
-    hosted model's rate. Adding one is a separate ask.
+    ``context_window_tokens`` and ``max_output_tokens`` are read first by the
+    resolvers in ``providers.rates``, ahead of every table: a person describing
+    their own deployment is the authority on it. Per model, and only per
+    model: one number for every model the session switches to is wrong for
+    all but one of them. A deployment configured with a smaller window than
+    the model's native one is exactly the case for this: the catalogue's
+    figure would be an over-estimate, and an over-estimate is a refused
+    request rather than wasted context.
+
+    ``wire`` picks the wire for this one model, over the section's
+    ``wire``: one relay can serve different models on different wires
+    (models.dev carries 289 such per-model overrides), so a provider-wide
+    setting cannot always be right.
+
+    What has no knob is a *price* for an endpoint no catalogue prices; such a
+    deployment reports unknown spend rather than borrowing a hosted model's
+    rate. Adding one is a separate ask.
     """
 
     label: str = ""
     description: str = ""
+    context_window_tokens: int | None = Field(default=None, gt=0)
+    max_output_tokens: int | None = Field(default=None, gt=0)
+    wire: Literal["responses", "chat"] | None = None
 
 
 class ProviderEndpoint(Base):
@@ -126,10 +138,13 @@ class ProviderConfig(Base):
 
     api_key: str = ""
     api_base: str | None = None
-    # OpenAI-compatible endpoints have two wire protocols.  New installations
-    # use Responses; Chat Completions remains an explicit compatibility mode
-    # for gateways that have not implemented ``POST /v1/responses`` yet.
-    api_mode: Literal["responses", "chat"] = "responses"
+    # OpenAI-compatible endpoints have two wire protocols: "chat" is
+    # POST /v1/chat/completions, "responses" is POST /v1/responses. None means
+    # the provider's own default (`ProviderSpec.wire`): Responses for
+    # OpenAI proper, Chat Completions for a relay or self-hosted endpoint,
+    # which is what most of them implement. Wrong wire is reported as a
+    # configuration error naming this field, never routed around silently.
+    wire: Literal["responses", "chat"] | None = None
     # Custom headers (e.g. APP-Code for AiHubMix) -- can carry a secret, so
     # display faces redact the values (keys stay visible).
     extra_headers: dict[str, str] | None = Field(default=None, json_schema_extra={"secret": True})
@@ -392,6 +407,30 @@ class ProvidersConfig(Base):
         if isinstance(extra, dict):
             return ProviderConfig.model_validate(extra)
         return None
+
+    def model_overlays(self) -> dict[str, ModelOverlay]:
+        """Every section's overlays in one map, keyed by ``wire.merge_key``.
+
+        Keyed by identity rather than by the string the user typed, so an
+        overlay written against a bare id still matches the qualified id the
+        loop runs on. One map for the loop to carry: it switches models at
+        runtime and has to find the new model's declaration without holding
+        the whole config.
+        """
+        from opendde_harness.providers.wire import merge_key
+
+        out: dict[str, ModelOverlay] = {}
+        sections: dict[str, Any] = {**self.__dict__, **(self.model_extra or {})}
+        for name, section in sections.items():
+            if isinstance(section, dict):
+                try:
+                    section = ProviderConfig.model_validate(section)
+                except Exception:
+                    continue
+            overlays = getattr(section, "model_overlay", None) or {}
+            for model, overlay in overlays.items():
+                out[merge_key(name, model)] = overlay
+        return out
 
 
 class WebSearchConfig(Base):

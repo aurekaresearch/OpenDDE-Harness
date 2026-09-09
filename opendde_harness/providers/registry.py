@@ -51,6 +51,17 @@ class ProviderSpec:
     # A vendor LiteLLM merely spells differently is NOT this: adopt LiteLLM's
     # spelling as `name` and keep ours in `name_aliases` (see hosted_vllm).
     via_driver: str = ""
+    # Which OpenAI-compatible wire this provider's endpoint serves when nothing
+    # in the config says: "chat" is POST /v1/chat/completions, "responses" is
+    # POST /v1/responses. Declared, never probed or guessed from an address --
+    # the same rule opencode and pi follow. Chat is the default because it is
+    # what an arbitrary relay implements: of the ~210 providers models.dev
+    # catalogues, 173 declare the Chat Completions package and 5 declare
+    # Responses. Only a provider known to serve Responses says so here; a user
+    # overrides per section (`wire`) or per model (`modelOverlay`). Read
+    # only where the request goes out under the openai driver -- every other
+    # driver has one wire.
+    wire: str = "chat"
     # Prefix LiteLLM's metadata table files this provider's models under, when it
     # differs from the routing prefix ("minimax-global/MiniMax-M3" is priced at
     # "minimax/MiniMax-M3"). None: the two coincide.
@@ -336,6 +347,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
         default_model="openai/gpt-5.5",
+        wire="responses",
     ),
     # OpenAI Codex: uses OAuth, not API key.
     ProviderSpec(
@@ -671,6 +683,16 @@ def litellm_spelling(name: str | None) -> str:
         if normalize_provider_name(candidate) == wanted:
             return candidate
     return wanted
+
+
+def default_wire(provider: str | None) -> str:
+    """The wire a provider's endpoint speaks unless its config says otherwise.
+
+    A vendor the registry carries no spec for is an OpenAI-compatible relay
+    reached with a key and an address, and those serve Chat Completions.
+    """
+    spec = find_by_name(provider)
+    return spec.wire if spec else "chat"
 
 
 def public_model_prefix(spec: "ProviderSpec") -> str:

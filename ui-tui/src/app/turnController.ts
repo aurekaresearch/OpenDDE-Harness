@@ -138,6 +138,9 @@ class TurnController {
   bufRef = ''
   episodes: Episode[] = []
   private lastEpisodeStartMs = 0
+  // Where the current model call's segments begin, so a discarding retry
+  // removes only that call's trail and keeps earlier calls' work.
+  private callSegmentStart = 0
   interrupted = false
   lastStatusNote = ''
   persistedToolLabels = new Set<string>()
@@ -677,10 +680,72 @@ class TurnController {
     }
   }
 
+  // The backend is re-running the current model call. With `discard`, what it
+  // streamed for this call is void: drop the live buffer and the current
+  // episode's accrual so the re-run's text replaces it instead of doubling it.
+  recordRetry({
+    attempt,
+    discard,
+    reason,
+    total
+  }: {
+    attempt: number
+    discard: boolean
+    reason: string
+    total: number
+  }) {
+    if (this.interrupted) {
+      return
+    }
+
+    if (discard) {
+      this.streamTimer = clear(this.streamTimer)
+      this.bufRef = ''
+      this.clearReasoning()
+      this.reasoningText = ''
+      this.activeReasoningText = ''
+      this.reasoningSegmentIndex = null
+      this.activeTools = []
+      this.pendingSegmentTools = []
+      this.segmentMessages = this.segmentMessages.slice(0, this.callSegmentStart)
+      patchTurnState({ streamPendingTools: [], streamSegments: this.segmentMessages, streaming: '', tools: [] })
+
+      const ep = this.currentEpisode()
+
+      if (ep) {
+        ep.reasoning = ''
+        ep.narration = ''
+        ep.tools = []
+        ep.reasoningMs = undefined
+        this.lastEpisodeStartMs = Date.now()
+        ep.startedAt = this.lastEpisodeStartMs
+        this.publishEpisodes()
+      }
+    }
+
+    const why = reason ? `: ${reason}` : ''
+
+    this.pushActivity(`retrying ${attempt}/${total}${why}`, 'warn')
+  }
+
   // Boundary marker: the backend has started a new model call. Opens a fresh
   // episode bucket that subsequent reasoning / narration / tools accrue into
   // (episodes-mode rendering); harmless in legacy mode.
   recordEpisodeStart(index: number) {
+    if (!this.interrupted) {
+      // The previous call's reasoning, text and tool shelf are its own; settle
+      // them into segments before the boundary so a discarding retry of the
+      // new call cannot take them, and the new call's reasoning opens a
+      // segment of its own instead of extending the old one.
+      this.closeReasoningSegment()
+
+      if (this.bufRef.trim() || this.pendingSegmentTools.length) {
+        this.flushStreamingSegment()
+      }
+
+      this.callSegmentStart = this.segmentMessages.length
+    }
+
     // Fully inert in legacy mode: opening no episode means no accrual, no
     // publishEpisodes churn, and the legacy render path is untouched.
     if (this.interrupted || getUiState().transcript !== 'episodes') {
@@ -996,6 +1061,7 @@ class TurnController {
   startMessage() {
     this.endReasoningPhase()
     this.clearReasoning()
+    this.callSegmentStart = 0
     this.activeTools = []
     this.activeReasoningText = ''
     this.reasoningSegmentIndex = null

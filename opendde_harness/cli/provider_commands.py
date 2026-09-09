@@ -25,6 +25,12 @@ reached through the plain LiteLLM client accept it:
 - ``provider endpoint remove <name> --label X``
 - ``provider endpoint list <name>``
 
+Model subcommands (``provider model ...``) write one model's ``modelOverlay``
+entry -- what the user knows about a model that no catalogue does: the wire
+it is served on, its context window and output ceiling, a label:
+
+- ``provider model set <name> <model> [--wire chat|responses] [--context-window N] ...``
+
 Architecture: write operations go ONLY through
 :mod:`opendde_harness.config.update_providers`. Command bodies do not import
 ``load_config`` / ``save_config`` / provider Pydantic classes.
@@ -821,6 +827,70 @@ def endpoint_list_cmd(
 
 
 provider_app.add_typer(endpoint_app, name="endpoint")
+
+
+model_app = typer.Typer(
+    help=(
+        "Describe one model under a provider: the wire it is served on "
+        "(--wire), its context window and output ceiling, a label. "
+        "Each flag patches one field of providers.<name>.modelOverlay.<model>; "
+        "the rest keep their values."
+    )
+)
+
+
+@model_app.command("set")
+def model_set_cmd(
+    name: str = typer.Argument(..., help="Provider name"),
+    model: str = typer.Argument(..., help="Model id, in any spelling the provider accepts"),
+    wire: str = typer.Option(
+        "", "--wire", help="Wire for this model: chat (/v1/chat/completions) or responses (/v1/responses)"
+    ),
+    context_window: int = typer.Option(0, "--context-window", help="Context window in tokens"),
+    max_output_tokens: int = typer.Option(0, "--max-output-tokens", help="Output ceiling in tokens"),
+    label: str = typer.Option("", "--label", help="Display name in the picker"),
+    description: str = typer.Option("", "--description", help="One-line description in the picker"),
+):
+    """Declare what you know about one model that no catalogue carries.
+
+    Examples:
+
+        ddeharness provider model set custom gpt-5.6-terra --wire responses --context-window 262144
+        ddeharness provider model set hosted-vllm qwen3-32b --context-window 32768 --max-output-tokens 4096
+    """
+    from pydantic import ValidationError
+
+    from opendde_harness.config.update_providers import set_model_overlay
+
+    fields: dict[str, Any] = {}
+    if wire:
+        fields["wire"] = wire
+    if context_window:
+        fields["context_window_tokens"] = context_window
+    if max_output_tokens:
+        fields["max_output_tokens"] = max_output_tokens
+    if label:
+        fields["label"] = label
+    if description:
+        fields["description"] = description
+    if not fields:
+        raise typer.BadParameter(
+            "pass at least one of --wire, --context-window, --max-output-tokens, --label, --description"
+        )
+
+    try:
+        entry = set_model_overlay(name, model, fields)
+    except KeyError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(1)
+    except ValidationError as exc:
+        console.print(f"[red]✗ Validation failed:[/red]\n{exc}")
+        raise typer.Exit(1)
+
+    console.print(f"[green]✓[/green] {name} / {model}: {json.dumps(entry)}")
+
+
+provider_app.add_typer(model_app, name="model")
 
 
 __all__ = ["provider_app"]

@@ -184,9 +184,10 @@ class ContextEngine(ABC):
         """
         return None
 
-    def set_context_window(self, tokens: int) -> None:
+    def set_context_window(self, tokens: int | None) -> None:
         """Follow a ``/model`` switch: re-budget whichever builders sized
-        themselves against the window at construction. Default is no-op so
+        themselves against the window at construction. ``None`` is an unknown
+        window, which the builders treat as "do not trim". Default is no-op so
         an engine with no such builder need not override it.
         """
         return None

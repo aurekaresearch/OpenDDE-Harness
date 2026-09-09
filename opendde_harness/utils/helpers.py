@@ -2,9 +2,12 @@
 
 import base64
 import binascii
+import hashlib
 import json
 import math
 import re
+import threading
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -256,54 +259,59 @@ def build_assistant_message(
     return msg
 
 
+# Token counts keyed by a digest of the text they were counted on. A session's
+# messages are re-estimated on every turn -- the manifest, the budget, and each
+# iteration of the trim loop all ask again -- and encoding is the cost: one
+# pass over a 100k-token history took a third of a second on the event loop,
+# and the trim loop took that pass once per dropped exchange. Hashing the text
+# is two orders of magnitude cheaper than encoding it, and a message that has
+# not changed encodes to the same count. Keyed by content rather than by
+# object so an edit in place (a tool body elided by the loop) is a miss, not a
+# stale hit. Bounded, so a long session cannot grow it without limit.
+_TOKEN_COUNT_CACHE: OrderedDict[bytes, int] = OrderedDict()
+_TOKEN_COUNT_CACHE_MAX = 16384
+# The curator counts in worker threads while the loop counts on its own; a
+# lookup racing an eviction raised KeyError out of move_to_end.
+_TOKEN_COUNT_LOCK = threading.Lock()
+
+
+def count_text_tokens(payload: str) -> int:
+    """tiktoken's count for ``payload``, cached by content."""
+    if not payload:
+        return 0
+    key = hashlib.blake2b(payload.encode("utf-8", "surrogatepass"), digest_size=16).digest()
+    with _TOKEN_COUNT_LOCK:
+        cached = _TOKEN_COUNT_CACHE.get(key)
+        if cached is not None:
+            _TOKEN_COUNT_CACHE.move_to_end(key)
+            return cached
+    try:
+        count = len(tiktoken.get_encoding("cl100k_base").encode(payload))
+    except Exception:
+        count = len(payload) // 4
+    with _TOKEN_COUNT_LOCK:
+        _TOKEN_COUNT_CACHE[key] = count
+        if len(_TOKEN_COUNT_CACHE) > _TOKEN_COUNT_CACHE_MAX:
+            _TOKEN_COUNT_CACHE.popitem(last=False)
+    return count
+
+
 def estimate_prompt_tokens(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> int:
-    """Estimate prompt tokens with tiktoken."""
-    parts: list[str] = []
-    extra_tokens = 0
-    for msg in messages:
-        content = msg.get("content")
-        if isinstance(content, str):
-            parts.append(content)
-        elif isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    txt = part.get("text", "")
-                    if txt:
-                        parts.append(txt)
-                elif (image_tokens := estimate_content_part_tokens(part)) is not None:
-                    extra_tokens += image_tokens
-                else:
-                    parts.append(json.dumps(part, ensure_ascii=False))
-        elif content is not None:
-            parts.append(json.dumps(content, ensure_ascii=False))
+    """Estimate prompt tokens with tiktoken.
 
-        for key in ("name", "tool_call_id"):
-            value = msg.get(key)
-            if isinstance(value, str) and value:
-                parts.append(value)
-        if msg.get("tool_calls"):
-            parts.append(json.dumps(msg["tool_calls"], ensure_ascii=False))
-        reasoning = msg.get("reasoning_content")
-        if isinstance(reasoning, str) and reasoning:
-            parts.append(reasoning)
-        if msg.get("thinking_blocks"):
-            parts.append(json.dumps(msg["thinking_blocks"], ensure_ascii=False))
-
+    Additive over messages, so each message's count comes from the cache and a
+    prompt that grew by one message costs one encode. Counting the joined text
+    in one pass gave a marginally different total at each message boundary; an
+    estimate does not owe that precision, and the per-turn cost it carried was
+    the TUI stutter.
+    """
+    total = sum(estimate_message_tokens(msg) for msg in messages)
     if tools:
-        parts.append(json.dumps(tools, ensure_ascii=False))
-
-    payload = "\n".join(parts)
-    if not payload:
-        return extra_tokens
-    try:
-        enc = tiktoken.get_encoding("cl100k_base")
-        text_tokens = len(enc.encode(payload))
-    except Exception:
-        text_tokens = len(payload) // 4
-    return max(1, text_tokens + extra_tokens)
+        total += count_text_tokens(json.dumps(tools, ensure_ascii=False))
+    return total
 
 
 def estimate_message_tokens(message: dict[str, Any]) -> int:
@@ -341,12 +349,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     payload = "\n".join(parts)
     if not payload:
         return max(1, extra_tokens)
-    try:
-        enc = tiktoken.get_encoding("cl100k_base")
-        text_tokens = len(enc.encode(payload))
-    except Exception:
-        text_tokens = len(payload) // 4
-    return max(1, text_tokens + extra_tokens)
+    return max(1, count_text_tokens(payload) + extra_tokens)
 
 
 def estimate_prompt_tokens_chain(

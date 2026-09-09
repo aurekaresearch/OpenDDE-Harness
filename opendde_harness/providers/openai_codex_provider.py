@@ -1,15 +1,11 @@
 """OpenAI Codex Responses Provider.
 
-LiteLLM owns the credential opendde signs in with, but not the request. On the
-pinned 1.85.0 its bridge to this backend raises: the account streams a
-``response.completed`` whose ``output`` is empty, which 1.95.0 rebuilds from the
-``output_item.done`` events and 1.85.0 reports as an unknown response.
-
-Routing through it also needs the model spelled ``responses/<slug>`` (nothing an
-account offers is in LiteLLM's table, and without a table entry there is no
-bridge), and costs ``prompt_cache_key``, which its allow-list filters out. That
-last one is what ``test_openai_codex_provider`` guards; the rest is a version
-bump away.
+LiteLLM owns the credential opendde signs in with, but not the request. Its
+``chatgpt/`` driver (checked on 1.100.0) prepends its own instructions to the
+system prompt, and its allow-list drops ``prompt_cache_key``, the field that
+keeps a session on one cache. This provider sends the request pi sends and
+replays reasoning items in emission order, which the driver leaves to the
+caller. ``test_providers_openai_codex`` guards the request shape.
 """
 
 from __future__ import annotations
@@ -31,10 +27,27 @@ from opendde_harness.providers.base import (
     ToolCallRequest,
     format_llm_error,
 )
-from opendde_harness.providers.responses_api import responses_usage
+from opendde_harness.providers.responses_api import (
+    PROVIDER_CODEX,
+    message_text,
+    reasoning_block,
+    responses_assistant_items,
+    responses_tool_choice,
+    responses_tools,
+    responses_usage,
+    split_tool_call_id,
+)
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_ORIGINATOR = "opendde_harness"
+
+#: The ``thinking_blocks`` entry this provider writes and reads back. One block
+#: per response, not one per reasoning item: the loop folds every non-redacted
+#: block of a delta into a single entry, so N blocks would keep N-1 items'
+#: worth of nothing. The same fold replaces ``items`` and ``order`` wholesale
+#: on a second delta, so a streaming path added here must emit the block once,
+#: at the end, or carry the items some other way.
+REASONING_BLOCK_PROVIDER = PROVIDER_CODEX
 
 
 @dataclass
@@ -46,6 +59,19 @@ class _CodexResult:
     finish_reason: str
     usage: dict[str, int] = field(default_factory=dict)
     truncated: bool = False
+    # The response's reasoning items, the id of every output item in the order
+    # the response emitted them, and the id of the text message. All of it is
+    # what the next request has to replay, in that order: with ``store: false``
+    # the server keeps no copy, without the ``rs_*`` items the model re-plans
+    # from nothing at every tool call, and the backend pairs each ``rs_*`` with
+    # the item that followed it.
+    reasoning_items: list[dict[str, Any]] = field(default_factory=list)
+    order: list[str] = field(default_factory=list)
+    messages: dict[str, str] = field(default_factory=dict)
+
+    def thinking_blocks(self) -> list[dict[str, Any]] | None:
+        block = reasoning_block(self.reasoning_items, self.order, self.messages, provider=PROVIDER_CODEX)
+        return [block] if block else None
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -86,24 +112,27 @@ class OpenAICodexProvider(LLMProvider):
             "input": input_items,
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
-            "tool_choice": tool_choice or "auto",
+            "tool_choice": responses_tool_choice(tool_choice) or "auto",
             "parallel_tool_calls": True,
         }
+        # The same shape pi sends, and only when pi sends it: an effort the
+        # user chose, with a summary so the reasoning text streams back. With
+        # no effort configured the key is omitted and the backend's own default
+        # applies, rather than a level or a half-formed block chosen here.
+        if reasoning_effort:
+            body["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
 
         # Nothing to group without instructions: every such request would share
         # one key while sharing no prefix.
         if system_prompt:
             body["prompt_cache_key"] = _prompt_cache_key(system_prompt)
 
-        if reasoning_effort:
-            body["reasoning"] = {"effort": reasoning_effort}
-
         if tools:
-            body["tools"] = _convert_tools(tools)
+            body["tools"] = responses_tools(tools)
 
         url = DEFAULT_CODEX_URL
 
-        timeout = self.generation.timeout
+        timeout = (self.generation.first_token_timeout, self.generation.idle_timeout)
         try:
             try:
                 result = await _request_codex(url, headers, body, timeout=timeout)
@@ -117,12 +146,15 @@ class OpenAICodexProvider(LLMProvider):
                     "TLS certificate verification failed for the Codex API. Trust the intercepting CA "
                     "(SSL_CERT_FILE or REQUESTS_CA_BUNDLE) instead of disabling verification."
                 ) from e
+            thinking = result.thinking_blocks()
             return LLMResponse(
                 content=result.content,
                 tool_calls=result.tool_calls,
                 finish_reason=result.finish_reason,
                 usage=result.usage,
                 truncated=result.truncated,
+                thinking_blocks=thinking,
+                reasoning_content=(thinking[0]["thinking"] or None) if thinking else None,
             )
         except Exception as e:
             classification = self.classify_error(e)
@@ -148,52 +180,35 @@ def _strip_model_prefix(model: str) -> str:
     return wire_model(model, spec=find_by_name("openai_codex"))
 
 
-def _build_headers(account_id: str, token: str) -> dict[str, str]:
-    return {
+def _build_headers(account_id: str | None, token: str) -> dict[str, str]:
+    headers = {
         "Authorization": f"Bearer {token}",
-        "chatgpt-account-id": account_id,
         "OpenAI-Beta": "responses=experimental",
         "originator": DEFAULT_ORIGINATOR,
         "User-Agent": "opendde (python)",
         "accept": "text/event-stream",
         "content-type": "application/json",
     }
+    if account_id:
+        headers["chatgpt-account-id"] = account_id
+    return headers
 
 
 async def _request_codex(
     url: str,
     headers: dict[str, str],
     body: dict[str, Any],
-    timeout: float,
+    timeout: tuple[float, float],
 ) -> "_CodexResult":
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    first_token_timeout, idle_timeout = timeout
+    async with httpx.AsyncClient(timeout=first_token_timeout) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 text = await response.aread()
                 raise ProviderHTTPError(
                     response.status_code, _friendly_error(response.status_code, text.decode("utf-8", "ignore"))
                 )
-            return await _consume_sse(response, timeout)
-
-
-def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert OpenAI function-calling schema to Codex flat format."""
-    converted: list[dict[str, Any]] = []
-    for tool in tools:
-        fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
-        name = fn.get("name")
-        if not name:
-            continue
-        params = fn.get("parameters") or {}
-        converted.append(
-            {
-                "type": "function",
-                "name": name,
-                "description": fn.get("description") or "",
-                "parameters": params if isinstance(params, dict) else {},
-            }
-        )
-    return converted
+            return await _consume_sse(response, first_token_timeout, idle_timeout)
 
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -205,7 +220,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
         content = msg.get("content")
 
         if role == "system":
-            system_prompt = content if isinstance(content, str) else ""
+            system_prompt = content if isinstance(content, str) else _text_of_blocks(content)
             continue
 
         if role == "user":
@@ -213,36 +228,11 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
             continue
 
         if role == "assistant":
-            # Handle text first.
-            if isinstance(content, str) and content:
-                input_items.append(
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": content}],
-                        "status": "completed",
-                        "id": f"msg_{idx}",
-                    }
-                )
-            # Then handle tool calls.
-            for tool_call in msg.get("tool_calls", []) or []:
-                fn = tool_call.get("function") or {}
-                call_id, item_id = _split_tool_call_id(tool_call.get("id"))
-                call_id = call_id or f"call_{idx}"
-                item_id = item_id or f"fc_{idx}"
-                input_items.append(
-                    {
-                        "type": "function_call",
-                        "id": item_id,
-                        "call_id": call_id,
-                        "name": fn.get("name"),
-                        "arguments": fn.get("arguments") or "{}",
-                    }
-                )
+            input_items.extend(responses_assistant_items(msg, idx, provider=PROVIDER_CODEX))
             continue
 
         if role == "tool":
-            call_id, _ = _split_tool_call_id(msg.get("tool_call_id"))
+            call_id, _ = split_tool_call_id(msg.get("tool_call_id"))
             input_items.append(
                 {
                     "type": "function_call_output",
@@ -253,6 +243,14 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[st
             continue
 
     return system_prompt, input_items
+
+
+def _text_of_blocks(content: Any) -> str:
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        str(part.get("text", "")) for part in content if isinstance(part, dict) and part.get("type") == "text"
+    )
 
 
 def _convert_tool_output(content: Any) -> Any:
@@ -324,15 +322,6 @@ def _convert_user_message(content: Any) -> dict[str, Any]:
     return {"role": "user", "content": [{"type": "input_text", "text": ""}]}
 
 
-def _split_tool_call_id(tool_call_id: Any) -> tuple[str, str | None]:
-    if isinstance(tool_call_id, str) and tool_call_id:
-        if "|" in tool_call_id:
-            call_id, item_id = tool_call_id.split("|", 1)
-            return call_id, item_id or None
-        return tool_call_id, None
-    return "call_0", None
-
-
 def _prompt_cache_key(system_prompt: str) -> str:
     """Group requests that share a cached prefix -- which is the instructions.
 
@@ -343,17 +332,21 @@ def _prompt_cache_key(system_prompt: str) -> str:
     return hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
 
 
-async def _iter_sse(response: httpx.Response, timeout: float) -> AsyncGenerator[dict[str, Any], None]:
+async def _iter_sse(
+    response: httpx.Response, first_token_timeout: float, idle_timeout: float
+) -> AsyncGenerator[dict[str, Any], None]:
     buffer: list[str] = []
-    # Per-event idle cap: aiter_lines resets httpx's read timer on every byte,
-    # so a trickle/keepalive stall never trips it. wait_for on each line bounds
-    # the silence between SSE lines without penalizing a long, progressing run.
+    # Per-line silence cap: aiter_lines resets httpx's read timer on every byte,
+    # so a trickle/keepalive stall never trips it. The first line may take as
+    # long as the model thinks; every later gap is bounded by the idle cap.
     lines = response.aiter_lines()
+    gap = first_token_timeout
     while True:
         try:
-            line = await asyncio.wait_for(lines.__anext__(), timeout)
+            line = await asyncio.wait_for(lines.__anext__(), gap)
         except StopAsyncIteration:
             break
+        gap = idle_timeout
         if line == "":
             if buffer:
                 data_lines = [ln[5:].strip() for ln in buffer if ln.startswith("data:")]
@@ -371,14 +364,17 @@ async def _iter_sse(response: httpx.Response, timeout: float) -> AsyncGenerator[
         buffer.append(line)
 
 
-async def _consume_sse(response: httpx.Response, timeout: float) -> "_CodexResult":
+async def _consume_sse(response: httpx.Response, first_token_timeout: float, idle_timeout: float) -> "_CodexResult":
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     finish_reason = ""
     usage: dict[str, int] = {}
+    reasoning_items: list[dict[str, Any]] = []
+    order: list[str] = []
+    messages: dict[str, str] = {}
 
-    async for event in _iter_sse(response, timeout):
+    async for event in _iter_sse(response, first_token_timeout, idle_timeout):
         event_type = event.get("type")
         if event_type == "response.output_item.added":
             item = event.get("item") or {}
@@ -403,7 +399,14 @@ async def _consume_sse(response: httpx.Response, timeout: float) -> "_CodexResul
                 tool_call_buffers[call_id]["arguments"] = event.get("arguments") or ""
         elif event_type == "response.output_item.done":
             item = event.get("item") or {}
-            if item.get("type") == "function_call":
+            item_type = item.get("type")
+            if item.get("id"):
+                order.append(item["id"])
+            if item_type == "reasoning":
+                reasoning_items.append(dict(item))
+            elif item_type == "message" and item.get("id"):
+                messages[item["id"]] = message_text(item)
+            if item_type == "function_call":
                 call_id = item.get("call_id")
                 if not call_id:
                     continue
@@ -430,11 +433,14 @@ async def _consume_sse(response: httpx.Response, timeout: float) -> "_CodexResul
                         run_meta=RunMeta(arguments_repaired=True) if repaired else None,
                     )
                 )
-        elif event_type in {"response.completed", "response.incomplete"}:
-            # Both are terminal. An incomplete response arrives on its own event
-            # rather than as a status on the completed one, so a run that hit the
-            # output ceiling or a content filter used to leave finish_reason at
-            # its initial value and read as a clean finish.
+        elif event_type in {"response.completed", "response.incomplete", "response.done"}:
+            # All three are terminal. An incomplete response arrives on its own
+            # event rather than as a status on the completed one, so a run that
+            # hit the output ceiling or a content filter used to leave
+            # finish_reason at its initial value and read as a clean finish.
+            # ``response.done`` is this backend's own spelling of completed;
+            # unhandled, a clean turn fell through to the no-terminal branch
+            # below and was reported as truncated.
             payload = event.get("response") or {}
             status = payload.get("status") or ("incomplete" if event_type.endswith("incomplete") else "completed")
             finish_reason = _map_finish_reason(status, payload.get("incomplete_details"))
@@ -453,14 +459,17 @@ async def _consume_sse(response: httpx.Response, timeout: float) -> "_CodexResul
             detail = ": ".join(str(part) for part in (code, message) if part)
             raise RuntimeError(f"Codex response failed: {detail}" if detail else "Codex response failed")
 
+    carried = dict(reasoning_items=reasoning_items, order=order, messages=messages)
     if not finish_reason:
         # The stream closed without a terminal event: the answer stops wherever
         # the connection did. Reporting "stop" presented a cut-off reply as a
         # finished one and skipped every truncation guard downstream.
-        return _CodexResult(content, tool_calls, "length", usage, truncated=True)
-    return _CodexResult(content, tool_calls, finish_reason, usage, truncated=finish_reason == "length")
+        return _CodexResult(content, tool_calls, "length", usage, truncated=True, **carried)
+    return _CodexResult(content, tool_calls, finish_reason, usage, truncated=finish_reason == "length", **carried)
 
 
+# ``queued`` / ``in_progress`` are legal statuses on this backend's terminal
+# event and mean the turn finished; an unknown status reads as a clean stop.
 _FINISH_REASON_MAP = {"completed": "stop", "incomplete": "length", "failed": "error", "cancelled": "error"}
 #: Why the response stopped short. Only the token ceiling is truncation; a
 #: filtered response is complete as far as the model is concerned, and calling

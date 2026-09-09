@@ -65,7 +65,7 @@ def build_context_engine(
     builder: ContextBuilder,
     provider: LLMProvider,
     model: str,
-    context_window_tokens: int,
+    context_window_tokens: int | None,
     get_tool_definitions: Callable[[], list[dict]],
     now_fn: Callable[[], datetime] | None = None,
     backend: "MemoryBackend | None" = None,

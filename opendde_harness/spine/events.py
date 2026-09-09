@@ -123,7 +123,22 @@ class EpisodeStart:
     conversation_id: str | None = None
 
 
-RunnerEvent = ToolEvent | Text | MediaOut | StreamDelta | Reasoning | Notice | EpisodeStart
+@dataclass(frozen=True)
+class TurnRetry:
+    """The model call is being run again. ``discard`` says output already
+    streamed for this call is void: the re-run replaces it rather than
+    appending to it, so an outlet showing live text starts that text over.
+    ``attempt`` is the one about to run, out of ``total``."""
+
+    attempt: int
+    total: int
+    reason: str
+    discard: bool
+    source: Source | None = None
+    conversation_id: str | None = None
+
+
+RunnerEvent = ToolEvent | Text | MediaOut | StreamDelta | Reasoning | Notice | EpisodeStart | TurnRetry
 # Same union, named for its delivery role: what the hub routes and an Outlet renders.
 Deliverable = RunnerEvent
 TurnEvent = TurnStarted | TurnFailed | TurnEnded | RunnerEvent

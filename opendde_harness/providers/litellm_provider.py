@@ -4,26 +4,31 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 import string
 import uuid
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import json_repair
 from loguru import logger
 
 from opendde_harness.providers import prompt_cache
 from opendde_harness.providers.base import (
+    EndpointNotFoundError,
     GenerationSettings,
     LLMProvider,
     LLMResponse,
     RunMeta,
     StreamDelta,
     ToolCallRequest,
+    WireMismatchError,
     format_llm_error,
 )
+from opendde_harness.providers.catalog import overlay_for
+from opendde_harness.providers.compat import apply_thinking, detect_compat
 from opendde_harness.providers.litellm_setup import import_litellm
 from opendde_harness.providers.prompt_cache import CACHE_CONTROL
 from opendde_harness.providers.reasoning import split_orphan_think
@@ -35,7 +40,12 @@ from opendde_harness.providers.registry import (
     find_gateway,
 )
 from opendde_harness.providers.responses_api import (
+    PROVIDER_OPENAI,
+    REASONING_BLOCK_TYPE,
     is_local_web_search_tool,
+    join_tool_call_id,
+    message_text,
+    reasoning_block,
     rejects_hosted_web_search,
     responses_error_text,
     responses_incomplete_reason,
@@ -50,6 +60,9 @@ from opendde_harness.providers.responses_api import (
     web_search_preview,
 )
 from opendde_harness.providers.wire import wire_model
+
+if TYPE_CHECKING:
+    from opendde_harness.config.schema import ModelOverlay
 
 litellm = import_litellm()
 acompletion = litellm.acompletion
@@ -73,6 +86,11 @@ warnings.filterwarnings(
 # Standard chat-completion message keys.
 _ALLOWED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"})
 _ANTHROPIC_EXTRA_KEYS = frozenset({"thinking_blocks"})
+# The block types Anthropic signed and accepts back. A session that switched
+# from Codex carries its ``reasoning`` blocks in the same list, and Anthropic
+# refuses a request with one in it; the strip is keyed on the target, so it
+# has to filter by what the block is, not only on who is asked.
+_ANTHROPIC_BLOCK_TYPES = frozenset({"thinking", "redacted_thinking"})
 _ALNUM = string.ascii_letters + string.digits
 
 # LiteLLM defaults to X-Title="liteLLM" / HTTP-Referer="https://litellm.ai" for OpenRouter
@@ -84,11 +102,6 @@ _OPENROUTER_ATTRIBUTION: dict[str, str] = {
     "X-OpenRouter-Title": "OpenDDE Harness Agent",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
-
-
-def _requires_reasoning_key(original_model: str, resolved_model: str) -> bool:
-    """Whether this target rejects an assistant turn with no reasoning_content key."""
-    return "deepseek" in f"{original_model} {resolved_model}".lower()
 
 
 def _thinking_blocks(blocks: Any) -> list[dict] | None:
@@ -133,12 +146,6 @@ def _tool_call_id(upstream: str | None, model: str) -> str:
     if not upstream or "mistral" in model.lower():
         return _short_tool_id()
     return upstream
-
-
-def _wants_enable_thinking(model: str) -> bool:
-    """Whether this model takes DashScope's thinking switch instead of an effort."""
-    lowered = model.lower()
-    return "dashscope" in lowered or lowered.startswith("qwen") or "/qwen" in lowered
 
 
 def _merge_extra_body(kwargs: dict[str, Any], wire_extra_body: dict[str, Any]) -> None:
@@ -186,6 +193,48 @@ def _rejects_temperature(exc: Exception) -> bool:
     return names_temperature and rejects_parameter
 
 
+# How a gateway says "no such route" when it does not use the status code
+# alone. Only read beside a 400/404/405; a body naming the model is the model.
+_UNKNOWN_ROUTE_PHRASES = (
+    "invalid url",
+    "unrecognized request url",
+    "unknown request url",
+    "unsupported endpoint",
+    "cannot post",
+    "no route",
+    "route post",  # Fastify/Nest: "Route POST:/v1/responses not found"
+    "not a valid endpoint",
+    "method not allowed",
+    "unsupported method",
+)
+
+
+_NOT_FOUND_FILLER = {"404", "page", "not", "found", "detail", "error", "message", "code", "status", "http", "null"}
+
+
+def _plain(item: Any) -> dict[str, Any]:
+    """A Responses output item as a plain dict, whatever object LiteLLM handed over."""
+    if isinstance(item, dict):
+        return dict(item)
+    dump = getattr(item, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(exclude_none=True)
+        except TypeError:
+            return dump()
+    return {k: v for k, v in vars(item).items() if not k.startswith("_")} if hasattr(item, "__dict__") else {}
+
+
+def _bare_not_found(message: str) -> bool:
+    """Is this 404 body only the status restated, with nothing said about why?"""
+    if not message.strip() or "<html" in message:
+        return True
+    # LiteLLM renders "<ExceptionName>: <Provider>Exception - <body>".
+    body = message.rsplit(" - ", 1)[-1]
+    words = set(re.findall(r"[a-z0-9]+", body.lower()))
+    return bool(words) and words <= _NOT_FOUND_FILLER
+
+
 class LiteLLMProvider(LLMProvider):
     """
     LLM provider using LiteLLM for multi-provider support.
@@ -205,8 +254,9 @@ class LiteLLMProvider(LLMProvider):
         disable_auto_cache_control: bool = False,
         extra_body: dict[str, Any] | None = None,
         model_overrides: dict[str, dict[str, Any]] | None = None,
-        api_mode: Literal["responses", "chat"] = "chat",
+        wire: Literal["responses", "chat"] = "chat",
         *,
+        model_overlays: "dict[str, ModelOverlay] | None" = None,
         unparsed_reasoning: bool | None = None,
     ):
         super().__init__(api_key, api_base)
@@ -228,18 +278,16 @@ class LiteLLMProvider(LLMProvider):
         self.extra_body = extra_body or {}
         # User-configured per-model parameter overrides; win over the registry's.
         self.model_overrides = model_overrides or {}
-        self.api_mode = api_mode
+        # The wire this endpoint serves (see ``ProviderSpec.wire``), and the
+        # per-model declarations that override it, keyed by ``wire.merge_key``.
+        self.wire = wire
+        self.model_overlays = model_overlays or {}
+        self._wire_ignored: set[str] = set()
         # Some OpenAI-compatible gateways advertise an unknown model using the
         # generic OpenAI capability table. LiteLLM then claims that temperature
         # is supported even when the real backend rejects it. Learn only from an
         # explicit backend rejection and scope the result to endpoint + model.
         self._temperature_unsupported: set[tuple[str, str]] = set()
-        # Some OpenAI-compatible gateways expose /v1/responses but return a
-        # synthetic "Service temporarily unavailable" envelope for models that
-        # are healthy on /v1/chat/completions.  Remember that protocol-level
-        # incompatibility per endpoint/model so Responses remains the default
-        # while the compatibility wire can keep the task alive.
-        self._responses_unavailable: set[tuple[str, str]] = set()
         self._hosted_web_search_unavailable: set[tuple[str, str]] = set()
 
         # Detect gateway / local deployment.
@@ -259,16 +307,89 @@ class LiteLLMProvider(LLMProvider):
         # Drop unsupported parameters for providers (e.g., gpt-5 rejects some params)
         litellm.drop_params = True
 
-    def _uses_responses_api(self, resolved_model: str) -> bool:
-        """Whether this request travels over the OpenAI Responses wire."""
-        return (
-            self.api_mode == "responses"
-            and resolved_model.startswith("openai/")
-            and self._responses_capability_key(resolved_model) not in self._responses_unavailable
-        )
+    def _declared_ceiling(self, model: str, max_tokens: Any) -> int | None:
+        """A caller's pin, else the output ceiling the model's overlay declares.
 
-    def _responses_capability_key(self, model: str) -> tuple[str, str]:
-        return (str(self.api_base or ""), model)
+        The budget reserves the declared ceiling, so a request that carried no
+        limit could run past the reservation trimming was made against.
+        Nothing is volunteered for a model with no declaration: a guessed
+        number above a vendor's real cap is a refused request.
+        """
+        overlay = overlay_for(self.model_overlays, model)
+        declared = getattr(overlay, "max_output_tokens", None)
+        if isinstance(max_tokens, int):
+            return min(max_tokens, int(declared)) if declared else max_tokens
+        return int(declared) if declared else None
+
+    def wire_for(self, model: str) -> str:
+        """The wire this model's request travels on: its overlay's say, else
+        the section's. ``model`` is the stored id, which is what overlays key."""
+        overlay = overlay_for(self.model_overlays, model)
+        declared = getattr(overlay, "wire", None) if overlay is not None else None
+        return declared or self.wire
+
+    def _uses_responses_api(self, original_model: str, resolved_model: str) -> bool:
+        """Whether this request travels over the OpenAI Responses wire.
+
+        Only a request LiteLLM sends through its openai driver can: the other
+        drivers each have one wire, and ``wire`` says nothing about them.
+        """
+        wire = self.wire_for(original_model)
+        if wire == "responses" and not resolved_model.startswith("openai/"):
+            if original_model not in self._wire_ignored:
+                self._wire_ignored.add(original_model)
+                logger.warning(
+                    "wire=responses declared for {} has no effect: it routes as {} rather than through the "
+                    "openai driver, which is the only one with a Responses wire",
+                    original_model,
+                    resolved_model,
+                )
+            return False
+        return wire == "responses"
+
+    def _wire_mismatch(self, exc: Exception, original_model: str, *, responses: bool) -> WireMismatchError | None:
+        """The endpoint's refusal of the wire itself, named as such, or None.
+
+        A relay that serves only Chat Completions answers ``/v1/responses`` with
+        404, 405 or a 400 that spells out an unknown route. Left as it arrives,
+        that 404 reads as "model not found" and the loop hops through fallback
+        models over the same transport. Nothing here retries on the other wire:
+        opencode and pi both treat a wrong wire as configuration to fix, and a
+        silent downgrade would hide exactly what the user has to change.
+        """
+        status = self._extract_status_code(exc)
+        msg = str(exc).lower()
+        spelled_out = any(phrase in msg for phrase in _UNKNOWN_ROUTE_PHRASES)
+        certain = status == 405 or (status in (400, 404) and spelled_out)
+        # A 404 with prose -- "No endpoints found for x", "The model `x` does
+        # not exist" -- is the model, and a typo behind a relay that does
+        # serve this wire must not be reported as the wire. A 404 that says
+        # nothing (a bare "404 page not found", an HTML page, an empty body)
+        # is the same body for a base URL missing its /v1, for a wire the
+        # endpoint does not serve, and for a model it does not know, so it
+        # is reported as all three rather than as the one this code favours.
+        if not certain and not (status == 404 and _bare_not_found(msg)):
+            return None
+        section = canonical_provider_name(self._provider_name) or (self._gateway.name if self._gateway else "")
+        dashed = section.replace("_", "-") or "<provider>"
+        wire, other = ("responses", "chat") if responses else ("chat", "responses")
+        path = "/v1/responses" if responses else "/v1/chat/completions"
+        where = self.api_base or "the configured endpoint"
+        wire_fix = (
+            f'set providers.{section}.wire to "{other}" (ddeharness provider set {dashed} --wire {other}), '
+            f"or for this one model: ddeharness provider model set {dashed} {original_model} --wire {other}"
+        )
+        if certain:
+            return WireMismatchError(
+                f"{where} does not serve the {wire} wire for {original_model} (HTTP {status} on POST {path}); {wire_fix}",
+                status_code=status,
+            )
+        return EndpointNotFoundError(
+            f"{where} answered HTTP 404 to POST {path} for {original_model} without naming a route or a model. "
+            f"Check the base URL first (providers.{section or '<provider>'}.apiBase; a missing /v1 gives exactly "
+            f"this), then the model id; if the endpoint serves only the {other} wire, {wire_fix}",
+            status_code=status,
+        )
 
     def _hosted_web_search_capability_key(self, model: str) -> tuple[str, str]:
         return (str(self.api_base or ""), model)
@@ -369,22 +490,27 @@ class LiteLLMProvider(LLMProvider):
         kwargs: dict[str, Any],
         local_fallback: tuple[list[dict[str, Any]], Any, bool] | None,
         model: str,
+        *,
+        timeout: Callable[[], float] | None = None,
     ) -> Any:
         try:
-            return await self._call_with_temperature_compatibility(call, kwargs)
+            return await self._call_with_temperature_compatibility(call, kwargs, timeout=timeout)
         except Exception as exc:
             if local_fallback is None or not rejects_hosted_web_search(exc):
                 raise
             self._restore_local_web_search(kwargs, local_fallback, model)
-            return await self._call_with_temperature_compatibility(call, kwargs)
+            return await self._call_with_temperature_compatibility(call, kwargs, timeout=timeout)
 
-    @staticmethod
-    def _responses_transport_unavailable(response: LLMResponse) -> bool:
-        """Detect the gateway envelope that means only Responses is unavailable."""
-        if response.finish_reason != "error":
-            return False
-        message = str(response.content or "").lower()
-        return "service temporarily unavailable" in message
+    def _first_token_deadline(self) -> Callable[[], float]:
+        """Seconds left of the first-token budget, counted from now.
+
+        One budget spans opening the stream and its first event: a gateway
+        that accepts the request and then says nothing is the case the bound
+        exists for, and it was invisible to a cap that started at the pull.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.generation.first_token_timeout
+        return lambda: max(0.001, deadline - loop.time())
 
     def _temperature_capability_key(self, kwargs: dict[str, Any]) -> tuple[str, str]:
         return (
@@ -415,17 +541,27 @@ class LiteLLMProvider(LLMProvider):
         self,
         call: Callable[..., Awaitable[Any]],
         kwargs: dict[str, Any],
+        *,
+        timeout: Callable[[], float] | None = None,
     ) -> Any:
-        """Call LiteLLM, retrying only an explicit unsupported-temperature error."""
+        """Call LiteLLM, retrying only an explicit unsupported-temperature error.
+
+        ``timeout`` returns the seconds still allowed, read again before the
+        retry so a budget spanning several attempts is one budget.
+        """
         request = dict(kwargs)
         if self._temperature_capability_key(request) in self._temperature_unsupported:
             request.pop("temperature", None)
+
+        def cap() -> float:
+            return self.generation.timeout if timeout is None else timeout()
+
         try:
-            return await asyncio.wait_for(call(**request), self.generation.timeout)
+            return await asyncio.wait_for(call(**request), cap())
         except Exception as exc:
             if not self._drop_rejected_temperature(exc, request):
                 raise
-            return await asyncio.wait_for(call(**request), self.generation.timeout)
+            return await asyncio.wait_for(call(**request), cap())
 
     def _export_env_extras(self, api_key: str, api_base: str | None, model: str) -> None:
         """Export a spec's ``env_extras`` (vendor SDK variables LiteLLM reads
@@ -601,16 +737,26 @@ class LiteLLMProvider(LLMProvider):
             kwargs.update(max(matches, key=lambda item: len(item[0]))[1])
 
     @staticmethod
-    def _extra_msg_keys(original_model: str, resolved_model: str) -> frozenset[str]:
-        """Return provider-specific extra keys to preserve in request messages."""
+    def _keeps_thinking_blocks(
+        original_model: str, resolved_model: str, *, responses: bool
+    ) -> Callable[[dict], bool] | None:
+        """Which ``thinking_blocks`` entries this target takes back, or None for none.
+
+        Anthropic wants its own signed ``thinking`` blocks; the Responses wire
+        wants the ``reasoning`` items its backend emitted. Each is refused the
+        other's, and a session that switched models carries both in one list,
+        so the filter is by what the block is rather than by who is asked.
+        """
+        if responses:
+            return lambda block: block.get("type") == REASONING_BLOCK_TYPE and block.get("provider") == PROVIDER_OPENAI
         spec = find_by_model(original_model) or find_by_model(resolved_model)
         if (
             (spec and spec.name == "anthropic")
             or "claude" in original_model.lower()
             or resolved_model.startswith("anthropic/")
         ):
-            return _ANTHROPIC_EXTRA_KEYS
-        return frozenset()
+            return lambda block: block.get("type") in _ANTHROPIC_BLOCK_TYPES
+        return None
 
     @staticmethod
     def _normalize_tool_call_id(tool_call_id: Any) -> Any:
@@ -624,17 +770,34 @@ class LiteLLMProvider(LLMProvider):
     @staticmethod
     def _sanitize_messages(
         messages: list[dict[str, Any]],
-        extra_keys: frozenset[str] = frozenset(),
         *,
+        keep_blocks: Callable[[dict], bool] | None = None,
         require_reasoning_key: bool = False,
+        normalize_ids: bool = True,
     ) -> list[dict[str, Any]]:
-        """Strip non-standard keys and ensure assistant messages have a content key."""
-        allowed = _ALLOWED_MSG_KEYS | extra_keys
+        """Strip non-standard keys and ensure assistant messages have a content key.
+
+        ``keep_blocks`` says which ``thinking_blocks`` entries the target takes
+        back; None strips the key entirely. ``normalize_ids`` is off for the
+        Responses wire: its ``call|item`` ids are the backend's own to pair,
+        and the 9-char rewrite would sever the item id from the reasoning
+        that references it.
+        """
+        allowed = _ALLOWED_MSG_KEYS | (_ANTHROPIC_EXTRA_KEYS if keep_blocks else frozenset())
         sanitized = LLMProvider._sanitize_request_messages(messages, allowed)
+        if keep_blocks is not None:
+            for clean in sanitized:
+                blocks = clean.get("thinking_blocks")
+                if isinstance(blocks, list):
+                    kept = [b for b in blocks if isinstance(b, dict) and keep_blocks(b)]
+                    if kept:
+                        clean["thinking_blocks"] = kept
+                    else:
+                        clean.pop("thinking_blocks", None)
         id_map: dict[str, str] = {}
 
         def map_id(value: Any) -> Any:
-            if not isinstance(value, str):
+            if not isinstance(value, str) or not normalize_ids:
                 return value
             return id_map.setdefault(value, LiteLLMProvider._normalize_tool_call_id(value))
 
@@ -700,19 +863,21 @@ class LiteLLMProvider(LLMProvider):
         web-search fallback ``_call_with_web_search_fallback`` restores when a
         hosted search is refused."""
         messages, tools = self._cache_marked(original_model, messages, tools, responses=responses)
+        compat = detect_compat(original_model, resolved_model=model, api_base=self.api_base)
         messages = self._sanitize_messages(
             self._sanitize_empty_content(messages),
-            extra_keys=self._extra_msg_keys(original_model, model),
-            require_reasoning_key=_requires_reasoning_key(original_model, model),
+            keep_blocks=self._keeps_thinking_blocks(original_model, model, responses=responses),
+            require_reasoning_key=compat.requires_reasoning_content,
+            normalize_ids=not responses,
         )
         kwargs: dict[str, Any] = {
             "model": model,
             "temperature": temperature,
-            # Per-read httpx cap forwarded to the underlying client. This alone
-            # cannot bound a backend that trickles bytes forever (the read timer
-            # resets on every chunk), so the awaited call is also wrapped in an
-            # asyncio.wait_for wall-clock cap.
-            "timeout": self.generation.timeout,
+            # Per-read httpx cap forwarded to the underlying client. A stream's
+            # read timer resets on every byte, so the pulls below also bound
+            # each gap with wait_for; a non-streamed call gets the wall-clock
+            # cap around the whole await.
+            "timeout": self.generation.first_token_timeout if stream else self.generation.timeout,
         }
         if stream:
             kwargs["stream"] = True
@@ -723,6 +888,12 @@ class LiteLLMProvider(LLMProvider):
         if responses:
             kwargs["input"] = responses_input(messages)
             kwargs["store"] = False
+            # With nothing stored server-side, the chain of thought has to
+            # travel with the history: asked for here, carried on the reply's
+            # thinking_blocks, replayed by responses_input before the item it
+            # produced. Without it the model re-plans from nothing at every
+            # tool call.
+            kwargs["include"] = ["reasoning.encrypted_content"]
             if max_tokens is not None:
                 kwargs["max_output_tokens"] = max(1, max_tokens)
         else:
@@ -744,19 +915,13 @@ class LiteLLMProvider(LLMProvider):
             kwargs["extra_headers"] = self.extra_headers
         if self.extra_body:
             _merge_extra_body(kwargs, self.extra_body)
-        if reasoning_effort:
-            if responses:
-                kwargs["reasoning"] = {"effort": reasoning_effort}
-            elif _wants_enable_thinking(model):
-                # DashScope has no reasoning_effort. LiteLLM's dashscope config
-                # does not list it either, and drop_params removes it, so asking
-                # for thinking there did exactly nothing. Its own switch lives in
-                # the request body; a model_overrides entry still wins, because
-                # _merge_extra_body keeps whatever is already in kwargs.
-                _merge_extra_body(kwargs, {"enable_thinking": True})
-            else:
-                kwargs["reasoning_effort"] = reasoning_effort
-                kwargs["drop_params"] = True
+        if responses:
+            # pi's shape, and only when pi sends it: a summary so the reasoning
+            # text streams back, with the effort the user chose.
+            if reasoning_effort:
+                kwargs["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
+        else:
+            apply_thinking(kwargs, compat, reasoning_effort=reasoning_effort, model=original_model)
 
         if responses:
             tools = responses_tools(tools)
@@ -802,13 +967,13 @@ class LiteLLMProvider(LLMProvider):
         """
         original_model = model or self.default_model
         model = self._resolve_model(original_model)
-        responses = self._uses_responses_api(model)
+        responses = self._uses_responses_api(original_model, model)
         kwargs, local_web_search_tools = self._request_kwargs(
             original_model,
             model,
             messages,
             tools,
-            max_tokens=max_tokens,
+            max_tokens=self._declared_ceiling(original_model, max_tokens),
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             tool_choice=tool_choice,
@@ -822,29 +987,9 @@ class LiteLLMProvider(LLMProvider):
                 local_web_search_tools,
                 model,
             )
-            response = self._parse_responses_response(raw) if responses else self._parse_response(raw)
+            return self._parse_responses_response(raw) if responses else self._parse_response(raw)
         except Exception as e:
-            response = self._error_response(e)
-
-        if responses and self._responses_transport_unavailable(response):
-            key = self._responses_capability_key(model)
-            self._responses_unavailable.add(key)
-            logger.warning(
-                "Responses transport unavailable for {} at {}; falling back to "
-                "Chat Completions for this provider instance",
-                model,
-                key[0] or "default endpoint",
-            )
-            return await self.chat(
-                messages=messages,
-                tools=tools,
-                model=original_model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-                tool_choice=tool_choice,
-            )
-        return response
+            return self._error_response(self._wire_mismatch(e, original_model, responses=responses) or e)
 
     async def chat_stream(
         self,
@@ -861,10 +1006,6 @@ class LiteLLMProvider(LLMProvider):
         Yields one StreamDelta per non-empty chunk. Signature matches chat()
         so callers can swap providers transparently.
 
-        Provider-specific chunk shapes (e.g. dashscope) are handled inside
-        `_normalize_stream_chunk`. The default OpenAI shape extraction lives
-        in that hook; subclasses or implementer additions can override.
-
         Generation defaults resolve from ``self.generation`` the same way
         ``chat_with_retry`` does: literal defaults here would shadow the user's
         configuration, since the agent loop calls this with messages/tools/model
@@ -879,13 +1020,13 @@ class LiteLLMProvider(LLMProvider):
             reasoning_effort = gen.reasoning_effort
         original_model = model or self.default_model
         model = self._resolve_model(original_model)
-        responses = self._uses_responses_api(model)
+        responses = self._uses_responses_api(original_model, model)
         kwargs, local_web_search_tools = self._request_kwargs(
             original_model,
             model,
             messages,
             tools,
-            max_tokens=max_tokens if isinstance(max_tokens, int) else None,
+            max_tokens=self._declared_ceiling(original_model, max_tokens),
             temperature=float(temperature) if isinstance(temperature, (int, float)) else 0.7,
             reasoning_effort=reasoning_effort if isinstance(reasoning_effort, str) else None,
             tool_choice=tool_choice,
@@ -894,8 +1035,14 @@ class LiteLLMProvider(LLMProvider):
         )
 
         if responses:
-            async for delta in self._chat_responses_stream(kwargs, local_web_search_tools, model):
-                yield delta
+            try:
+                async for delta in self._chat_responses_stream(kwargs, local_web_search_tools, model):
+                    yield delta
+            except Exception as exc:
+                mismatch = self._wire_mismatch(exc, original_model, responses=True)
+                if mismatch is None:
+                    raise
+                raise mismatch from exc
             return
 
         def _retry_without_breakpoints(exc: Exception) -> bool:
@@ -916,6 +1063,8 @@ class LiteLLMProvider(LLMProvider):
                 kwargs["tools"] = stripped
             return True
 
+        remaining = self._first_token_deadline()
+
         async def _open():
             return (
                 await self._call_with_web_search_fallback(
@@ -923,6 +1072,7 @@ class LiteLLMProvider(LLMProvider):
                     kwargs,
                     local_web_search_tools,
                     model,
+                    timeout=remaining,
                 )
             ).__aiter__()
 
@@ -951,7 +1101,7 @@ class LiteLLMProvider(LLMProvider):
             # that defers the request until the first pull raises there instead.
             try:
                 stream = await _open()
-                first = await asyncio.wait_for(stream.__anext__(), self.generation.timeout)
+                first = await asyncio.wait_for(stream.__anext__(), remaining())
             except StopAsyncIteration:
                 first = done
             except Exception as exc:
@@ -964,6 +1114,9 @@ class LiteLLMProvider(LLMProvider):
                     )
                 temperature_retry = False if hosted_search_retry else self._drop_rejected_temperature(exc, kwargs)
                 if not hosted_search_retry and not temperature_retry and not _retry_without_breakpoints(exc):
+                    mismatch = self._wire_mismatch(exc, original_model, responses=False)
+                    if mismatch is not None:
+                        raise mismatch from exc
                     raise
                 # The refused stream is finished with; closing it before opening
                 # the replacement keeps at most one live at a time. It is None
@@ -971,7 +1124,7 @@ class LiteLLMProvider(LLMProvider):
                 await _close(stream)
                 stream = await _open()
                 try:
-                    first = await asyncio.wait_for(stream.__anext__(), self.generation.timeout)
+                    first = await asyncio.wait_for(stream.__anext__(), remaining())
                 except StopAsyncIteration:
                     first = done
 
@@ -981,7 +1134,7 @@ class LiteLLMProvider(LLMProvider):
                 if delta is not None:
                     yield delta
                 try:
-                    chunk = await asyncio.wait_for(stream.__anext__(), self.generation.timeout)
+                    chunk = await asyncio.wait_for(stream.__anext__(), self.generation.idle_timeout)
                 except StopAsyncIteration:
                     break
         finally:
@@ -994,39 +1147,34 @@ class LiteLLMProvider(LLMProvider):
         model: str,
     ) -> AsyncIterator[StreamDelta]:
         """Stream Responses events while preserving OpenDDE Harness's Chat-shaped deltas."""
+        remaining = self._first_token_deadline()
         stream = await self._call_with_web_search_fallback(
             aresponses,
             kwargs,
             local_web_search_tools,
             model,
+            timeout=remaining,
         )
         iterator = stream.__aiter__()
         calls: dict[str, tuple[int, str, str]] = {}
+        reasoning_items: list[dict[str, Any]] = []
+        order: list[str] = []
+        messages_out: dict[str, str] = {}
         web_searches: dict[str, Any] = {}
         started_web_searches: set[str] = set()
         streamed_citations: dict[str, str] = {}
         terminated = False
+        gap = remaining()
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(iterator.__anext__(), self.generation.timeout)
+                    event = await asyncio.wait_for(iterator.__anext__(), gap)
                 except StopAsyncIteration:
                     break
-                # LiteLLM currently types Responses event ``usage`` as
-                # ``ResponseAPIUsage`` but may populate it with a plain dict.
-                # Serializing the whole event therefore emits a noisy Pydantic
-                # warning even though we only need attribute access.  Keep the
-                # native event object; use model_dump only for lightweight test
-                # or compatibility wrappers that expose no event ``type``.
-                if isinstance(event, dict) or hasattr(event, "type"):
-                    data = event
-                elif hasattr(event, "model_dump"):
-                    try:
-                        data = event.model_dump(warnings=False)
-                    except TypeError:  # Pydantic v1 / non-Pydantic wrapper
-                        data = event.model_dump()
-                else:
-                    data = event
+                gap = self.generation.idle_timeout
+                # Attribute access only: dumping the event would serialize the
+                # usage LiteLLM mistyped (see litellm_setup) and warn each time.
+                data = event
                 event_type = value_of(data, "type", "")
 
                 if event_type in {
@@ -1092,6 +1240,9 @@ class LiteLLMProvider(LLMProvider):
                     call_id = str(value_of(item, "call_id", item_id))
                     name = str(value_of(item, "name", ""))
                     index = int(value_of(data, "output_index", 0) or 0)
+                    # Both ids travel as one string: the call_id a result
+                    # answers and the item id the backend pairs reasoning with.
+                    call_id = join_tool_call_id(call_id, item_id)
                     calls[item_id] = (index, call_id, name)
                     yield StreamDelta(
                         content=None,
@@ -1132,7 +1283,15 @@ class LiteLLMProvider(LLMProvider):
                     continue
                 if event_type == "response.output_item.done":
                     item = value_of(data, "item", {})
-                    if value_of(item, "type", "") == "web_search_call":
+                    item_type = value_of(item, "type", "")
+                    item_id = str(value_of(item, "id", "") or "")
+                    if item_id and item_type in ("reasoning", "message", "function_call"):
+                        order.append(item_id)
+                    if item_type == "reasoning":
+                        reasoning_items.append(_plain(item))
+                    elif item_type == "message" and item_id:
+                        messages_out[item_id] = message_text(item)
+                    elif item_type == "web_search_call":
                         item_id = str(value_of(item, "id", value_of(data, "item_id", "")))
                         if item_id:
                             web_searches[item_id] = item
@@ -1140,6 +1299,9 @@ class LiteLLMProvider(LLMProvider):
                 if event_type == "response.completed":
                     terminated = True
                     response = value_of(data, "response", {})
+                    block = reasoning_block(reasoning_items, order, messages_out, provider=PROVIDER_OPENAI)
+                    if block is not None:
+                        yield StreamDelta(content=None, thinking_blocks=[block])
                     citations = url_citations(response)
                     citations.extend(streamed_citations.items())
                     for item in value_of(response, "output", []) or []:
@@ -1178,6 +1340,9 @@ class LiteLLMProvider(LLMProvider):
                 if event_type == "response.incomplete":
                     terminated = True
                     response = value_of(data, "response", {})
+                    block = reasoning_block(reasoning_items, order, messages_out, provider=PROVIDER_OPENAI)
+                    if block is not None:
+                        yield StreamDelta(content=None, thinking_blocks=[block])
                     yield StreamDelta(
                         content=None,
                         usage=responses_usage(response),
@@ -1211,11 +1376,6 @@ class LiteLLMProvider(LLMProvider):
         `delta.tool_calls` (list | None), and a final `chunk.usage` snapshot
         on the trailing chunk for some providers. Returns None when the chunk
         carries no content / tool_call / usage payload so callers can skip.
-
-        Provider-specific shapes (e.g. Qwen dashscope) are decided at
-        implementation time after a real-provider smoke test (per design.md
-        §D4 + tasks.md T3.4). Add a hardcoded branch here keyed on
-        `self._gateway` / `find_by_model(...).name` if/when needed.
         """
         try:
             choices = getattr(chunk, "choices", None)
@@ -1242,36 +1402,11 @@ class LiteLLMProvider(LLMProvider):
                 # Surface raw tool_call deltas as a list of dict snapshots so
                 # downstream layers can re-assemble; intentionally light-touch
                 # here (full tool-call accumulation is the consumer's job).
-                serialized = []
-                for tc in tool_calls:
-                    try:
-                        serialized.append(tc.model_dump())  # pydantic v2
-                    except AttributeError:
-                        serialized.append(
-                            {
-                                "index": getattr(tc, "index", None),
-                                "id": getattr(tc, "id", None),
-                                "function": {
-                                    "name": getattr(getattr(tc, "function", None), "name", None),
-                                    "arguments": getattr(getattr(tc, "function", None), "arguments", None),
-                                },
-                            }
-                        )
-                tool_call_delta = {"tool_calls": serialized}
+                tool_call_delta = {"tool_calls": [tc.model_dump() for tc in tool_calls]}
 
             usage_dict: dict[str, Any] | None = None
             if usage is not None:
-                try:
-                    try:
-                        usage_dict = usage.model_dump(warnings=False)
-                    except TypeError:  # Pydantic v1 / non-Pydantic wrapper
-                        usage_dict = usage.model_dump()
-                except AttributeError:
-                    usage_dict = {
-                        "prompt_tokens": getattr(usage, "prompt_tokens", None),
-                        "completion_tokens": getattr(usage, "completion_tokens", None),
-                        "total_tokens": getattr(usage, "total_tokens", None),
-                    }
+                usage_dict = usage.model_dump(warnings=False) if hasattr(usage, "model_dump") else dict(usage)
 
             if (
                 content is None
@@ -1403,8 +1538,16 @@ class LiteLLMProvider(LLMProvider):
         """Normalize Responses messages/function calls to OpenDDE Harness's contract."""
         tool_calls: list[ToolCallRequest] = []
         reasoning_parts: list[str] = []
+        reasoning_items: list[dict[str, Any]] = []
+        order: list[str] = []
+        messages_out: dict[str, str] = {}
         for item in value_of(response, "output", []) or []:
             item_type = value_of(item, "type", "")
+            item_id = str(value_of(item, "id", "") or "")
+            if item_id and item_type in ("reasoning", "message", "function_call"):
+                order.append(item_id)
+            if item_type == "message" and item_id:
+                messages_out[item_id] = message_text(item)
             if item_type == "function_call":
                 raw_arguments = value_of(item, "arguments", "{}")
                 repaired = False
@@ -1415,13 +1558,14 @@ class LiteLLMProvider(LLMProvider):
                     repaired = True
                 tool_calls.append(
                     ToolCallRequest(
-                        id=str(value_of(item, "call_id", value_of(item, "id", _short_tool_id()))),
+                        id=join_tool_call_id(str(value_of(item, "call_id", "") or _short_tool_id()), item_id),
                         name=str(value_of(item, "name", "")),
                         arguments=arguments if isinstance(arguments, dict) else {},
                         run_meta=RunMeta(arguments_repaired=True) if repaired else None,
                     )
                 )
             elif item_type == "reasoning":
+                reasoning_items.append(_plain(item))
                 for summary in value_of(item, "summary", []) or []:
                     text = value_of(summary, "text", "")
                     if text:
@@ -1448,12 +1592,14 @@ class LiteLLMProvider(LLMProvider):
             finish_reason = "tool_calls"
         else:
             finish_reason = "stop"
+        block = reasoning_block(reasoning_items, order, messages_out, provider=PROVIDER_OPENAI)
         return LLMResponse(
             content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=responses_usage(response),
             reasoning_content="\n".join(reasoning_parts) or None,
+            thinking_blocks=[block] if block else None,
             truncated=finish_reason == "length",
         )
 

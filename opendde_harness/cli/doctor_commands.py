@@ -46,6 +46,14 @@ class RoutingInfo:
     provider: Optional[str]
     max_tokens: int
     context_window_tokens: Optional[int]
+    # Which tier answered each number (providers/rates SOURCE_*), so a figure
+    # that is an estimate or unknown reads as one rather than as a setting.
+    max_tokens_source: str = "estimated"
+    context_window_source: str = "unknown"
+    # The wire the default model's requests travel on, when its provider has
+    # two to choose from; "" otherwise.
+    wire: str = ""
+    wire_source: str = ""
 
 
 @dataclass
@@ -182,17 +190,26 @@ def _gather_static_checks() -> DoctorReport:
     paths.workspace_path = str(workspace)
     paths.workspace_exists = workspace.exists()
 
-    from opendde_harness.providers.rates import resolve_max_output_tokens
+    from opendde_harness.providers.catalog import overlay_for
+    from opendde_harness.providers.rates import resolve_context_window, resolve_max_output_tokens
 
     defaults = config.agents.defaults
+    overlay = overlay_for(config.providers.model_overlays(), defaults.model)
+    # What a request will actually carry, resolved the same way the loop
+    # resolves it -- doctor reporting a configured number that no longer
+    # exists would be reporting a setting, not the behaviour.
+    ceiling = resolve_max_output_tokens(defaults.model, overlay=overlay)
+    window = resolve_context_window(defaults.model, overlay=overlay)
+    wire, wire_source = _wire_facts(config)
     report.routing = RoutingInfo(
         model=defaults.model,
         provider=config.get_provider_name(),
-        # What a request will actually carry, resolved the same way the
-        # provider resolves it -- doctor reporting a configured number that
-        # no longer exists would be reporting a setting, not the behaviour.
-        max_tokens=resolve_max_output_tokens(defaults.model),
-        context_window_tokens=defaults.context_window_tokens,
+        max_tokens=ceiling.tokens,
+        context_window_tokens=window.tokens,
+        max_tokens_source=ceiling.source,
+        context_window_source=window.source,
+        wire=wire,
+        wire_source=wire_source,
     )
 
     try:
@@ -369,6 +386,27 @@ def _server_log_hint() -> str:
     return str(server_log_path())
 
 
+def _wire_facts(config) -> tuple[str, str]:
+    """(wire, where it came from) for the default model, or two empties.
+
+    The same precedence the request uses: the model's overlay, then the
+    section, then the provider's default.
+    """
+    from opendde_harness.providers.catalog import overlay_for
+    from opendde_harness.providers.registry import default_wire, find_by_name
+
+    name = config.get_provider_name() or ""
+    spec = find_by_name(name)
+    if spec is None or spec.model_prefix != "openai":
+        return "", ""
+    overlay = overlay_for(config.providers.model_overlays(), config.agents.defaults.model or "")
+    if overlay is not None and overlay.wire:
+        return overlay.wire, "model overlay"
+    section = config.providers.get(name)
+    declared = getattr(section, "wire", None)
+    return (declared, "section") if declared else (default_wire(name), f"{name} default")
+
+
 def _render_human_output(report: DoctorReport) -> None:
     console.print(f"\n{__logo__} OpenDDE Harness Doctor\n")
 
@@ -415,8 +453,20 @@ def _render_human_output(report: DoctorReport) -> None:
             console.print(f"  Routes to:    {routing.provider}")
         else:
             console.print("  Routes to:    [red]<unresolved>[/red]")
-        console.print(f"  Max tokens:   {routing.max_tokens}")
-        console.print(f"  Context win:  {routing.context_window_tokens if routing.context_window_tokens else 'auto'}")
+        console.print(f"  Max tokens:   {routing.max_tokens}  [dim]({routing.max_tokens_source})[/dim]")
+        if routing.context_window_tokens:
+            console.print(
+                f"  Context win:  {routing.context_window_tokens}  [dim]({routing.context_window_source})[/dim]"
+            )
+        else:
+            console.print(
+                "  Context win:  [yellow]unknown[/yellow]  [dim](no table lists this model; history is not trimmed)[/dim]"
+            )
+            console.print(
+                f"                [dim]declare providers.<name>.modelOverlay.{routing.model!r}.contextWindowTokens to size it[/dim]"
+            )
+        if routing.wire:
+            console.print(f"  Wire:         {routing.wire}  [dim]({routing.wire_source})[/dim]")
 
     features = report.features
     if features is not None:
@@ -491,7 +541,9 @@ def _render_compute(report: dict, indent: str = "  ") -> None:
     for check in report.get("checks", []):
         icon = "[green]OK[/green]" if check["ok"] else "[red]FAIL[/red]"
         console.print(
-            f"{indent}{icon} {escape(check['name'])}" + (f": {escape(check['error'])}" if check.get("error") else "")
+            f"{indent}{icon} {escape(check['name'])}"
+            + (f": {escape(check['error'])}" if check.get("error") else "")
+            + (f"  [dim]({escape(check['note'])})[/dim]" if check.get("note") else "")
         )
     for service in report.get("external_services") or []:
         from opendde_harness.cli.onboard_compute import external_service_line

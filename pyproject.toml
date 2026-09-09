@@ -1,6 +1,6 @@
 [project]
 name = "opendde-harness"
-version = "0.0.1"
+version = "0.0.2"
 readme = "README.md"
 description = "OpenDDE Harness - antibody design harness: agent runtime, protein-design plugin, and compute service"
 requires-python = ">=3.12"
@@ -19,7 +19,7 @@ classifiers = [
 
 dependencies = [
     "typer>=0.20.0,<1.0.0",
-    "litellm>=1.82.1,<2.0.0",
+    "litellm>=1.100.0,<2.0.0",
     "pydantic>=2.12.0,<3.0.0",
     "pydantic-settings>=2.14.2,<3.0.0",
     "httpx>=0.28.0,<1.0.0",

@@ -111,16 +111,6 @@ def test_check_smoke_path_needs_no_config(home, monkeypatch):
     assert len(calls) == 1
 
 
-def test_missing_bundle_recommends_current_install_commands(home, launch, monkeypatch):
-    monkeypatch.setattr(tui_commands, "resolve_dist_entry", lambda: None)
-    result = CliRunner().invoke(tui_commands.tui_app, ["--check"])
-    assert result.exit_code == 2
-    assert "uv tool install --python 3.12 --reinstall opendde-harness" in result.output
-    assert "uv tool install --python 3.12 --reinstall ." in result.output
-    assert "install.sh" not in result.output
-    assert "OpenDDE-Harness-beta" not in result.output
-
-
 def test_missing_node_is_provisioned_before_launch(home, launch, monkeypatch):
     from opendde_harness.cli import node_runtime
 

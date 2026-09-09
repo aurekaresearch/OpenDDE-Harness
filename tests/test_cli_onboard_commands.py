@@ -127,7 +127,7 @@ def test_missing_source_is_rejected(settings, relative):
         validate_assets(settings)
 
 
-def test_missing_shared_weights_rejected_in_api_mode(settings):
+def test_missing_shared_weights_rejected_in_wire(settings):
     settings.mode = "api"
     Path(settings.opendde_checkpoint).unlink()
     validate_assets(settings)
@@ -237,7 +237,7 @@ def test_resolver_reuses_running_healthy_container(harness_home, monkeypatch):
     assert endpoint == local_service.ComputeEndpoint("http://127.0.0.1:18091", "tok")
 
 
-def test_resolver_starts_new_release_and_leaves_old_container_alone(harness_home, monkeypatch):
+def test_resolver_starts_new_release_and_asks_the_old_container_to_exit_when_idle(harness_home, monkeypatch):
     from opendde_harness.cli import compute_code, onboard_compute
 
     monkeypatch.setattr(compute_code, "runtime_code_identity", lambda: {"id": CODE_ID})
@@ -245,6 +245,10 @@ def test_resolver_starts_new_release_and_leaves_old_container_alone(harness_home
     monkeypatch.setattr(onboard_compute, "docker", lambda *args, **k: pytest.fail(f"unexpected docker {args}"))
     monkeypatch.setattr(
         local_service, "service_health", lambda url, token, **k: pytest.fail("old release must not be probed")
+    )
+    retired = []
+    monkeypatch.setattr(
+        local_service, "request_shutdown", lambda url, token, *, if_idle, timeout=5.0: retired.append((url, if_idle))
     )
     old = local_service.new_state(container="opendde-compute-old", image="img", code_id="old-code", port=18092)
     local_service.write_state(old)
@@ -276,6 +280,8 @@ def test_resolver_starts_new_release_and_leaves_old_container_alone(harness_home
     assert len(started) == 1 and started[0][1:] == ("tok", "http://fold.test", CODE_ID, True)
     assert started[0][0].image == "img" and started[0][0].port == 0
     assert local_service.read_state()["container"] == "opendde-compute-" + "a" * 12
+    # Asked, not killed: a busy old release answers 409 and finishes its work.
+    assert retired == [("http://127.0.0.1:18092", True)]
 
 
 def test_resolver_restarts_dead_or_unhealthy_container(harness_home, monkeypatch):
@@ -743,3 +749,85 @@ def test_probe_failure_always_says_something(monkeypatch):
     assert "no reply" in wizard._probe_failure(TimeoutError())
     assert wizard._probe_failure(RuntimeError("")) == "RuntimeError"
     assert wizard._probe_failure(RuntimeError("upstream refused the key")) == "upstream refused the key"
+
+
+def test_custom_endpoint_credentials_ask_which_wire_and_write_it(monkeypatch):
+    from opendde_harness.cli import onboard_commands as wizard
+
+    written = {}
+    monkeypatch.setattr(wizard, "_prompt_api_key", lambda provider, **kw: "sk-test")
+    monkeypatch.setattr(wizard, "_prompt_base_url", lambda *a, **kw: "https://relay.example/v1")
+    monkeypatch.setattr(wizard, "_prompt_wire", lambda *a, **kw: "responses")
+    monkeypatch.setattr(wizard, "_write_provider_fields", lambda provider, fields: written.update({provider: fields}))
+
+    wizard._collect_credentials(
+        "custom", is_oauth=False, is_custom=True, api_key=None, base_url=None, model=None, non_interactive=False
+    )
+
+    assert written["custom"] == {"api_key": "sk-test", "api_base": "https://relay.example/v1", "wire": "responses"}
+
+
+def test_non_interactive_custom_endpoint_writes_no_wire_unless_given(monkeypatch):
+    from opendde_harness.cli import onboard_commands as wizard
+
+    written = {}
+    monkeypatch.setattr(wizard, "_write_provider_fields", lambda provider, fields: written.update({provider: fields}))
+    args = dict(is_oauth=False, is_custom=True, api_key="sk", base_url="https://relay.example/v1", model="gpt-x")
+
+    wizard._collect_credentials("custom", non_interactive=True, **args)
+    assert "wire" not in written["custom"]
+
+    wizard._collect_credentials("custom", non_interactive=True, wire="chat", **args)
+    assert written["custom"]["wire"] == "chat"
+
+
+def test_inspect_compute_treats_unprepared_managed_code_as_ready_when_it_can_start_offline(tmp_path, monkeypatch):
+    from opendde_harness.cli import compute_assets, compute_code, onboard_compute
+
+    monkeypatch.setattr(compute_assets, "inspect_assets", lambda root, **kwargs: {"ready": True, "files": []})
+    monkeypatch.setattr(onboard_compute, "check_local_docker", lambda: None)
+    monkeypatch.setattr(local_service, "instance_status", lambda config: {"running": False, "container": "c"})
+    monkeypatch.setattr(
+        compute_code, "managed_code_status", lambda: {"identity": {"id": "abc"}, "path": "/cache/x", "prepared": False}
+    )
+    config = {"compute_docker": {"weights_dir": str(tmp_path), "code_mode": "managed", "gpus": "none"}}
+
+    report = onboard_compute.inspect_compute(config)
+
+    check = next(item for item in report["checks"] if item["name"] == "runtime_code")
+    assert check["ok"] is True and "first start" in check["note"]
+    assert report["code"] == {"id": "abc"}
+
+
+def test_a_managed_start_prepares_the_newly_installed_release_itself(settings, harness_home, monkeypatch):
+    """After a package upgrade the next task start copies the new code; no manual prepare."""
+    from opendde_harness.cli import compute_code, onboard_compute
+
+    prepared = []
+    code_root = settings.package_root
+    monkeypatch.setattr(compute_code, "prepare_runtime_code", lambda: prepared.append("code") or Path(code_root))
+    monkeypatch.setattr(
+        onboard_compute, "validate_code_assets", lambda s: prepared.append(("validated", s.package_root))
+    )
+    monkeypatch.setattr(onboard_compute, "create_arguments", lambda *a, **k: (["run"], {}))
+    monkeypatch.setattr(onboard_compute, "check_local_docker", lambda: {"Runtimes": {"nvidia": {}}})
+    monkeypatch.setattr(onboard_compute, "ensure_image", lambda image, **k: None)
+    monkeypatch.setattr(onboard_compute, "validate_settings", lambda *a, **k: None)
+    monkeypatch.setattr(onboard_compute, "inspect_container", lambda name: None)
+    monkeypatch.setattr(onboard_compute, "docker", lambda *args, **k: "container-id")
+    monkeypatch.setattr(onboard_compute, "wait_for_service", lambda *a, **k: None)
+    settings.code_mode = "managed"
+    settings.package_root = ""
+
+    start_service(settings, "token", code_id=CODE_ID)
+
+    assert prepared == ["code", ("validated", code_root)]
+
+
+def test_missing_shared_weights_rejected_in_api_mode(settings):
+    settings.mode = "api"
+    Path(settings.opendde_checkpoint).unlink()
+    validate_assets(settings)
+    (Path(settings.weights_dir) / "soluble_mpnn/solublempnn_v_48_020.pt").unlink()
+    with pytest.raises(ComputeSetupError, match="missing, empty or unreadable"):
+        validate_assets(settings)

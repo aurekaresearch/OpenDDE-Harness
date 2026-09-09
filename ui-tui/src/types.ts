@@ -216,6 +216,9 @@ export interface Usage {
   compressions?: number
   context_max?: number
   context_percent?: number
+  // Which tier sized context_max; 'unknown' with no context_max means no table
+  // lists the model, which the status rule says rather than showing nothing.
+  context_source?: string
   context_used?: number
   cost_status?: string
   cost_usd?: number

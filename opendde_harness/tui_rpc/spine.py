@@ -35,6 +35,7 @@ from opendde_harness.spine import (
     TurnFailed,
     TurnOutcome,
     TurnRequest,
+    TurnRetry,
     TurnStarted,
 )
 from opendde_harness.spine.delivery import Capabilities, DeliveryHub
@@ -102,7 +103,7 @@ class TuiOutlet:
     conversation's subscription: streamed token content via ``send_stream_chunk``
     (-> token.delta), and the discrete deliverables via ``deliver`` (Reasoning ->
     thinking.delta, ToolEvent -> tool.start / tool.complete, a non-streamed Text
-    -> a token.delta). The turn's completion (``message.complete``) and failure
+    -> a token.delta, TurnRetry -> turn.retry). The turn's completion (``message.complete``) and failure
     (``error``) are emitted by the sink after the render barrier. Notice and
     MediaOut are eaten — the wire protocol has no event for them and the TUI shows
     no per-turn progress or tool media today (a known gap, deferred)."""
@@ -153,6 +154,19 @@ class TuiOutlet:
             # Boundary marker; the TUI buckets this model call's reasoning +
             # text + tools into one collapsible episode.
             await self._emitter.emit(cid, {"type": "episode.start", "payload": {"index": out.index}})
+        elif isinstance(out, TurnRetry):
+            await self._emitter.emit(
+                cid,
+                {
+                    "type": "turn.retry",
+                    "payload": {
+                        "attempt": out.attempt,
+                        "total": out.total,
+                        "reason": out.reason,
+                        "discard": out.discard,
+                    },
+                },
+            )
         # Notice / MediaOut: eaten (no wire event today).
 
     async def send_stream_chunk(self, chat_id: str, stream_id: str, delta: str, *, done: bool = False) -> None:

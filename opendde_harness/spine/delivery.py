@@ -25,6 +25,7 @@ from opendde_harness.spine.events import (
     TurnEnded,
     TurnEvent,
     TurnFailed,
+    TurnRetry,
     TurnStarted,
 )
 
@@ -138,6 +139,10 @@ class DeliveryHub:
             # Remember the channel this stream rides so a later close_stream (driven
             # by a sourceless lifecycle event) can route its marker here.
             self._stream_channel.setdefault(out.conversation_id, channel)
+        elif isinstance(out, TurnRetry) and out.discard:
+            # An edit-in-place outlet cannot un-send what it showed; the closed
+            # stream stays as a finished message and the re-run opens a new one.
+            await self.close_stream(out.conversation_id)
         queue = self._queues.get(channel)
         if queue is None:
             queue = asyncio.Queue(maxsize=_OUTLET_QUEUE_MAXSIZE)

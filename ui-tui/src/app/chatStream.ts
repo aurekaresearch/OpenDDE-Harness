@@ -139,6 +139,9 @@ const dispatch = (
     case 'episode.start':
       turnController.recordEpisodeStart(event.payload.index)
       return
+    case 'turn.retry':
+      turnController.recordRetry(event.payload)
+      return
     case 'token.delta':
       onTokenDelta(event)
       return

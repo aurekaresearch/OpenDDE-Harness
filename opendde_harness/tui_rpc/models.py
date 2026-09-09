@@ -100,6 +100,9 @@ class UsageSnapshot(_Strict):
     context_used: int | None = None
     context_max: int | None = None
     context_percent: int | None = None
+    # Which tier sized context_max (providers/rates SOURCE_*); "unknown" with
+    # a zero context_max means no table lists the model, not that it is small.
+    context_source: str | None = None
 
 
 class CliResult(_Strict):
@@ -145,6 +148,20 @@ class EpisodeStartPayload(_Strict):
 class EpisodeStartEvent(_Strict):
     type: Literal["episode.start"]
     payload: EpisodeStartPayload
+
+
+class TurnRetryPayload(_Strict):
+    attempt: int
+    total: int
+    reason: str
+    #: True when text already streamed for this model call is void and the
+    #: live buffer must start over; False when nothing had been shown yet.
+    discard: bool
+
+
+class TurnRetryEvent(_Strict):
+    type: Literal["turn.retry"]
+    payload: TurnRetryPayload
 
 
 class TokenDeltaPayload(_Strict):
@@ -252,6 +269,7 @@ TurnEvent = Annotated[
     Union[
         MessageStartEvent,
         EpisodeStartEvent,
+        TurnRetryEvent,
         TokenDeltaEvent,
         ThinkingDeltaEvent,
         ToolStartEvent,
@@ -570,6 +588,9 @@ class ModelOptionProvider(_Strict):
     total_models: int
     needs_api_base: bool
     warning: str
+    # The wire this provider's endpoint is configured for, offered for the
+    # picker to switch; absent when the provider's driver has only one wire.
+    wire: Literal["responses", "chat"] | None = None
 
 
 class ModelOptionsParams(_Strict):
@@ -588,6 +609,7 @@ class ModelSaveKeyParams(_Strict):
     # The handler rejects an empty one for every other credential shape.
     api_key: str = ""
     api_base: str | None = None
+    wire: Literal["responses", "chat"] | None = None
     session_id: str | None = None
 
 
@@ -994,6 +1016,7 @@ __all__ = [
     "SessionExportResult",
     "MessageStartEvent",
     "EpisodeStartEvent",
+    "TurnRetryEvent",
     "TokenDeltaEvent",
     "ThinkingDeltaEvent",
     "ToolStartEvent",

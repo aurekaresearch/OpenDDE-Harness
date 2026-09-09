@@ -256,6 +256,18 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         turnController.recordEpisodeStart(Number(ev.payload?.index ?? 0))
 
         return
+      case 'turn.retry': {
+        const p = ev.payload ?? {}
+
+        turnController.recordRetry({
+          attempt: Number(p.attempt ?? 0),
+          discard: Boolean(p.discard),
+          reason: String(p.reason ?? ''),
+          total: Number(p.total ?? 0)
+        })
+
+        return
+      }
       case 'status.update': {
         const p = ev.payload
 

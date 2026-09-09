@@ -60,6 +60,17 @@ describe('createGatewayEventHandler', () => {
     patchUiState({ showReasoning: true })
   })
 
+  it('turn.retry with discard clears the live stream and notes the attempt', () => {
+    const onEvent = createGatewayEventHandler(buildCtx([]))
+
+    onEvent({ payload: {}, type: 'message.start' } as any)
+    onEvent({ payload: { text: 'cut off' }, type: 'token.delta' } as any)
+    onEvent({ payload: { attempt: 3, discard: true, reason: 'network', total: 4 }, type: 'turn.retry' } as any)
+
+    expect(turnController.bufRef).toBe('')
+    expect(getTurnState().activity.some(a => a.text.includes('retrying 3/4: network'))).toBe(true)
+  })
+
   it('archives incomplete todos into transcript flow at end of turn so they scroll up', () => {
     const appended: Msg[] = []
 

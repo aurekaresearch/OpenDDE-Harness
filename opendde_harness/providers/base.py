@@ -7,11 +7,14 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from opendde_harness.tracing import semconv, trace
+
+if TYPE_CHECKING:
+    from opendde_harness.config.schema import ModelOverlay
 
 # Wordings providers use to reject list-type content in a tool message. Each is
 # a real 400 body, not a guess: the first group was measured against
@@ -149,6 +152,84 @@ def parse_llm_error(content: str | None) -> tuple[str, str | None, str] | None:
     if not m:
         return None
     return m.group("category"), m.group("provider"), m.group("detail").strip()
+
+
+#: Transport failures by lowercased class name (httpx, ssl, the stdlib) and by
+#: the wording the surveyed harnesses accumulated (pi's retry table). Neither
+#: list alone is enough: httpx's str() is frequently empty, and a proxy or a
+#: resolver reports through OSError whose class says nothing.
+_TRANSPORT_ERROR_NAMES = frozenset(
+    {
+        "timeout",
+        "apitimeouterror",
+        "apiconnectionerror",
+        "connecttimeout",
+        "readtimeout",
+        "writetimeout",
+        "pooltimeout",
+        "connecterror",
+        "readerror",
+        "writeerror",
+        "remoteprotocolerror",
+        "proxyerror",
+        "networkerror",
+        "transporterror",
+        "sslerror",
+        "ssleoferror",
+        "connectionerror",
+        "connectionreseterror",
+        "brokenpipeerror",
+        "incompleteread",
+        "serverdisconnectederror",
+        "clientconnectorerror",
+    }
+)
+_TRANSPORT_ERROR_PHRASES = (
+    "timeout",
+    "timed out",
+    "connection",
+    "name resolution",
+    "socket hang up",
+    "other side closed",
+    "fetch failed",
+    "reset before headers",
+    "stream ended before",
+    "eof occurred in violation of protocol",
+    "server disconnected",
+    "network is unreachable",
+    "no route to host",
+    "broken pipe",
+)
+
+
+class WireMismatchError(RuntimeError):
+    """The endpoint refused the wire the request travelled on.
+
+    Raised in place of the transport's own 404/405 when a request to
+    ``/v1/responses`` (or ``/v1/chat/completions``) is answered as an unknown
+    route. Its own type so the verdict is the type: a bare 404 classifies as
+    ``model_unavailable`` and sends the loop hopping through fallback models
+    over the same broken transport, naming the model in an error that is
+    about the endpoint. The message says which config field fixes it, because
+    a wrong wire is a configuration error and nothing here routes around it.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class EndpointNotFoundError(WireMismatchError):
+    """The endpoint answered 404 without naming a route or a model.
+
+    A bare "404 page not found" is what nginx, Caddy and a Go server return
+    for any unknown path, so it cannot tell a missing ``/v1`` in the base URL
+    from a wire the endpoint does not serve from a model it does not know.
+    Its own type so the message can list all three in the order they are
+    likely, rather than naming one with a confidence the evidence does not
+    carry. Fatal for the same reason as its parent: no other model over the
+    same address would fare better.
+    """
 
 
 class ProviderHTTPError(RuntimeError):
@@ -325,7 +406,14 @@ class StreamDelta:
     error_classification: ErrorClassification | None = None
 
 
-def send_max_tokens(generation: Any, model: str | None, *, pinned: int | None = None, allow_fetch: bool = True) -> int:
+def send_max_tokens(
+    generation: Any,
+    model: str | None,
+    *,
+    pinned: int | None = None,
+    overlay: "ModelOverlay | None" = None,
+    allow_import: bool = True,
+) -> int:
     """The output ceiling a request will actually carry.
 
     One function for both the request body and the agent loop's ceiling check.
@@ -345,10 +433,11 @@ def send_max_tokens(generation: Any, model: str | None, *, pinned: int | None = 
     for a short answer are bounded by different rules and only one of them is
     the number truncation is judged against.
 
-    ``allow_fetch=False`` is for callers that only need a reservation and must
+    ``allow_import=False`` is for callers that only need a reservation and must
     not stall on the catalogue's importing tier (~2-7s in a fresh process);
     they get whatever is already loaded, then the fixed fallback. A caller
-    about to build a request wants the default.
+    about to build a request wants the default. ``overlay`` is the model's own
+    declaration, which beats every table.
 
     The model's own ceiling is the answer, unbounded by anything else. How much
     of the window a turn holds back for its reply is the budget's business, and
@@ -357,7 +446,7 @@ def send_max_tokens(generation: Any, model: str | None, *, pinned: int | None = 
     """
     from opendde_harness.providers.rates import resolve_max_output_tokens
 
-    ceiling = resolve_max_output_tokens(model, allow_fetch=allow_fetch)
+    ceiling = resolve_max_output_tokens(model, overlay=overlay, allow_import=allow_import).tokens
     pin = pinned if pinned is not None else getattr(generation, "max_tokens", None)
     if pin:
         return min(int(pin), ceiling)
@@ -380,7 +469,14 @@ class GenerationSettings:
     #: explicit ``chat(max_tokens=...)`` at a call site wants.
     max_tokens: int | None = None
     reasoning_effort: str | None = None
+    #: Wall-clock cap on a non-streamed call. A stream is bounded per gap
+    #: instead: ``first_token_timeout`` covers the silence before its first
+    #: event (a model with hidden reasoning thinks for minutes before it),
+    #: ``idle_timeout`` every silence after. A stream that keeps delivering
+    #: has no total cap; a long reply is not a fault.
     timeout: float = 600.0
+    first_token_timeout: float = 300.0
+    idle_timeout: float = 120.0
 
 
 class LLMProvider(ABC):
@@ -574,6 +670,10 @@ class LLMProvider(ABC):
                 val = getattr(cur, attr, None)
                 if isinstance(val, int) and 100 <= val < 600:
                     return val
+            # httpx keeps it on the response, not the exception.
+            val = getattr(getattr(cur, "response", None), "status_code", None)
+            if isinstance(val, int) and 100 <= val < 600:
+                return val
             cur = cur.__cause__ or cur.__context__
         return None
 
@@ -629,6 +729,14 @@ class LLMProvider(ABC):
         def has(*needles: str) -> bool:
             return any(n in msg for n in needles)
 
+        # A wrong wire is a configuration error: not retryable, and no other
+        # model over the same transport would fare better. Decided by type
+        # before the status buckets, which would read its 404 as the model.
+        if "endpointnotfounderror" in names:
+            return ErrorClassification("endpoint_not_found")
+        if "wiremismatcherror" in names:
+            return ErrorClassification("wire_mismatch")
+
         # Context-window overflow → compress and retry, NOT fallback (a smaller
         # window won't help; the same model after compaction will). Detected by
         # class name first — a bare 400 otherwise looks like invalid_request.
@@ -675,15 +783,12 @@ class LLMProvider(ABC):
         # Timeout / connection → retry + fallback. isinstance covers the builtin
         # TimeoutError raised by asyncio.wait_for (its class name "timeouterror"
         # and empty str() match neither the name set nor the substrings below).
-        if (
-            isinstance(exc, TimeoutError)
-            or {"timeout", "apitimeouterror", "apiconnectionerror"} & names
-            or has(
-                "timeout",
-                "timed out",
-                "connection",
-            )
-        ):
+        # The name set is httpx's and the stdlib's transport failures by class:
+        # their str() is often empty ("" for a ReadError), so a message match
+        # alone left nine of fourteen real drops classified unknown -- fatal,
+        # with no retry and no fallback -- on the bespoke httpx providers that
+        # LiteLLM's exception mapping does not cover.
+        if isinstance(exc, TimeoutError) or _TRANSPORT_ERROR_NAMES & names or has(*_TRANSPORT_ERROR_PHRASES):
             return ErrorClassification("network", retryable=True, should_fallback=True)
 
         # Auth / permission → fatal config; retry & fallback won't fix it.
@@ -724,6 +829,7 @@ class LLMProvider(ABC):
                 "model not found",
                 "does not exist",
                 "no endpoints",
+                "no available channel",  # new-api / one-api relays: no upstream carries this model
                 "not available",
                 "unavailable",
             )
@@ -862,11 +968,10 @@ class LLMProvider(ABC):
     def wire_model_id(self, model: str) -> str:
         """The id this provider will actually send. See ``providers.wire``.
 
-        Anyone sizing a *request* has to ask under this rather than under the
-        stored name. The catalogue files a gateway spelling as its own row with
-        its own numbers -- ``openai/gpt-4o`` answers 16384 where
-        ``openrouter/openai/gpt-4o`` answers 4096 -- so the two are different
-        questions, and only this one is about the request that went out.
+        For sending only. Sizing asks under the stored id: the ladder knows
+        every spelling a table files a model as, while this id names the
+        driver ("openai/" for a custom endpoint, a bare slug for the Codex
+        login), which answers for another vendor's model or for none.
 
         Default identity: a provider that sends the stored id unchanged has
         nothing to translate.
@@ -938,15 +1043,20 @@ class LLMProvider(ABC):
             # sending Anthropic's markers on to Gemini is what doubled a prompt.
             if idx and not prompt_cache.accepts_cache_control(current_model or ""):
                 messages, tools = prompt_cache.strip(messages, tools)
-            # One id for both the bound below and the check further down, and
-            # the id this request goes out under rather than the stored one --
-            # a gateway spelling is its own catalogue row with its own ceiling.
-            wire_id = self.wire_model_id(current_model or "")
             # Bounded here rather than inside each provider: a pin is per call
             # but a ceiling is per model, so a fallback hop can change it. Left
             # as ``None`` when nobody pinned, which is the provider's cue to
             # resolve the model's own ceiling.
-            sent = None if max_tokens is None else send_max_tokens(self.generation, wire_id, pinned=max_tokens)
+            if max_tokens is None:
+                sent = None
+            else:
+                from opendde_harness.providers.catalog import overlay_for
+
+                # The stored id, not the wire id: overlays key by identity, and
+                # a declared ceiling has to bound a pin the same way it bounds
+                # the budget's reservation.
+                overlay = overlay_for(getattr(self, "model_overlays", None) or {}, current_model or "")
+                sent = send_max_tokens(self.generation, current_model or "", pinned=max_tokens, overlay=overlay)
             response = await self._chat_attempt_with_retry(
                 messages=messages,
                 tools=tools,

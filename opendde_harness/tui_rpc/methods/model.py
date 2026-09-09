@@ -231,7 +231,29 @@ def _build_provider_entry(
         # demand what the gate does not.
         "needs_api_base": kind == CRED_LOCAL or (kind == CRED_ENDPOINT and not (spec and spec.usable_default_api_base)),
         "warning": warning,
+        "wire": _wire_choice(slug, spec, section=section),
     }
+
+
+def _wire_choice(slug: str, spec: Any, *, section: Any = _UNLOADED) -> str | None:
+    """The wire the picker may switch for this provider, or None.
+
+    Only an endpoint reached through the openai driver has two wires to
+    choose between; every other driver has one, and offering a switch there
+    would be offering a setting nothing reads.
+    """
+    from opendde_harness.providers.registry import default_wire
+
+    if spec is None or spec.model_prefix != "openai":
+        return None
+    if section is _UNLOADED:
+        from opendde_harness.config.loader import load_config
+
+        try:
+            section = load_config().providers.get(slug)
+        except Exception:
+            section = None
+    return getattr(section, "wire", None) or default_wire(slug)
 
 
 async def _entry_off_loop(slug: str, current_provider: str | None) -> dict[str, Any]:
@@ -352,6 +374,8 @@ async def model_save_key(params: dict) -> dict:
     fields: dict[str, Any] = {"api_key": "" if kind == CRED_LOCAL else parsed.api_key}
     if parsed.api_base:
         fields["api_base"] = parsed.api_base
+    if parsed.wire:
+        fields["wire"] = parsed.wire
 
     try:
         await asyncio.to_thread(set_provider_fields, parsed.slug, fields)

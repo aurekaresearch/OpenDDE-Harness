@@ -1,7 +1,7 @@
 """MCP client: connects to MCP servers and wraps their tools as native OpenDDE Harness tools."""
 
 import asyncio
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -14,6 +14,114 @@ from opendde_harness.sandbox import SandboxInitError
 
 if TYPE_CHECKING:
     from opendde_harness.sandbox import SandboxExecutor
+
+
+@asynccontextmanager
+async def _mcp_server_connection(name: str, cfg, transport_type: str, executor: "SandboxExecutor | None"):
+    """One server's transport, session and handshake, as a single lifecycle.
+
+    The transport runs in a task of its own. The SDK's transports are anyio
+    task groups, and entered in the agent's task they made every later
+    transport failure the agent's: a server dropping mid-turn cancelled the
+    turn with an ExceptionGroup. Owned by its own task, a failure after the
+    handshake ends that task and the server's tools start failing, which the
+    wrapper already reports per call. A failure during the handshake is
+    raised here, as this server's connection error.
+    """
+    loop = asyncio.get_running_loop()
+    ready: asyncio.Future = loop.create_future()
+    closing = asyncio.Event()
+
+    async def run() -> None:
+        try:
+            async with _mcp_transport(name, cfg, transport_type, executor) as (session, tools):
+                ready.set_result((session, tools))
+                await closing.wait()
+        except asyncio.CancelledError:
+            if not ready.done():
+                ready.cancel()
+            raise
+        except BaseException as exc:
+            if not ready.done():
+                ready.set_exception(exc)
+            else:
+                logger.warning("MCP server '{}': connection ended: {}", name, exc)
+
+    task = asyncio.create_task(run(), name=f"mcp:{name}")
+
+    async def reap() -> None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    try:
+        session, tools = await ready
+    except BaseException:
+        # Never connected (a handshake that hung, or the caller cancelled):
+        # nothing to close, and the transport must not outlive the caller.
+        await reap()
+        raise
+    try:
+        yield session, tools
+    finally:
+        closing.set()
+        try:
+            await asyncio.wait_for(asyncio.shield(task), _MCP_CLOSE_TIMEOUT)
+        except asyncio.CancelledError:
+            await reap()
+            raise
+        except BaseException:
+            await reap()
+
+
+#: How long a closing connection may take to unwind its transport.
+_MCP_CLOSE_TIMEOUT = 10.0
+
+
+@asynccontextmanager
+async def _mcp_transport(name: str, cfg, transport_type: str, executor: "SandboxExecutor | None"):
+    """The transport, session and handshake, entered and left in one task."""
+    async with AsyncExitStack() as stack:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.sse import sse_client
+        from mcp.client.stdio import stdio_client
+        from mcp.client.streamable_http import streamable_http_client
+
+        if transport_type == "stdio":
+            if executor is not None and executor.supports_process_spawning:
+                read, write = await executor.start_process(cfg.command, cfg.args, env=cfg.env or None)
+            else:
+                params = StdioServerParameters(command=cfg.command, args=cfg.args, env=cfg.env or None)
+                read, write = await stack.enter_async_context(stdio_client(params))
+        elif transport_type == "sse":
+
+            def httpx_client_factory(
+                headers: dict[str, str] | None = None,
+                timeout: httpx.Timeout | None = None,
+                auth: httpx.Auth | None = None,
+            ) -> httpx.AsyncClient:
+                merged_headers = {**(cfg.headers or {}), **(headers or {})}
+                return httpx.AsyncClient(
+                    headers=merged_headers or None,
+                    follow_redirects=True,
+                    timeout=timeout,
+                    auth=auth,
+                )
+
+            read, write = await stack.enter_async_context(
+                sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
+            )
+        elif transport_type == "streamableHttp":
+            http_client = await stack.enter_async_context(
+                httpx.AsyncClient(headers=cfg.headers or None, follow_redirects=True, timeout=None)
+            )
+            read, write, _ = await stack.enter_async_context(streamable_http_client(cfg.url, http_client=http_client))
+        else:
+            raise ValueError(f"MCP server '{name}': unknown transport type '{transport_type}'")
+
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+        tools = await session.list_tools()
+        yield session, tools
 
 
 class MCPToolWrapper(Tool):
@@ -110,55 +218,17 @@ async def connect_mcp_servers(
                 "Either switch to an HTTP/SSE MCP server or set sandbox.backend='none'."
             )
 
+        if transport_type not in ("stdio", "sse", "streamableHttp"):
+            logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
+            continue
+
         try:
-            from mcp import ClientSession, StdioServerParameters
-            from mcp.client.sse import sse_client
-            from mcp.client.stdio import stdio_client
-            from mcp.client.streamable_http import streamable_http_client
-
-            if transport_type == "stdio":
-                if executor is not None and executor.supports_process_spawning:
-                    read, write = await executor.start_process(cfg.command, cfg.args, env=cfg.env or None)
-                else:
-                    params = StdioServerParameters(command=cfg.command, args=cfg.args, env=cfg.env or None)
-                    read, write = await stack.enter_async_context(stdio_client(params))
-            elif transport_type == "sse":
-
-                def httpx_client_factory(
-                    headers: dict[str, str] | None = None,
-                    timeout: httpx.Timeout | None = None,
-                    auth: httpx.Auth | None = None,
-                ) -> httpx.AsyncClient:
-                    merged_headers = {**(cfg.headers or {}), **(headers or {})}
-                    return httpx.AsyncClient(
-                        headers=merged_headers or None,
-                        follow_redirects=True,
-                        timeout=timeout,
-                        auth=auth,
-                    )
-
-                read, write = await stack.enter_async_context(
-                    sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
-                )
-            elif transport_type == "streamableHttp":
-                http_client = await stack.enter_async_context(
-                    httpx.AsyncClient(
-                        headers=cfg.headers or None,
-                        follow_redirects=True,
-                        timeout=None,
-                    )
-                )
-                read, write, _ = await stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
-                )
-            else:
-                logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
-                continue
-
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-
-            tools = await session.list_tools()
+            # One task per server (see _mcp_server_connection): a failure
+            # surfaces here as this server's connection error, the rest still
+            # connect, and a later drop never cancels the agent turn.
+            session, tools = await stack.enter_async_context(
+                _mcp_server_connection(name, cfg, transport_type, executor)
+            )
             for tool_def in tools.tools:
                 wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
                 registry.register(wrapper)

@@ -14,6 +14,7 @@ fixed overhead.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import asdict
@@ -41,6 +42,7 @@ from opendde_harness.context_engine.curator import (
     TurnContext,
     _curator_input_payload,
     _trace_messages,
+    estimate_message_tokens,
 )
 from opendde_harness.memory_engine.consolidate.consolidator import MemoryStore
 from opendde_harness.providers.base import LLMProvider
@@ -61,7 +63,7 @@ class CuratorSegmentBuilder:
         config: ContextConfig,
         provider: LLMProvider,
         model: str,
-        context_window_tokens: int,
+        context_window_tokens: int | None,
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         now_fn: Callable[[], datetime] | None = None,
         max_steps: int = 12,
@@ -88,16 +90,15 @@ class CuratorSegmentBuilder:
 
         ``curator_model`` is re-derived with the constructor's own
         expression, so a switch cannot make it mean something it did not
-        mean at build time. The default is non-empty, so in practice it is
-        a pin; an explicitly empty ``context.curator_model`` is the one
-        config that follows the agent model, and it follows it here too.
+        mean at build time: an empty ``context.curator_model`` (the default)
+        follows the agent model here too, and a pin stays pinned.
         """
         self.provider = provider
         self.model = model
         self.curator_model = self.config.curator_model or model
         self.assembler.set_provider(provider, model)
 
-    def set_context_window(self, tokens: int) -> None:
+    def set_context_window(self, tokens: int | None) -> None:
         """Follow a ``/model`` switch down into the assembler it owns."""
         self.context_window_tokens = tokens
         self.assembler.set_context_window(tokens)
@@ -111,7 +112,10 @@ class CuratorSegmentBuilder:
         self._turn_ids[session_key] = turn_id
         self.assembler.prefix = ctx.prefix
 
-        manifest = self.archive.build_manifest(session_key, ctx.session_messages)
+        # Off the event loop: the manifest estimates every message and the
+        # fallback below runs the trimmer, and the loop is what the TUI's
+        # keystrokes and stream updates wait on.
+        manifest = await asyncio.to_thread(self.archive.build_manifest, session_key, ctx.session_messages)
         turn = TurnContext(
             current_message=ctx.current_message,
             media=ctx.media,
@@ -133,8 +137,17 @@ class CuratorSegmentBuilder:
         )
 
         history_tokens = sum(item.tokens for item in manifest)
-        threshold = int(ctx.budget.available_history * self.config.fast_path_threshold)
-        if history_tokens < threshold:
+        # An unknown window takes the fast path unconditionally. The slow path
+        # is an LLM loop that plans against the budget, and a budget nobody
+        # measured is not one to plan against: run at a stand-in figure it
+        # fired on every turn past a fraction of the real window. The provider
+        # still bounds the request, and its overflow error is handled upstream.
+        # A threshold of zero is a budget nothing fits in, not one every
+        # history overflows: compared strictly, it sent an empty history down
+        # the slow path on every turn.
+        available = ctx.budget.available_history
+        threshold = None if available is None else int(available * self.config.fast_path_threshold)
+        if not ctx.budget.known or threshold <= 0 or history_tokens < threshold:
             history = self._history_from_messages(ctx.session_messages)
             meta = {
                 "path": "fast",
@@ -145,18 +158,43 @@ class CuratorSegmentBuilder:
             self.archive.append_trace(session_key, turn_id, "fast_path", meta)
             return Segment(text="", history=history, meta=meta)
 
-        try:
-            seg = await self._slow_path(state, turn_id)
-            if seg is not None:
-                return seg
-        except Exception:
-            logger.exception("Curator slow path failed; using deterministic fallback")
-            self.archive.append_trace(session_key, turn_id, "slow_path_exception", {})
+        # The slow path is worth its LLM steps only when the budget leaves a
+        # choice to make. The protected head is never dropped and the user
+        # message rides along regardless, so a budget no larger than the two
+        # leaves the planner nothing to decide; measured at 58 spare tokens it
+        # spent twelve steps producing the fallback's own selection, every
+        # turn. Below that floor the fallback is taken directly: the head plus
+        # whatever else fits, no calls -- unlike the fast path, which would
+        # ship everything. The user message as it will actually be sent, with
+        # its runtime context, not the bare text.
+        floor = sum(item.tokens for item in manifest if item.protected) + estimate_message_tokens(
+            ctx.prefix.user_message
+        )
+        reason = "slow_path_failed"
+        if available > floor:
+            try:
+                seg = await asyncio.wait_for(self._slow_path(state, turn_id), self.config.curator_timeout_seconds)
+                if seg is not None:
+                    return seg
+            except TimeoutError:
+                reason = "slow_path_timeout"
+                logger.warning(
+                    "Curator slow path exceeded {}s; using deterministic fallback", self.config.curator_timeout_seconds
+                )
+                self.archive.append_trace(session_key, turn_id, "slow_path_timeout", {})
+            except Exception:
+                logger.exception("Curator slow path failed; using deterministic fallback")
+                self.archive.append_trace(session_key, turn_id, "slow_path_exception", {})
+        else:
+            reason = "below_floor"
 
         plan = self.assembler.fallback_plan(state)
-        assembled, validation = self.assembler.build(state, plan)
+        assembled, validation = await asyncio.to_thread(self.assembler.build, state, plan)
         meta = {
             "path": "fallback",
+            "reason": reason,
+            "available_history": available,
+            "floor_tokens": floor,
             "trace_path": str(self.archive.trace_path(session_key, turn_id)),
         }
         self.archive.append_trace(
@@ -269,7 +307,7 @@ class CuratorSegmentBuilder:
                     },
                 )
                 if tool_call.name == "curator_build_context" and state.final_plan is not None:
-                    assembled, validation = self.assembler.build(state, state.final_plan)
+                    assembled, validation = await asyncio.to_thread(self.assembler.build, state, state.final_plan)
                     if validation.get("ok"):
                         self.archive.append_trace(
                             state.session_key,

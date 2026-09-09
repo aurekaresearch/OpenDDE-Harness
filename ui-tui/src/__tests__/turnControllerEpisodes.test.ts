@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { Msg } from '../types.js'
 
 import { turnController } from '../app/turnController.js'
+import { getTurnState } from '../app/turnStore.js'
 import { patchUiState } from '../app/uiStore.js'
 
 afterEach(() => {
@@ -121,5 +122,77 @@ describe('turnController episodes commit', () => {
     const { finalMessages } = turnController.recordMessageComplete({ text: 'hi' })
 
     expect(finalMessages.some(m => m.kind === 'episodes')).toBe(false)
+  })
+})
+
+describe('turnController retry', () => {
+  it("discards the current call's live text and accrual, then re-fills from the re-run", () => {
+    patchUiState({ transcript: 'episodes' })
+    turnController.reset()
+
+    turnController.recordEpisodeStart(0)
+    turnController.recordReasoningDelta('first try')
+    turnController.recordToolStart('search1', 'web_search', 'searching')
+    turnController.recordMessageDelta({ text: 'partial answer that was cut' })
+    turnController.recordRetry({ attempt: 2, discard: true, reason: 'network', total: 4 })
+    turnController.recordReasoningDelta('second try')
+    turnController.recordMessageDelta({ text: 'whole answer' })
+
+    expect(turnController.bufRef).toBe('whole answer')
+    expect(getTurnState().tools).toEqual([])
+    expect(turnController.episodes[0]!.reasoning).toBe('second try')
+    expect(getTurnState().activity.some(a => a.text.includes('retrying 2/4: network'))).toBe(true)
+
+    const { finalMessages } = turnController.recordMessageComplete({ text: 'whole answer' })
+    const epMsg = finalMessages.find(m => m.kind === 'episodes')!
+
+    expect(epMsg.text).toBe('whole answer')
+    expect(epMsg.episodes![0]!.reasoning).toBe('second try')
+  })
+
+  it("drops the discarded call's trail segments but keeps earlier calls' work", () => {
+    turnController.reset()
+    turnController.startMessage()
+
+    turnController.recordEpisodeStart(0)
+    turnController.recordToolStart('a', 'read_file', 'src/a.go')
+    turnController.recordToolComplete('a', 'read_file', undefined, 'package a', 0.1)
+    turnController.recordEpisodeStart(1)
+    turnController.recordReasoningDelta('discarded reasoning')
+    turnController.recordMessageDelta({ text: 'cut' })
+    turnController.recordRetry({ attempt: 2, discard: true, reason: 'network', total: 4 })
+    turnController.recordReasoningDelta('kept reasoning')
+
+    const trail = turnController.segmentMessages.map(m => m.thinking ?? m.tools?.join(',') ?? m.text)
+
+    expect(trail.some(t => t?.includes('discarded reasoning'))).toBe(false)
+    expect(trail.some(t => t?.includes('kept reasoning'))).toBe(true)
+    expect(trail.some(t => t?.includes('src/a.go'))).toBe(true)
+  })
+
+  it('a reasoning-only previous call keeps its segment through a discarding retry', () => {
+    turnController.reset()
+    turnController.startMessage()
+
+    turnController.recordEpisodeStart(0)
+    turnController.recordReasoningDelta('earlier call reasoning')
+    turnController.recordEpisodeStart(1)
+    turnController.recordReasoningDelta('discarded reasoning')
+    turnController.recordRetry({ attempt: 2, discard: true, reason: 'network', total: 4 })
+    turnController.recordReasoningDelta('kept reasoning')
+
+    const thinking = turnController.segmentMessages.map(m => m.thinking ?? '')
+
+    expect(thinking.some(t => t.includes('earlier call reasoning') && !t.includes('discarded'))).toBe(true)
+    expect(thinking.some(t => t.includes('discarded reasoning'))).toBe(false)
+    expect(thinking.some(t => t.includes('kept reasoning'))).toBe(true)
+  })
+
+  it('keeps the live text when nothing had been shown before the retry', () => {
+    turnController.reset()
+    turnController.recordMessageDelta({ text: 'kept' })
+    turnController.recordRetry({ attempt: 2, discard: false, reason: 'network', total: 4 })
+
+    expect(turnController.bufRef).toBe('kept')
   })
 })

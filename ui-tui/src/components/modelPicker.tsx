@@ -86,6 +86,10 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
   const [keyInput, setKeyInput] = useState('')
   const [baseInput, setBaseInput] = useState('')
   const [keyField, setKeyField] = useState<KeyField>('api_key')
+  // The wire the endpoint serves, for a provider whose driver has two. Seeded
+  // from the server's current value on entering the key stage; '' means the
+  // provider offers no choice and save_key does not send one.
+  const [wireInput, setWireInput] = useState('')
   const [keySaving, setKeySaving] = useState(false)
   const [keyError, setKeyError] = useState('')
   const [modelNameInput, setModelNameInput] = useState('')
@@ -355,6 +359,13 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
         return
       }
 
+      // Arrows flip the wire; a letter would land in whichever field has focus.
+      if ((key.leftArrow || key.rightArrow) && wireInput) {
+        setWireInput(w => (w === 'chat' ? 'responses' : 'chat'))
+
+        return
+      }
+
       if (key.return) {
         // Enter on api_key advances to api_base instead of submitting, so the
         // user can fill both fields with single-key navigation.
@@ -388,6 +399,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
           slug: provider?.slug,
           api_key: apiKey,
           ...(apiBase ? { api_base: apiBase } : {}),
+          ...(wireInput ? { wire: wireInput } : {}),
           ...(sessionId ? { session_id: sessionId } : {})
         })
           .then(raw => {
@@ -802,6 +814,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
           setStage('key')
           setKeyInput('')
           setBaseInput('')
+          setWireInput(provider.wire ?? '')
           setKeyField(provider.auth_type === 'local' ? 'api_base' : 'api_key')
           setKeyError('')
 
@@ -969,6 +982,16 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
               {focusBase ? caret : ''}
             </Text>
           </>
+        ) : null}
+
+        {wireInput ? (
+          <Text color={t.color.muted} wrap="truncate-end">
+            {'  Wire: '}
+            <Text color={t.color.accent}>
+              {wireInput === 'responses' ? 'Responses (/v1/responses)' : 'Chat Completions (/v1/chat/completions)'}
+            </Text>
+            {'  ←/→ switch'}
+          </Text>
         ) : null}
 
         <Text color={t.color.muted} wrap="truncate-end">

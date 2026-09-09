@@ -48,7 +48,8 @@ from opendde_harness.providers.base import (
     send_max_tokens,
 )
 from opendde_harness.providers.capabilities import image_placeholder_text, supports_image_tool_result, vision_verdict
-from opendde_harness.providers.rates import effective_context_window, resolve_context_window
+from opendde_harness.providers.catalog import overlay_for
+from opendde_harness.providers.rates import Resolved, resolve_context_window
 from opendde_harness.providers.reasoning import split_orphan_think
 from opendde_harness.providers.truncation import flag_truncation
 from opendde_harness.sandbox import DirectExecutor, SandboxExecutor, SandboxInitError
@@ -286,18 +287,17 @@ class AgentLoop:
         self._vision_ok: dict[str, bool] = {}
         self.max_iterations = settings.max_iterations
         self._recovery_limits = settings.empty_recovery
-        # A positive value set the window explicitly; None/0 means "figure it
-        # out", resolved once here against the model's real window.
-        # ("Explicit", not "pinned" -- Provider Pin is a different registered
-        # term, see CONTEXT.md.)
-        self._context_window_explicit = bool(settings.context_window_tokens)
-        # allow_fetch=False: construction must not block on a synchronous
-        # network call for an OpenRouter model's window -- whatever is already
-        # cached (in-process or on disk, any age) answers instead. See
-        # rates._fetch_openrouter_models.
-        self.context_window_tokens = settings.context_window_tokens or effective_context_window(
-            self.model, None, allow_fetch=False
-        )
+        # allow_import=False: construction must not pay LiteLLM's import for a
+        # window; the lazy provider's prewarm thread imports it and
+        # `refresh_context_window` re-walks the ladder once it has, so only a
+        # provider with no such callback has its answer settled here. None
+        # means unknown -- no table lists the model and the user declared
+        # nothing -- and every consumer treats that as "do not trim" rather
+        # than as a number (see TokenBudget).
+        self.context_window_tokens: int | None = None
+        self.context_window_source: str = ""
+        self._budget_warned_for: int | None = None
+        self._apply_context_window(self.resolve_window(allow_import=False), settled=not hasattr(provider, "on_built"))
         self.brave_api_key = settings.brave_api_key
         self.jina_api_key = settings.jina_api_key
         self.web_proxy = settings.web_proxy
@@ -418,7 +418,7 @@ class AgentLoop:
             provider=provider,
             model=self.model,
             sessions=self.sessions,
-            context_window_tokens=self.context_window_tokens,
+            context_window_tokens=self.context_window_tokens or 0,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             now_fn=now_fn,
@@ -539,34 +539,66 @@ class AgentLoop:
         self._pending_provider = None
         self._adopt_provider(*pending)
 
+    def resolve_window(self, model: str | None = None, *, allow_import: bool = True) -> Resolved:
+        """Walk the window ladder for ``model`` (default: the loop's own).
+
+        The model's own overlay is supplied from here so every caller -- construction, a ``/model`` switch, the per-turn
+        usage report, the session banner -- answers the same question the same
+        way. No tier reaches the network; ``allow_import=False`` additionally
+        skips LiteLLM's import (see ``rates.resolve_context_window``).
+        """
+        model = model or self.model
+        return resolve_context_window(
+            model,
+            overlay=overlay_for(self.settings.model_overlays, model),
+            allow_import=allow_import,
+        )
+
+    def _apply_context_window(self, resolved: Resolved, *, settled: bool = True) -> None:
+        """Adopt a resolution; say so when it is the final answer for this model.
+
+        ``settled=False`` is construction ahead of a lazy provider's import,
+        where an unknown may still become known and a warning would be noise.
+        """
+        self.context_window_tokens = resolved.tokens
+        self.context_window_source = resolved.source
+        if not settled:
+            return
+        if resolved.known:
+            logger.info("context window for {}: {} tokens ({})", self.model, resolved.tokens, resolved.source)
+        else:
+            logger.warning(
+                "context window for {} is unknown: no table lists it, so history is not trimmed; "
+                "declare providers.<name>.modelOverlay.<id>.contextWindowTokens to size it",
+                self.model,
+            )
+
     def refresh_context_window(self) -> None:
         """Re-resolve ``context_window_tokens`` against the current ``self.model``.
 
-        A no-op once the window was set explicitly at construction -- an
-        explicit value is a deliberate override, and a model switch afterwards
-        must not quietly discard it. Otherwise the ladder is re-walked so a
-        ``/model`` switch picks up the new model's real window instead of
-        keeping the old one's.
+        The ladder is re-walked so a ``/model`` switch picks up the new model's
+        own window -- its overlay, then the tables -- instead of keeping the
+        old one's.
 
         Also the callback ``LazyProvider.on_built`` fires from its prewarm
         thread, i.e. off the event loop -- safe because every write this
         method triggers, transitively through the consolidator and the
-        context engine's builders, is a plain ``int`` attribute assignment,
-        and the GIL makes each one atomic.
+        context engine's builders, is a plain attribute assignment, and the
+        GIL makes each one atomic.
         """
-        if self._context_window_explicit:
-            return
-        # allow_fetch=False: a /model switch runs inside the running event
-        # loop, so this must not block it on a synchronous network call. See
-        # rates._fetch_openrouter_models.
-        self.context_window_tokens = effective_context_window(self.model, None, allow_fetch=False)
+        # allow_import=False: a /model switch runs inside the running event
+        # loop, so this must not block it on LiteLLM's import. Once the lazy
+        # provider has imported it (the on_built callback lands here too) the
+        # check is free and the LiteLLM tier answers.
+        self._apply_context_window(self.resolve_window(allow_import=False))
         # Cascade into the builders that sized themselves against the window
         # at construction (the Curator's trimmer) and the consolidator --
         # both would otherwise keep budgeting against the pre-switch model's
         # window for the rest of the session. The consolidator's window is a
-        # plain attribute (no setter of its own), set directly here.
+        # plain attribute (no setter of its own), set directly here; it takes
+        # 0 for unknown and treats it as "off".
         self.context_engine.set_context_window(self.context_window_tokens)
-        self.memory_consolidator.context_window_tokens = self.context_window_tokens
+        self.memory_consolidator.context_window_tokens = self.context_window_tokens or 0
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -762,16 +794,20 @@ class AgentLoop:
 
     def _make_token_budget(self, selected_skills: list[Any] | None = None) -> TokenBudget:
         """Compute a conservative per-turn prompt budget for the active engine."""
-        # allow_fetch=False for the same reason construction passes it (see
+        # allow_import=False for the same reason construction passes it (see
         # __init__): this runs per turn on the loop's own thread, and it only
         # needs a number to reserve -- not the one a request will carry. The
         # fallback under-reserves at worst; the importing tier costs seconds.
         ceiling = send_max_tokens(
             getattr(self.provider, "generation", None),
-            # The id a request will go out under, so the reservation matches the
-            # ceiling that request will carry rather than the stored name's.
-            getattr(self.provider, "wire_model_id", lambda m: m)(self.model),
-            allow_fetch=False,
+            # The stored id, the same one the request's own bound resolves
+            # under: the ladder knows every spelling a table files it as, and
+            # the wire id names the driver -- "openai/" for a custom endpoint,
+            # a bare slug for the Codex login -- which answers for the wrong
+            # model or for none.
+            self.model,
+            overlay=overlay_for(self.settings.model_overlays, self.model),
+            allow_import=False,
         )
         # The whole ceiling, not a share of it. Requests no longer name a
         # ceiling, so the one that applies is the model's own -- whatever the
@@ -784,14 +820,38 @@ class AgentLoop:
         #
         # A share would be right again only if the request carried one, which
         # is the trade the previous shape made and this one does not.
-        reserved_output = min(ceiling, self.context_window_tokens)
+        window = self.context_window_tokens
+        reserved_output = ceiling if window is None else min(ceiling, window)
         tool_tokens = estimate_prompt_tokens([], self.tools.get_definitions())
         system_prompt = self.context.build_system_prompt(selected_skills)
         system_tokens = estimate_prompt_tokens([{"role": "system", "content": system_prompt}])
-        available_history = max(
-            0,
-            self.context_window_tokens - reserved_output - tool_tokens - system_tokens,
-        )
+        # Unknown stays unknown. Subtracting from a stand-in produced a budget
+        # that nothing had measured, and the curator and trimmer acted on it.
+        # A window the reservation alone fills -- a model whose window is no
+        # larger than its output ceiling, which a declared overlay can now
+        # describe -- leaves nothing for history; that is reported as unknown
+        # too, not as a budget of zero, which the curator's gate read as "every
+        # history overflows" and ran its LLM loop on an empty one.
+        #
+        # Two budgets, two questions: this is history-only headroom for the
+        # curator's gate, while the trimmer bounds the whole prompt (its
+        # estimate includes the system prompt and tool schemas) against
+        # ``window - reserved_output``. Neither is the other's subtraction.
+        available_history = None if window is None else window - reserved_output - tool_tokens - system_tokens
+        if available_history is not None and available_history <= 0:
+            # Once per resolved window, not per turn: this runs every turn.
+            if self._budget_warned_for != window:
+                self._budget_warned_for = window
+                logger.warning(
+                    "context window for {} ({} tokens) holds no history beside a {}-token reply, "
+                    "{} tokens of tools and {} of system prompt; history is not trimmed",
+                    self.model,
+                    window,
+                    reserved_output,
+                    tool_tokens,
+                    system_tokens,
+                )
+            available_history = None
         return TokenBudget(
             context_length=self.context_window_tokens,
             reserved_output=reserved_output,
@@ -1275,20 +1335,24 @@ class AgentLoop:
         on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_event: Callable[[str, dict], Awaitable[None]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        on_retry: Callable[[int, int, str, bool], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Stream via ``provider.chat_stream`` with the retry and model-fallback
         ladder ``chat_with_retry`` gives the non-streaming path.
 
         Each model in ``[model, *fallback_models]`` gets the provider's retry
         ladder for ``retryable`` errors; a model exhausted with a
-        ``should_fallback`` error hands over to the next one. A retry or a
-        fallback is only possible while nothing has reached the caller's
-        callbacks: once a token has been shown, restarting would repeat it, so
-        an error after that point is the turn's response.
+        ``should_fallback`` error hands over to the next one. Output that had
+        already reached the callbacks does not end the ladder: a drop after
+        the first token is the common failure, not a rare one, and the
+        streamed text is discardable. ``on_retry(attempt, total, reason,
+        discard)`` fires before each re-run so the outlet can start its live
+        text over when ``discard`` says something had been shown.
 
         Exceptions from the stream are classified like the non-streaming
         path's, so the result is always an ``LLMResponse`` -- one with
-        ``finish_reason="error"`` when the ladder is exhausted.
+        ``finish_reason="error"`` when the ladder is exhausted, carrying the
+        last attempt's partial text.
         """
         from opendde_harness.providers import prompt_cache
 
@@ -1298,6 +1362,11 @@ class AgentLoop:
         model_chain = [model, *(fallback_models or [])]
         can_serve = getattr(provider, "can_serve", None)
         response: LLMResponse | None = None
+
+        async def _announce(attempt: int, reason: str, discard: bool) -> None:
+            if on_retry is not None:
+                await on_retry(attempt, total_attempts, reason, discard)
+
         for idx, current_model in enumerate(model_chain):
             if idx and can_serve is not None and not can_serve(current_model or ""):
                 logger.warning(
@@ -1312,7 +1381,7 @@ class AgentLoop:
                 response, delivered = await self._stream_once(
                     messages, tools, current_model, on_token_delta, on_reasoning_delta, on_tool_event, tool_choice
                 )
-                if response.finish_reason != "error" or delivered:
+                if response.finish_reason != "error":
                     return response
                 classification = response.error_classification or provider.classify_error(content=response.content)
                 response.error_classification = classification
@@ -1320,14 +1389,16 @@ class AgentLoop:
                     break
                 delay = provider._jittered(delays[attempt - 1])
                 logger.warning(
-                    "LLM stream error [{}] (attempt {}/{}) model={}, retrying in {:.1f}s: {}",
+                    "LLM stream error [{}] (attempt {}/{}) model={}, delivered={}, retrying in {:.1f}s: {}",
                     classification.category,
                     attempt,
                     total_attempts,
                     current_model,
+                    delivered,
                     delay,
                     (response.content or "")[:120],
                 )
+                await _announce(attempt + 1, classification.category, delivered)
                 await asyncio.sleep(delay)
 
             has_next = idx + 1 < len(model_chain)
@@ -1338,6 +1409,9 @@ class AgentLoop:
                     response.error_classification.category,
                     model_chain[idx + 1],
                     (response.content or "")[:120],
+                )
+                await _announce(
+                    1, f"{response.error_classification.category}, switching to {model_chain[idx + 1]}", delivered
                 )
                 continue
             return response
@@ -1358,8 +1432,8 @@ class AgentLoop:
         Each non-empty content chunk fires the callback; tool_call fragments
         are merged positionally; the final response object is shape-compatible
         with what ``chat()`` would have returned. The second value says whether
-        anything reached a callback, which is what decides if a failure can
-        still be retried.
+        anything reached a callback, which tells a retry whether the outlet
+        has shown text that the re-run must replace.
         """
         content_buf: list[str] = []
         reasoning_buf: list[str] = []
@@ -1437,8 +1511,9 @@ class AgentLoop:
             summary = format_llm_error(exc, classification, provider=head)
             if not delivered:
                 return _error(summary, classification)
-            # The user already saw part of the reply; say why it stopped
-            # instead of ending the turn as if the text were complete.
+            # Part of the reply was shown. If the ladder gives up, this is
+            # the turn's text, so say why it stopped instead of ending the
+            # turn as if it were complete.
             partial = "".join(content_buf)
             logger.warning(
                 "LLM stream interrupted after {} chars [{}]: {}",
@@ -1612,6 +1687,7 @@ class AgentLoop:
         fallback_models: list[str] | None,
         on_token_delta: Callable[[str], Awaitable[None]] | None = None,
         on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, int, str, bool], Awaitable[None]] | None = None,
     ) -> str:
         """One tools-disabled LLM call to wrap up after the iteration budget runs out.
 
@@ -1644,6 +1720,7 @@ class AgentLoop:
                     on_token_delta=on_token_delta,
                     on_reasoning_delta=on_reasoning_delta,
                     tool_choice="none",
+                    on_retry=on_retry,
                 )
             else:
                 response = await self.provider.chat_with_retry(
@@ -1682,6 +1759,7 @@ class AgentLoop:
         on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_event: Callable[[str, dict], Awaitable[None]] | None = None,
         on_episode_start: Callable[[int], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, int, str, bool], Awaitable[None]] | None = None,
         drain: Drain | None = None,
     ) -> tuple[str | None, list[str], list[dict], LoopOutcome]:
         """Run the agent iteration loop.
@@ -1769,6 +1847,7 @@ class AgentLoop:
                     on_token_delta=on_token_delta,
                     on_reasoning_delta=on_reasoning_delta,
                     on_tool_event=on_tool_event,
+                    on_retry=on_retry,
                 )
             else:
                 response = await self.provider.chat_with_retry(
@@ -1795,19 +1874,13 @@ class AgentLoop:
             if response.usage:
                 prompt_tokens = int(response.usage.get("prompt_tokens", 0) or 0)
                 completion_tokens = int(response.usage.get("completion_tokens", 0) or 0)
-                # An explicitly configured window always wins over the live
-                # table -- that is what setting it means. Otherwise the live
-                # window from the model's provider table (e.g. OpenRouter,
-                # when LiteLLM lags) answers instead; unknown to that table
-                # too, 0 tells the UI to show its empty state rather than a
-                # number that isn't this model's.
-                if self._context_window_explicit:
-                    context_max = self.context_window_tokens
-                else:
-                    # Off the event loop: allow_fetch=True here can hit the
-                    # network for up to 10s on an OpenRouter model with both
-                    # caches expired. See rates._fetch_openrouter_models.
-                    context_max = await asyncio.to_thread(resolve_context_window, call_model) or 0
+                # The call's own model, which is not always ``self.model`` (a
+                # strategy rewrote it, or the chain fell back). Unknown to every
+                # table, 0 tells the UI to show its empty state rather than a
+                # number that isn't this model's. Off the event loop only for
+                # LiteLLM's import; no tier reaches the network.
+                window = await asyncio.to_thread(self.resolve_window, call_model)
+                context_max = window.tokens or 0
                 context_used = prompt_tokens + completion_tokens
                 usage = {
                     "prompt_tokens": prompt_tokens,
@@ -1815,6 +1888,7 @@ class AgentLoop:
                     "total_tokens": int(response.usage.get("total_tokens", 0) or 0),
                     "cost_usd": usage_snapshot.estimated_cost_usd,
                     "context_max": context_max,
+                    "context_source": window.source,
                     "context_used": context_used,
                     "context_percent": round(100 * context_used / context_max) if context_max else 0,
                 }
@@ -2133,6 +2207,7 @@ class AgentLoop:
                 fallback_models,
                 on_token_delta=on_token_delta,
                 on_reasoning_delta=on_reasoning_delta,
+                on_retry=on_retry,
             )
             # Persist the wrap-up into history like any normal final reply.
             # Persistence downstream reads only the returned ``messages`` list,
@@ -2243,6 +2318,7 @@ class AgentLoop:
         on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_event: Callable[[str, dict], Awaitable[None]] | None = None,
         on_episode_start: Callable[[int], Awaitable[None]] | None = None,
+        on_retry: Callable[[int, int, str, bool], Awaitable[None]] | None = None,
         origin: Origin | None = None,
         drain: Drain | None = None,
     ) -> TurnReply:
@@ -2313,6 +2389,7 @@ class AgentLoop:
             on_reasoning_delta=on_reasoning_delta,
             on_tool_event=on_tool_event,
             on_episode_start=on_episode_start,
+            on_retry=on_retry,
             drain=drain,
         )
         self._stash_recovery(key, outcome)
@@ -2514,6 +2591,7 @@ class AgentLoop:
             Text,
             ToolEvent,
             ToolPhase,
+            TurnRetry,
             Usage,
         )
         from opendde_harness.spine.message import Media
@@ -2557,6 +2635,12 @@ class AgentLoop:
 
         async def on_episode(index: int) -> None:
             await emit(EpisodeStart(index=index))
+
+        async def on_retry(attempt: int, total: int, reason: str, discard: bool) -> None:
+            nonlocal streamed
+            if discard:
+                streamed = False
+            await emit(TurnRetry(attempt=attempt, total=total, reason=reason, discard=discard))
 
         async def on_tool(phase: str, info: dict[str, Any]) -> None:
             if phase == "start":
@@ -2608,6 +2692,7 @@ class AgentLoop:
                 on_reasoning_delta=on_reasoning if stream else None,
                 on_tool_event=on_tool,
                 on_episode_start=on_episode if stream else None,
+                on_retry=on_retry,
                 origin=req.origin,
                 drain=drain,
             )

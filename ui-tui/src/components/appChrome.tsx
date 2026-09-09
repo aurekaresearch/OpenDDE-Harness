@@ -301,11 +301,14 @@ export function StatusRule({
   const pct = usage.context_percent
   const barColor = ctxBarColor(pct, t)
 
+  const ctxUnknown = !usage.context_max && usage.context_source === 'unknown'
   const ctxLabel = usage.context_max
     ? `${fmtK(usage.context_used ?? 0)}/${fmtK(usage.context_max)}`
     : usage.total > 0
-      ? `${fmtK(usage.total)} tok`
-      : ''
+      ? `${fmtK(usage.total)} tok${ctxUnknown ? ' · ctx ?' : ''}`
+      : ctxUnknown
+        ? 'ctx ?'
+        : ''
 
   const bar = usage.context_max ? ctxBar(pct) : ''
   // When an update is available, the bottom-right slot shows the upgrade nudge

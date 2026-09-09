@@ -123,6 +123,21 @@ def wait_until_stopped(name: str, *, timeout: float = 60.0) -> bool:
         time.sleep(1)
 
 
+def retire_previous_release(token: str | None, code_id: str) -> None:
+    """Ask an earlier release's container to exit once idle, without waiting.
+
+    A new release starts its own container; left alone, the old one holds
+    its GPU memory until its idle timeout. Busy, it answers 409 and stays.
+    """
+    state = running_instance()
+    if state is None or state.get("code_id") == code_id:
+        return
+    try:
+        request_shutdown(str(state["url"]), token, if_idle=True, timeout=2.0)
+    except httpx.HTTPError:
+        pass
+
+
 def stop_if_idle(token: str | None, *, timeout: float = 60.0) -> bool:
     """Stop the current release's container when idle; ``False`` when it is busy and stays up."""
     from opendde_harness.cli.compute_code import runtime_code_identity
@@ -210,6 +225,7 @@ def ensure_compute_service(config: Mapping[str, Any]) -> ComputeEndpoint:
         state = running_instance(code_id)
         if state is not None and service_health(str(state["url"]), token) is not None:
             return ComputeEndpoint(str(state["url"]), token)
+        retire_previous_release(token, code_id)
         settings = DockerSettings.from_saved(config.get("compute_docker") or {})
         fold = config.get("fold_defaults") or {}
         state = start_service(settings, token, str(fold.get("api_url") or ""), code_id=code_id, quiet=True)
@@ -228,6 +244,7 @@ __all__ = [
     "read_state",
     "release_if_idle",
     "request_shutdown",
+    "retire_previous_release",
     "running_instance",
     "service_health",
     "state_path",
