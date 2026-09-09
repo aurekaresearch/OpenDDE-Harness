@@ -31,6 +31,10 @@ Harness for agentic antibody design: prepare targets, optimize CDR sequences, pr
 
 See the [changelog](CHANGELOG.md) for release details.
 
+
+https://github.com/user-attachments/assets/1530c7e6-9a7e-4069-b861-0e6cf58e6752
+
+
 ## Installation
 
 Use a Linux or macOS client with Python 3.12 or newer. Native Windows is not
