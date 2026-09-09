@@ -8,8 +8,8 @@ No changes yet.
 
 ## [0.0.2] - 2026-09-09
 
-This release improves model configuration, context limits, streaming recovery, and MCP
-connection handling. After upgrading, run `ddeharness onboard` again to reconfigure.
+OpenDDE Harness 0.0.2 improves model configuration, context limits, streaming recovery,
+and MCP connection handling. After upgrading, run `ddeharness onboard` again to reconfigure.
 
 ### Added
 
