@@ -123,7 +123,11 @@ export function ClarifyPrompt({ cols = 80, onAnswer, onCancel, req, t }: Clarify
 
   useInput((ch, key) => {
     if (key.escape) {
-      typing && choices.length ? setTyping(false) : onCancel()
+      if (typing && choices.length) {
+        setTyping(false)
+      } else {
+        onCancel()
+      }
 
       return
     }
@@ -141,7 +145,11 @@ export function ClarifyPrompt({ cols = 80, onAnswer, onCancel, req, t }: Clarify
     }
 
     if (key.return) {
-      sel === choices.length ? setTyping(true) : choices[sel] && onAnswer(choices[sel]!)
+      if (sel === choices.length) {
+        setTyping(true)
+      } else if (choices[sel]) {
+        onAnswer(choices[sel])
+      }
     }
 
     const n = parseInt(ch)
@@ -196,6 +204,11 @@ export function ConfirmPrompt({ onCancel, onConfirm, req, t }: ConfirmPromptProp
   const isRpc = Boolean(req.requestId)
   const [remaining, setRemaining] = useState<null | number>(isRpc ? CONFIRM_COUNTDOWN_SECONDS : null)
   const intervalRef = useRef<null | ReturnType<typeof setInterval>>(null)
+  const cancelRef = useRef(onCancel)
+
+  useEffect(() => {
+    cancelRef.current = onCancel
+  }, [onCancel])
 
   const suspend = () => {
     if (intervalRef.current) {
@@ -225,7 +238,7 @@ export function ConfirmPrompt({ onCancel, onConfirm, req, t }: ConfirmPromptProp
             intervalRef.current = null
           }
 
-          onCancel()
+          cancelRef.current()
         }
 
         return next
@@ -238,8 +251,6 @@ export function ConfirmPrompt({ onCancel, onConfirm, req, t }: ConfirmPromptProp
         intervalRef.current = null
       }
     }
-    // onCancel is stable for the lifetime of a given confirm overlay.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRpc])
 
   useInput((ch, key) => {

@@ -121,7 +121,7 @@ def register_aligned_methods_except_system(
     register_config_methods(dispatcher, agent_loop_factory=agent_loop_factory)
     register_session_methods(dispatcher, agent_loop_factory=agent_loop_factory)
     register_terminal_methods(dispatcher)
-    register_model_methods(dispatcher)
+    register_model_methods(dispatcher, agent_loop_factory=agent_loop_factory)
     register_commands_methods(dispatcher)
     register_slash_routing_methods(dispatcher, confirm_broker=confirm_broker)
     # Unlike generic stubs, approval.respond is a capability-bearing endpoint.

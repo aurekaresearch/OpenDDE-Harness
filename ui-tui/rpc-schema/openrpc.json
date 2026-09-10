@@ -845,6 +845,44 @@
       ]
     },
     {
+      "name": "model.overlay",
+      "summary": "Set one overlay field of the current model (persisted; default clears it and the global setting applies).",
+      "params": [
+        {
+          "name": "field",
+          "required": true,
+          "schema": { "type": "string", "enum": ["reasoning_effort", "context_window_tokens", "max_output_tokens"] }
+        },
+        {
+          "name": "value",
+          "required": true,
+          "schema": { "type": "string" }
+        },
+        {
+          "name": "session_id",
+          "required": false,
+          "schema": { "type": "string" }
+        }
+      ],
+      "result": {
+        "name": "ModelOverlayResult",
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "field"],
+          "properties": {
+            "model": { "type": "string" },
+            "field": { "type": "string" },
+            "value": { "type": ["string", "integer", "null"] },
+            "context_window_tokens": { "type": ["integer", "null"] }
+          }
+        }
+      },
+      "errors": [
+        { "$ref": "#/components/errors/ConfigValidationError" }
+      ]
+    },
+    {
       "name": "model.endpoints",
       "summary": "List a provider's endpoints, api_key redacted for display.",
       "params": [
@@ -1539,6 +1577,24 @@
           }
         }
       },
+      "TurnUsageEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "payload"],
+        "properties": {
+          "type": { "type": "string", "const": "turn.usage" },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["completion_tokens", "reasoning_tokens", "calls"],
+            "properties": {
+              "completion_tokens": { "type": "integer" },
+              "reasoning_tokens": { "type": "integer" },
+              "calls": { "type": "integer" }
+            }
+          }
+        }
+      },
       "TurnRetryEvent": {
         "type": "object",
         "additionalProperties": false,
@@ -1740,6 +1796,7 @@
           { "$ref": "#/components/schemas/MessageStartEvent" },
           { "$ref": "#/components/schemas/EpisodeStartEvent" },
           { "$ref": "#/components/schemas/TurnRetryEvent" },
+          { "$ref": "#/components/schemas/TurnUsageEvent" },
           { "$ref": "#/components/schemas/TokenDeltaEvent" },
           { "$ref": "#/components/schemas/ThinkingDeltaEvent" },
           { "$ref": "#/components/schemas/ToolStartEvent" },
@@ -1756,6 +1813,7 @@
             "message.start": "#/components/schemas/MessageStartEvent",
             "episode.start": "#/components/schemas/EpisodeStartEvent",
             "turn.retry": "#/components/schemas/TurnRetryEvent",
+            "turn.usage": "#/components/schemas/TurnUsageEvent",
             "token.delta": "#/components/schemas/TokenDeltaEvent",
             "thinking.delta": "#/components/schemas/ThinkingDeltaEvent",
             "tool.start": "#/components/schemas/ToolStartEvent",

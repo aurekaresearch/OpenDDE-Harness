@@ -31,7 +31,7 @@ import { appendTranscriptMessage } from '../lib/messages.js'
 import { shouldCopySelectionOnSelect } from '../lib/platform.js'
 import { asRpcResult, rpcErrorMessage } from '../lib/rpc.js'
 import { terminalParityHints } from '../lib/terminalParity.js'
-import { buildToolTrailLine, sameToolTrailGroup, toolTrailLabel } from '../lib/text.js'
+import { buildToolTrailLine, toolTrailLabel } from '../lib/text.js'
 import { estimatedMsgHeight, messageHeightKey } from '../lib/virtualHeights.js'
 import { createChatStream, type ChatStreamHandle, type ChatStreamRpcClient } from './chatStream.js'
 import { createGatewayEventHandler } from './createGatewayEventHandler.js'
@@ -490,8 +490,7 @@ export function useMainApp(gw: GatewayClient, rpcClient?: ChatStreamRpcClient) {
 
       const label = toolTrailLabel('clarify')
 
-      turnController.turnTools = turnController.turnTools.filter(line => !sameToolTrailGroup(label, line))
-      patchTurnState({ turnTrail: turnController.turnTools })
+      turnController.dropToolTrail(label)
 
       rpc<ClarifyRespondResponse>('clarify.respond', {
         answer,
@@ -626,7 +625,6 @@ export function useMainApp(gw: GatewayClient, rpcClient?: ChatStreamRpcClient) {
     [
       appendMessage,
       bellOnComplete,
-      clearSelection,
       composerActions.setInput,
       gateway,
       panel,

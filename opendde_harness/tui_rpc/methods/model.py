@@ -34,6 +34,7 @@ from opendde_harness.config.update_providers import (
     remove_provider_endpoint,
     remove_provider_model,
     reset_provider,
+    set_model_overlay,
     set_provider_fields,
 )
 from opendde_harness.providers.auth import credential_status
@@ -58,6 +59,7 @@ from opendde_harness.tui_rpc.models import (
     ModelDisconnectParams,
     ModelEndpointsParams,
     ModelOptionsParams,
+    ModelOverlayParams,
     ModelRemoveEndpointParams,
     ModelRemoveModelParams,
     ModelSaveKeyParams,
@@ -65,6 +67,7 @@ from opendde_harness.tui_rpc.models import (
 
 if TYPE_CHECKING:
     from opendde_harness.tui_rpc.dispatcher import Dispatcher
+    from opendde_harness.tui_rpc.methods.session import AgentLoopFactory
 
 
 def _parse(model_cls: type, params: dict) -> Any:
@@ -89,8 +92,10 @@ def _provider_models(slug: str, *, configured: bool, section: Any = _UNLOADED) -
         except KeyError:
             cfg = {}
         from_config = cfg.get("models", [])
+        api_base, api_key = str(cfg.get("api_base") or ""), str(cfg.get("api_key") or "")
     else:
         from_config = getattr(section, "models", None) or []
+        api_base, api_key = _endpoint_address(section)
     from_config = list(from_config) if isinstance(from_config, list) else []
     # Priority: what the user configured (manual entry via ``model.add_model``
     # writes here), then the curated shortlist, then LiteLLM's own catalogue,
@@ -109,6 +114,7 @@ def _provider_models(slug: str, *, configured: bool, section: Any = _UNLOADED) -
         *common_models_for(slug),
         *litellm_models_for(slug),
         *_account_models(slug, configured=configured),
+        *_endpoint_models(slug, api_base, api_key, configured=configured),
     )
     for candidate in chain:
         # By identity: a model reaching this list from two sources in two
@@ -119,6 +125,33 @@ def _provider_models(slug: str, *, configured: bool, section: Any = _UNLOADED) -
             out.append(candidate)
 
     return out
+
+
+def _endpoint_address(section: Any) -> tuple[str, str]:
+    """The base URL and key a section reaches its endpoint with; the first
+    named endpoint's when the section itself carries none."""
+    api_base = str(getattr(section, "api_base", None) or "")
+    api_key = str(getattr(section, "effective_api_key", None) or getattr(section, "api_key", None) or "")
+    if not api_base:
+        for endpoint in getattr(section, "endpoints", None) or []:
+            api_base = str(getattr(endpoint, "api_base", None) or "")
+            api_key = str(getattr(endpoint, "api_key", None) or api_key)
+            if api_base:
+                break
+    return api_base, api_key
+
+
+def _endpoint_models(slug: str, api_base: str, api_key: str, *, configured: bool) -> tuple[str, ...]:
+    """What an endpoint-addressed provider (a relay, a local server) lists itself.
+
+    Only these kinds are asked: a vendor with a catalogue is served by the
+    tiers above, and its ``/models`` is the same list with more noise.
+    """
+    if not configured or credential_kind(slug) not in (CRED_ENDPOINT, CRED_LOCAL):
+        return ()
+    from opendde_harness.providers.endpoint_catalog import endpoint_models
+
+    return endpoint_models(api_base, api_key)
 
 
 def _account_models(slug: str, *, configured: bool) -> tuple[str, ...]:
@@ -195,6 +228,7 @@ def _build_provider_entry(
     slug: str,
     *,
     current_provider: str | None,
+    current_model: str | None = None,
     providers: dict[str, dict[str, Any]] | None = None,
     section: Any = _UNLOADED,
 ) -> dict[str, Any]:
@@ -211,6 +245,15 @@ def _build_provider_entry(
         warning = f"run `ddeharness provider login {slug.replace('_', '-')}` to authenticate"
 
     models = _provider_models(slug, configured=configured, section=section)
+    if slug == current_provider and current_model:
+        # The model in use heads the list whatever the sources know of it: a
+        # relay lists hundreds, and a picker that cannot show the current
+        # choice reads as broken.
+        from opendde_harness.providers.wire import merge_key
+
+        key = merge_key(slug, current_model)
+        rest = [m for m in models if merge_key(slug, m) != key]
+        models = [next((m for m in models if merge_key(slug, m) == key), current_model), *rest]
     return {
         # Names and one-liners for the ids above, so the picker shows what a
         # model is rather than only what it is called on the wire. Omitted for
@@ -256,7 +299,7 @@ def _wire_choice(slug: str, spec: Any, *, section: Any = _UNLOADED) -> str | Non
     return getattr(section, "wire", None) or default_wire(slug)
 
 
-async def _entry_off_loop(slug: str, current_provider: str | None) -> dict[str, Any]:
+async def _entry_off_loop(slug: str, current_provider: str | None, current_model: str | None = None) -> dict[str, Any]:
     """Build one picker row without blocking the event loop.
 
     Reading the candidate chain imports LiteLLM the first time, which takes
@@ -265,10 +308,12 @@ async def _entry_off_loop(slug: str, current_provider: str | None) -> dict[str, 
     and reading it inline in the others: a first read that failed leaves nothing
     to reuse, and handler order is up to the client.
     """
-    return await asyncio.to_thread(_build_provider_entry, slug, current_provider=current_provider)
+    return await asyncio.to_thread(
+        _build_provider_entry, slug, current_provider=current_provider, current_model=current_model
+    )
 
 
-async def _entries_off_loop(current_provider: str | None) -> list[dict[str, Any]]:
+async def _entries_off_loop(current_provider: str | None, current_model: str | None = None) -> list[dict[str, Any]]:
     """Build every picker row in one thread hop rather than one hop per row.
 
     The config is also read once for all rows rather than once per row:
@@ -290,6 +335,7 @@ async def _entries_off_loop(current_provider: str | None) -> list[dict[str, Any]
             _build_provider_entry(
                 p["name"],
                 current_provider=current_provider,
+                current_model=current_model,
                 providers=providers,
                 section=sections.get(p["name"]) if sections is not None else _UNLOADED,
             )
@@ -323,7 +369,7 @@ def _current_selection() -> tuple[str, str | None]:
 async def model_options(params: dict) -> dict:
     _parse(ModelOptionsParams, params)
     current_model, current_provider = _current_selection()
-    entries = await _entries_off_loop(current_provider)
+    entries = await _entries_off_loop(current_provider, current_model)
     return {
         "model": current_model,
         "provider": current_provider or "",
@@ -434,6 +480,94 @@ async def model_remove_model(params: dict) -> dict:
     }
 
 
+#: The overlay fields a session may set for its current model, and how a
+#: value typed at the prompt is read for each.
+_OVERLAY_FIELDS = ("reasoning_effort", "context_window_tokens", "max_output_tokens")
+_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _apply_overlay_live(loop: Any, key: str, entry: Any) -> None:
+    """Put one model's new overlay in front of the running loop and its providers.
+
+    Overlays were handed out at build time as plain dicts, so the running
+    objects are updated in place: the loop's settings (budgets), and every
+    provider holding a dict (a lazy wrapper's inner, each endpoint of a rotor).
+    """
+    settings = getattr(loop, "settings", None)
+    overlays = getattr(settings, "model_overlays", None)
+    if isinstance(overlays, dict):
+        overlays[key] = entry
+    seen: set[int] = set()
+    stack = [getattr(loop, "provider", None)]
+    while stack:
+        provider = stack.pop()
+        if provider is None or id(provider) in seen:
+            continue
+        seen.add(id(provider))
+        own = provider.__dict__.get("model_overlays") if hasattr(provider, "__dict__") else None
+        if isinstance(own, dict):
+            own[key] = entry
+        stack.append(getattr(provider, "_provider", None))
+        stack.extend(getattr(provider, "_inners", None) or [])
+
+
+async def model_overlay(params: dict, agent_loop_factory: "AgentLoopFactory | None" = None) -> dict:
+    """Set one overlay field of the current model, on disk and in the live loop.
+
+    Per model, as pi keeps its thinking levels: what one model needs (a
+    level, a window a relay caps, an output ceiling) must not be a setting
+    for every model the session switches to. ``default`` clears the field.
+    """
+    from opendde_harness.config.schema import ModelOverlay
+    from opendde_harness.providers.wire import merge_key
+
+    parsed = _parse(ModelOverlayParams, params)
+    field = parsed.field.strip()
+    raw = parsed.value.strip().lower()
+    if field not in _OVERLAY_FIELDS:
+        raise ConfigValidationError(
+            f"unknown overlay field {parsed.field!r}; use one of {', '.join(_OVERLAY_FIELDS)}",
+            data={"field": "field", "got": parsed.field},
+        )
+    value: str | int | None
+    if raw == "default":
+        value = None
+    elif field == "reasoning_effort":
+        if raw not in _THINKING_LEVELS:
+            raise ConfigValidationError(
+                f"unknown thinking level {parsed.value!r}; use one of {', '.join(_THINKING_LEVELS)} or default",
+                data={"field": "value", "got": parsed.value},
+            )
+        value = raw
+    else:
+        digits = raw.replace(",", "").replace("_", "")
+        scale = 1000 if digits.endswith("k") else 1
+        digits = digits.rstrip("k")
+        if not digits.isdigit() or int(digits) <= 0:
+            raise ConfigValidationError(
+                f"{field} takes a positive token count (e.g. 128000 or 128k) or default",
+                data={"field": "value", "got": parsed.value},
+            )
+        value = int(digits) * scale
+    model, provider = _current_selection()
+    if not model or not provider:
+        raise ConfigValidationError("no current model to set an overlay for", data={"model": model or ""})
+    try:
+        stored = await asyncio.to_thread(set_model_overlay, provider, model, {field: value})
+    except (KeyError, ValidationError) as exc:
+        raise ConfigValidationError(str(exc), data={"model": model}) from exc
+
+    result: dict[str, Any] = {"model": model, "field": field, "value": value}
+    loop = agent_loop_factory() if agent_loop_factory is not None else None
+    if loop is not None:
+        _apply_overlay_live(loop, merge_key(provider, model), ModelOverlay.model_validate(stored))
+        if field != "reasoning_effort":
+            # Budgets follow the new figure from the next turn on.
+            await asyncio.to_thread(loop.refresh_context_window)
+            result["context_window_tokens"] = loop.context_window_tokens
+    return result
+
+
 async def _endpoints_off_loop(slug: str) -> list[dict[str, Any]]:
     """The provider's endpoint list, api_key redacted, off the event loop."""
     try:
@@ -476,13 +610,17 @@ async def model_remove_endpoint(params: dict) -> dict:
     return {"endpoints": await _endpoints_off_loop(parsed.slug)}
 
 
-def register_model_methods(dispatcher: "Dispatcher") -> None:
+def register_model_methods(dispatcher: "Dispatcher", *, agent_loop_factory: "AgentLoopFactory | None" = None) -> None:
+    async def _overlay(params: dict) -> dict:
+        return await model_overlay(params, agent_loop_factory)
+
     """Register the eight ``model.*`` handlers on a dispatcher instance."""
     dispatcher.register("model.options", model_options)
     dispatcher.register("model.save_key", model_save_key)
     dispatcher.register("model.disconnect", model_disconnect)
     dispatcher.register("model.add_model", model_add_model)
     dispatcher.register("model.remove_model", model_remove_model)
+    dispatcher.register("model.overlay", _overlay)
     dispatcher.register("model.endpoints", model_endpoints)
     dispatcher.register("model.add_endpoint", model_add_endpoint)
     dispatcher.register("model.remove_endpoint", model_remove_endpoint)
@@ -494,6 +632,7 @@ __all__ = [
     "model_disconnect",
     "model_add_model",
     "model_remove_model",
+    "model_overlay",
     "model_endpoints",
     "model_add_endpoint",
     "model_remove_endpoint",

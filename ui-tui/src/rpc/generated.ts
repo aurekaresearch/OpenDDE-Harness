@@ -4,7 +4,7 @@
 // Regenerate via: cd ui-tui && npm run gen:rpc
 // Lint (drift check) via: cd ui-tui && npm run lint:rpc
 //
-// 76 method-scoped types (38 RPC methods × {Params, Result}) + all
+// 78 method-scoped types (39 RPC methods × {Params, Result}) + all
 // components/schemas + JSON-RPC 2.0 envelope types.
 
 /* eslint-disable */
@@ -27,6 +27,7 @@ export type TurnEvent =
   | MessageStartEvent
   | EpisodeStartEvent
   | TurnRetryEvent
+  | TurnUsageEvent
   | TokenDeltaEvent
   | ThinkingDeltaEvent
   | ToolStartEvent
@@ -288,6 +289,18 @@ export interface EpisodeStartEvent {
   type: 'episode.start';
   payload: {
     index: number;
+  };
+}
+/**
+ * This interface was referenced by `OpenDDEHarnessRpcRoot`'s JSON-Schema
+ * via the `definition` "TurnUsageEvent".
+ */
+export interface TurnUsageEvent {
+  type: 'turn.usage';
+  payload: {
+    completion_tokens: number;
+    reasoning_tokens: number;
+    calls: number;
   };
 }
 /**
@@ -876,6 +889,25 @@ export interface ModelRemoveModelParams {
  */
 export interface ModelRemoveModelResult {
   provider: ModelOptionProvider;
+}
+/**
+ * This interface was referenced by `OpenDDEHarnessRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOverlayParams".
+ */
+export interface ModelOverlayParams {
+  field: 'reasoning_effort' | 'context_window_tokens' | 'max_output_tokens';
+  value: string;
+  session_id?: string;
+}
+/**
+ * This interface was referenced by `OpenDDEHarnessRpcRoot`'s JSON-Schema
+ * via the `definition` "ModelOverlayResult".
+ */
+export interface ModelOverlayResult {
+  model: string;
+  field: string;
+  value?: string | number | null;
+  context_window_tokens?: number | null;
 }
 /**
  * This interface was referenced by `OpenDDEHarnessRpcRoot`'s JSON-Schema

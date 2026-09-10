@@ -423,3 +423,38 @@ def test_the_budget_reserves_the_stored_models_own_ceiling(tmp_path):
     loop = AgentLoop(BareWire(), tmp_path, AgentLoopSettings(model="openai-codex/gpt-5.3-codex-spark"))
 
     assert loop._make_token_budget().reserved_output == 128_000
+
+
+async def test_the_loop_reports_cumulative_vendor_output_after_each_call(tmp_path):
+    from opendde_harness.agent.loop.main import _reasoning_tokens_of
+
+    assert _reasoning_tokens_of({"completion_tokens": 10}) == 0
+    assert _reasoning_tokens_of({"completion_tokens_details": {"reasoning_tokens": 7}}) == 7
+
+    class Counted(StreamProvider):
+        async def chat_stream(self, messages, tools=None, model=None, **kwargs):
+            yield StreamDelta(content="ok")
+            yield StreamDelta(
+                content=None,
+                finish_reason="stop",
+                usage={
+                    "prompt_tokens": 5,
+                    "completion_tokens": 12,
+                    "completion_tokens_details": {"reasoning_tokens": 4},
+                },
+            )
+
+    loop = AgentLoop(Counted(), tmp_path, AgentLoopSettings(model=PRIMARY))
+    seen = []
+
+    async def on_usage(completion, reasoning, calls):
+        seen.append((completion, reasoning, calls))
+
+    async def on_token(text):
+        pass
+
+    await loop._run_agent_loop(
+        [{"role": "user", "content": "hi"}], session_key="tui:t", on_token_delta=on_token, on_usage=on_usage
+    )
+
+    assert seen == [(12, 4, 1)]

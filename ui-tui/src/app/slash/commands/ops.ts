@@ -310,7 +310,11 @@ export const opsCommands: SlashCommand[] = [
             const formatted = r?.warning ? `warning: ${r.warning}\n${body}` : body
             const long = formatted.length > 180 || formatted.split('\n').filter(Boolean).length > 2
 
-            long ? ctx.transcript.page(formatted, 'Skills') : ctx.transcript.sys(formatted)
+            if (long) {
+              ctx.transcript.page(formatted, 'Skills')
+            } else {
+              ctx.transcript.sys(formatted)
+            }
           })
           .catch(ctx.guardedErr)
       }
@@ -478,7 +482,11 @@ export const opsCommands: SlashCommand[] = [
           const text = r?.warning ? `warning: ${r.warning}\n${body}` : body
           const long = text.length > 180 || text.split('\n').filter(Boolean).length > 2
 
-          long ? ctx.transcript.page(text, 'Tools') : ctx.transcript.sys(text)
+          if (long) {
+            ctx.transcript.page(text, 'Tools')
+          } else {
+            ctx.transcript.sys(text)
+          }
         })
         .catch(ctx.guardedErr)
     }

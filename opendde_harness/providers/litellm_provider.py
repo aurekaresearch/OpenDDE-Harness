@@ -28,7 +28,7 @@ from opendde_harness.providers.base import (
     format_llm_error,
 )
 from opendde_harness.providers.catalog import overlay_for
-from opendde_harness.providers.compat import apply_thinking, detect_compat
+from opendde_harness.providers.compat import apply_thinking, detect_compat, openai_effort
 from opendde_harness.providers.litellm_setup import import_litellm
 from opendde_harness.providers.prompt_cache import CACHE_CONTROL
 from opendde_harness.providers.reasoning import split_orphan_think
@@ -916,12 +916,14 @@ class LiteLLMProvider(LLMProvider):
         if self.extra_body:
             _merge_extra_body(kwargs, self.extra_body)
         if responses:
-            # pi's shape, and only when pi sends it: a summary so the reasoning
-            # text streams back, with the effort the user chose.
+            # pi's shape: the level the model takes, with a summary so the
+            # reasoning text streams back; ``off`` is spelled ``none``.
             if reasoning_effort:
-                kwargs["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
+                kwargs["reasoning"] = {"effort": openai_effort(original_model, reasoning_effort), "summary": "auto"}
         else:
-            apply_thinking(kwargs, compat, reasoning_effort=reasoning_effort, model=original_model)
+            apply_thinking(
+                kwargs, compat, reasoning_effort=reasoning_effort, model=original_model, max_tokens=max_tokens
+            )
 
         if responses:
             tools = responses_tools(tools)
@@ -1016,9 +1018,9 @@ class LiteLLMProvider(LLMProvider):
             max_tokens = gen.max_tokens
         if temperature is self._SENTINEL:
             temperature = gen.temperature
-        if reasoning_effort is self._SENTINEL:
-            reasoning_effort = gen.reasoning_effort
         original_model = model or self.default_model
+        if reasoning_effort is self._SENTINEL:
+            reasoning_effort = self.effort_for(original_model)
         model = self._resolve_model(original_model)
         responses = self._uses_responses_api(original_model, model)
         kwargs, local_web_search_tools = self._request_kwargs(

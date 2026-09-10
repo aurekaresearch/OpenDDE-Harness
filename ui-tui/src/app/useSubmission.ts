@@ -3,7 +3,7 @@
 // Modifications Copyright (c) 2026 EverMind.
 // See NOTICES.md and LICENSES/MIT-hermes-agent.txt.
 
-import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
+import { type MutableRefObject, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 
 import type { GatewayClient } from '../gatewayClientStub.js'
 import type { InputDetectDropResponse, ShellExecResponse } from '../gatewayTypes.js'
@@ -29,7 +29,11 @@ const expandSnips = (snips: PasteSnippet[]) => {
 
   for (const { label, text } of snips) {
     const hit = byLabel.get(label)
-    hit ? hit.push(text) : byLabel.set(label, [text])
+    if (hit) {
+      hit.push(text)
+    } else {
+      byLabel.set(label, [text])
+    }
   }
 
   return (value: string) => value.replace(PASTE_SNIPPET_RE, tok => byLabel.get(tok)?.shift() ?? tok)
@@ -106,8 +110,7 @@ export function useSubmission(opts: UseSubmissionOptions) {
         }
 
         patchUiState({ busy: true, status: 'running…' })
-        turnController.bufRef = ''
-        turnController.interrupted = false
+        turnController.beginSend()
 
         // Streaming events arrive via the chatStream subscription wired in
         // useMainApp; here we only need to fire turn.send.
@@ -380,7 +383,7 @@ export function useSubmission(opts: UseSubmissionOptions) {
     [appendMessage, composerActions, composerRefs, composerState, dispatchSubmission, gw, sys]
   )
 
-  submitRef.current = submit
+  useImperativeHandle(submitRef, () => submit, [submit])
 
   return { dispatchSubmission, send, sendQueued, submit }
 }

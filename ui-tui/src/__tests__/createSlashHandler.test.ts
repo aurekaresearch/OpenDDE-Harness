@@ -114,44 +114,31 @@ describe('createSlashHandler', () => {
     })
   })
 
-  it('applies /reasoning hide to the thinking section immediately', async () => {
-    patchUiState({ sections: { thinking: 'expanded' }, showReasoning: true, sid: 'sid-abc' })
+  it('sets the current model thinking level through model.overlay and updates the banner', async () => {
+    patchUiState({ info: { model: 'custom/deep-thinker' } as any, sid: 'sid-abc' })
 
     const ctx = buildCtx({
       gateway: {
         ...buildGateway(),
-        rpc: vi.fn(() => Promise.resolve({ value: 'hide' }))
+        rpc: vi.fn(() => Promise.resolve({ field: 'reasoning_effort', model: 'custom/deep-thinker', value: 'high' }))
       }
     })
 
-    expect(createSlashHandler(ctx)('/reasoning hide')).toBe(true)
+    expect(createSlashHandler(ctx)('/thinking high')).toBe(true)
+    expect(createSlashHandler(ctx)('/reasoning low')).toBe(true)
 
     await vi.waitFor(() => {
-      expect(getUiState().showReasoning).toBe(false)
-      expect(getUiState().sections.thinking).toBe('hidden')
+      expect(getUiState().info?.reasoning_effort).toBe('high')
     })
-    expect(ctx.gateway.rpc).toHaveBeenCalledWith('config.set', {
-      key: 'reasoning',
+    expect(ctx.gateway.rpc).toHaveBeenCalledWith('model.overlay', {
+      field: 'reasoning_effort',
       session_id: 'sid-abc',
-      value: 'hide'
+      value: 'high'
     })
-  })
-
-  it('applies /reasoning show to the thinking section immediately', async () => {
-    patchUiState({ sections: { thinking: 'hidden' }, showReasoning: false, sid: 'sid-abc' })
-
-    const ctx = buildCtx({
-      gateway: {
-        ...buildGateway(),
-        rpc: vi.fn(() => Promise.resolve({ value: 'show' }))
-      }
-    })
-
-    expect(createSlashHandler(ctx)('/reasoning show')).toBe(true)
-
-    await vi.waitFor(() => {
-      expect(getUiState().showReasoning).toBe(true)
-      expect(getUiState().sections.thinking).toBe('expanded')
+    expect(ctx.gateway.rpc).toHaveBeenCalledWith('model.overlay', {
+      field: 'reasoning_effort',
+      session_id: 'sid-abc',
+      value: 'low'
     })
   })
 

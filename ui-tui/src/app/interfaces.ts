@@ -165,6 +165,7 @@ export interface ComposerActions {
   setInput: StateSetter<string>
   setInputBuf: StateSetter<string[]>
   setPasteSnips: StateSetter<PasteSnippet[]>
+  setHistoryDraft: (text: string) => void
   setQueueEdit: (index: null | number) => void
   syncQueue: () => void
 }

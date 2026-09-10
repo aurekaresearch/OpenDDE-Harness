@@ -22,6 +22,7 @@ from opendde_harness.spine.events import (
     TurnFailed,
     TurnRetry,
     TurnStarted,
+    TurnUsage,
     Usage,
 )
 from opendde_harness.spine.message import ChatType, Media, Source
@@ -36,6 +37,7 @@ __all__ = [
     "Emit",
     "EpisodeStart",
     "TurnRetry",
+    "TurnUsage",
     "Media",
     "MediaOut",
     "Notice",

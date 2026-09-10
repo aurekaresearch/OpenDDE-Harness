@@ -111,14 +111,29 @@ def test_served_limit_reads_only_the_provider_the_id_names():
     assert served_limit("gpt-5.6-terra") is None  # a bare id names no provider
 
 
-def test_native_limit_never_reads_through_the_wire_prefix():
-    # custom/gpt-5.6-terra goes out as openai/gpt-5.6-terra, which the
-    # canonical table keys; the endpoint is still whatever the relay serves.
+def test_native_limit_recognises_a_prefixed_id_by_its_model_name():
     assert "openai/gpt-5.6-terra" in catalog._snapshot()["_models"]
-    assert native_limit("custom/gpt-5.6-terra") is None
-    assert native_limit("siliconflow/gpt-5.6-terra") is None
-    assert native_limit("minimax-global/claude-opus-5") is None
     assert native_limit("openai/gpt-5.6-terra")["context"] == 1_050_000
+    # The same model behind a relay, a reseller, or a self-hosted server.
+    assert native_limit("custom/gpt-5.6-terra")["context"] == 1_050_000
+    assert native_limit("siliconflow/gpt-5.6-terra")["context"] == 1_050_000
+    assert native_limit("minimax-global/claude-opus-5")["context"] == 1_000_000
+    assert native_limit("gpt-5.6-terra") is None  # a bare id names no provider
+    assert native_limit("custom/GPT-5.6-Terra") is None  # exact name, no case folding
+
+
+def test_every_model_name_in_the_bundled_table_belongs_to_one_vendor():
+    """What makes matching by name safe: the table never files one name under two vendors."""
+    names = [key.partition("/")[2] for key in catalog._snapshot()["_models"]]
+
+    assert len(names) == len(set(names))
+    assert len(catalog._bare_index()) == len(names)
+
+
+def test_a_relay_model_is_labelled_by_the_vendors_name():
+    row = catalog.describe("custom", "deepseek-v4-flash")
+
+    assert row.label == "DeepSeek-V4-Flash"
 
 
 def test_native_limit_is_an_exact_key_match(fake_snapshot):
@@ -131,14 +146,12 @@ def test_native_limit_is_an_exact_key_match(fake_snapshot):
         }
     )
 
-    # The self-hosted deployment the snapshot was once kept out of the window
-    # path to protect: a basename or cross-vendor match would answer it with
-    # a hosted vendor's window, and an over-estimate is a refused request.
-    assert native_limit("hosted_vllm/qwen3-32b") is None
-    assert native_limit("hostedVllm/qwen3-32b") is None
-    assert native_limit("qwen3-32b") is None
-    assert native_limit("openrouter/qwen/qwen3-32b") is None
-    assert native_limit("minimax/minimax-m3") is None  # no case folding either
+    # A self-hosted deployment is the vendor's model under another prefix.
+    assert native_limit("hosted_vllm/qwen3-32b") == {"context": 40_960}
+    assert native_limit("hostedVllm/qwen3-32b") == {"context": 40_960}
+    assert native_limit("qwen3-32b") is None  # bare: names no provider
+    assert native_limit("openrouter/qwen/qwen3-32b") is None  # not the table's key, and no name match
+    assert native_limit("minimax/minimax-m3") is None  # no case folding
     assert native_limit("minimax/MiniMax-M3") == {"context": 1_000_000}
 
 

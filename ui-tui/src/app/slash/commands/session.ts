@@ -5,6 +5,7 @@
 
 import type {
   ConfigGetValueResponse,
+  ModelOverlayResponse,
   ConfigSetResponse,
   SessionBranchResponse,
   SessionExportResponse
@@ -299,44 +300,69 @@ export const sessionCommands: SlashCommand[] = [
   },
 
   {
-    help: 'inspect or set reasoning effort (updates live agent)',
-    name: 'reasoning',
-    supported: false,
+    aliases: ['reasoning'],
+    help: "set the current model's thinking level (off|minimal|low|medium|high|xhigh|max|default)",
+    name: 'thinking',
     run: (arg, ctx) => {
-      if (!arg) {
-        return ctx.gateway
-          .rpc<ConfigGetValueResponse>('config.get', { key: 'reasoning' })
-          .then(
-            ctx.guarded<ConfigGetValueResponse>(
-              r => r.value && ctx.transcript.sys(`reasoning: ${r.value} · display ${r.display || 'hide'}`)
-            )
-          )
+      const level = arg.trim().toLowerCase()
+
+      if (!level) {
+        const current = ctx.ui.info?.reasoning_effort || 'default'
+
+        return ctx.transcript.sys(
+          `thinking: ${current} · usage: /thinking off|minimal|low|medium|high|xhigh|max|default`
+        )
       }
 
-      ctx.gateway.rpc<ConfigSetResponse>('config.set', { key: 'reasoning', session_id: ctx.sid, value: arg }).then(
-        ctx.guarded<ConfigSetResponse>(r => {
-          if (!r.value) {
-            return
-          }
+      ctx.gateway
+        .rpc<ModelOverlayResponse>('model.overlay', { field: 'reasoning_effort', session_id: ctx.sid, value: level })
+        .then(
+          ctx.guarded<ModelOverlayResponse>(r => {
+            const effort = typeof r.value === 'string' ? r.value : undefined
 
-          if (r.value === 'hide') {
             patchUiState(state => ({
               ...state,
-              sections: { ...state.sections, thinking: 'hidden' },
-              showReasoning: false
+              info: state.info ? { ...state.info, reasoning_effort: effort } : state.info
             }))
-          } else if (r.value === 'show') {
+            ctx.transcript.sys(`thinking: ${effort ?? 'default'} for ${r.model}`)
+          })
+        )
+    },
+    usage: '/thinking <level>'
+  },
+
+  {
+    help: "declare the current model's context window in tokens (e.g. 128k), or default",
+    name: 'context',
+    run: (arg, ctx) => {
+      const value = arg.trim().toLowerCase()
+
+      if (!value) {
+        const max = ctx.ui.info?.usage?.context_max
+
+        return ctx.transcript.sys(`context: ${max ? `${max} tokens` : 'unknown'} · usage: /context <tokens|default>`)
+      }
+
+      ctx.gateway
+        .rpc<ModelOverlayResponse>('model.overlay', { field: 'context_window_tokens', session_id: ctx.sid, value })
+        .then(
+          ctx.guarded<ModelOverlayResponse>(r => {
+            const max = r.context_window_tokens ?? 0
+
             patchUiState(state => ({
               ...state,
-              sections: { ...state.sections, thinking: 'expanded' },
-              showReasoning: true
+              info: state.info?.usage
+                ? {
+                    ...state.info,
+                    usage: { ...state.info.usage, context_max: max, context_source: max ? 'overlay' : 'unknown' }
+                  }
+                : state.info
             }))
-          }
-
-          ctx.transcript.sys(`reasoning: ${r.value}`)
-        })
-      )
-    }
+            ctx.transcript.sys(`context: ${max ? `${max} tokens` : 'unknown'} for ${r.model}`)
+          })
+        )
+    },
+    usage: '/context <tokens>'
   },
 
   {

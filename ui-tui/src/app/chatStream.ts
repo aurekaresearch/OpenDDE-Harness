@@ -142,6 +142,9 @@ const dispatch = (
     case 'turn.retry':
       turnController.recordRetry(event.payload)
       return
+    case 'turn.usage':
+      turnController.recordUsage(event.payload.completion_tokens, event.payload.reasoning_tokens)
+      return
     case 'token.delta':
       onTokenDelta(event)
       return

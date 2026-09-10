@@ -495,6 +495,22 @@ class LLMProvider(ABC):
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
 
+    def effort_for(self, model: str | None) -> str | None:
+        """The thinking level a call with no pin uses for this model.
+
+        The model's overlay first, then ``generation.reasoning_effort``; None
+        leaves the vendor's default. Read through ``getattr`` because wrappers
+        that never run this ``__init__`` carry the overlays as a property.
+        """
+        from opendde_harness.providers.catalog import overlay_for
+
+        overlay = overlay_for(getattr(self, "model_overlays", None) or {}, model or "")
+        declared = getattr(overlay, "reasoning_effort", None)
+        if declared:
+            return declared
+        generation = getattr(self, "generation", None)
+        return generation.reasoning_effort if generation is not None else None
+
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Replace empty text content that causes provider 400 errors.
@@ -618,7 +634,7 @@ class LLMProvider(ABC):
         if temperature is self._SENTINEL:
             temperature = gen.temperature
         if reasoning_effort is self._SENTINEL:
-            reasoning_effort = gen.reasoning_effort
+            reasoning_effort = self.effort_for(model)
         response = await self.chat(
             messages=messages,
             tools=tools,
@@ -1017,7 +1033,7 @@ class LLMProvider(ABC):
         if temperature is self._SENTINEL:
             temperature = self.generation.temperature
         if reasoning_effort is self._SENTINEL:
-            reasoning_effort = self.generation.reasoning_effort
+            reasoning_effort = self.effort_for(model)
 
         from opendde_harness.providers import prompt_cache
 

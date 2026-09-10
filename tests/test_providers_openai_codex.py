@@ -198,9 +198,9 @@ def _captured_body(monkeypatch, *, reasoning_effort=None, tool_choice=None, tool
     return seen
 
 
-def test_reasoning_is_sent_only_with_a_configured_effort_and_then_with_a_summary(monkeypatch):
-    # What pi sends, and only when pi sends it.
-    assert "reasoning" not in _captured_body(monkeypatch)["body"]
+def test_reasoning_is_always_requested_with_a_summary_so_thinking_streams(monkeypatch):
+    # pi's shape on every Codex request; medium is pi's default level.
+    assert _captured_body(monkeypatch)["body"]["reasoning"] == {"effort": "medium", "summary": "auto"}
     assert _captured_body(monkeypatch, reasoning_effort="high")["body"]["reasoning"] == {
         "effort": "high",
         "summary": "auto",
@@ -241,3 +241,25 @@ def test_a_block_list_system_prompt_is_not_erased():
     system_prompt, _ = codex._convert_messages([{"role": "system", "content": [{"type": "text", "text": "be brief"}]}])
 
     assert system_prompt == "be brief"
+
+
+def test_the_models_overlay_sets_the_codex_effort_when_the_call_pins_none(monkeypatch):
+    from opendde_harness.config.schema import ModelOverlay
+    from opendde_harness.providers.wire import merge_key
+
+    seen = {}
+
+    async def request(url, headers, body, timeout):
+        seen["body"] = body
+        return codex._CodexResult("ok", [], "stop")
+
+    monkeypatch.setattr("opendde_harness.providers.chatgpt_token.access_token_and_account", lambda: ("tok", "a"))
+    monkeypatch.setattr(codex, "_request_codex", request)
+    provider = OpenAICodexProvider(
+        default_model="openai-codex/gpt-5.6-luna",
+        model_overlays={merge_key("openai_codex", "gpt-5.6-luna"): ModelOverlay(reasoningEffort="max")},
+    )
+
+    asyncio.run(provider.chat([{"role": "user", "content": "hi"}]))
+
+    assert seen["body"]["reasoning"] == {"effort": "max", "summary": "auto"}

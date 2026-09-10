@@ -94,6 +94,13 @@ export interface ConfigGetValueResponse {
   value?: string
 }
 
+export interface ModelOverlayResponse {
+  context_window_tokens?: null | number
+  field: string
+  model: string
+  value?: null | number | string
+}
+
 export interface ConfigSetResponse {
   applied?: boolean
   credential_warning?: string
@@ -353,6 +360,11 @@ export type GatewayEvent =
       payload?: { attempt?: number; discard?: boolean; reason?: string; total?: number }
       session_id?: string
       type: 'turn.retry'
+    }
+  | {
+      payload?: { calls?: number; completion_tokens?: number; reasoning_tokens?: number }
+      session_id?: string
+      type: 'turn.usage'
     }
   | { payload?: { kind?: string; text?: string }; session_id?: string; type: 'status.update' }
   | { payload: { line: string }; session_id?: string; type: 'gateway.stderr' }

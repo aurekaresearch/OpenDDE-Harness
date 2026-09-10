@@ -14,10 +14,12 @@ const buildTurnState = (): TurnState => ({
   activity: [],
   episodes: [],
   outcome: '',
+  outputTokens: 0,
   reasoning: '',
   reasoningActive: false,
   reasoningStreaming: false,
   reasoningTokens: 0,
+  retry: null,
   streamPendingTools: [],
   streamSegments: [],
   streaming: '',
@@ -73,14 +75,25 @@ export const archiveTodosAtTurnEnd = () => {
 
 export const resetTurnState = () => $turnState.set(buildTurnState())
 
+export interface TurnRetry {
+  attempt: number
+  reason: string
+  total: number
+}
+
 export interface TurnState {
   activity: ActivityItem[]
   episodes: Episode[]
   outcome: string
+  // What this turn's model calls have produced: the vendor's count for the
+  // finished calls plus an estimate of the call still streaming.
+  outputTokens: number
   reasoning: string
   reasoningActive: boolean
   reasoningStreaming: boolean
   reasoningTokens: number
+  // The model call being re-run after a failure, until the re-run delivers.
+  retry: null | TurnRetry
   streamPendingTools: string[]
   streamSegments: Msg[]
   streaming: string

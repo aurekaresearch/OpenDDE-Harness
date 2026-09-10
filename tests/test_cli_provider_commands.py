@@ -69,3 +69,14 @@ def test_an_overlay_edit_never_rewrites_an_invalid_section_with_defaults(config_
         set_model_overlay("custom", "gpt-x", {"context_window_tokens": 1000})
 
     assert json.loads(config_path.read_text())["providers"]["custom"]["apiKey"] == "keep-me"
+
+
+def test_provider_model_set_writes_and_validates_the_reasoning_effort(config_path):
+    ok = CliRunner().invoke(provider_app, ["model", "set", "custom", "deep-thinker", "--reasoning-effort", "high"])
+    assert ok.exit_code == 0, ok.output
+
+    config = Config.model_validate(json.loads(config_path.read_text()))
+    assert config.providers.model_overlays()[merge_key("custom", "deep-thinker")].reasoning_effort == "high"
+
+    bad = CliRunner().invoke(provider_app, ["model", "set", "custom", "deep-thinker", "--reasoning-effort", "ultra"])
+    assert bad.exit_code != 0

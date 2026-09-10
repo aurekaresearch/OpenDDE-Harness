@@ -1760,6 +1760,7 @@ class AgentLoop:
         on_tool_event: Callable[[str, dict], Awaitable[None]] | None = None,
         on_episode_start: Callable[[int], Awaitable[None]] | None = None,
         on_retry: Callable[[int, int, str, bool], Awaitable[None]] | None = None,
+        on_usage: Callable[[int, int, int], Awaitable[None]] | None = None,
         drain: Drain | None = None,
     ) -> tuple[str | None, list[str], list[dict], LoopOutcome]:
         """Run the agent iteration loop.
@@ -1776,6 +1777,8 @@ class AgentLoop:
         used_skill_ids: list[str] = []
         effective_model = model or self.model
         usage: dict[str, Any] = {}
+        turn_completion_tokens = 0
+        turn_reasoning_tokens = 0
 
         # Bug2 / decision B — track whether the turn was a normal exit or a
         # max-iter interruption. ``status`` is the only piece read downstream
@@ -1874,6 +1877,10 @@ class AgentLoop:
             if response.usage:
                 prompt_tokens = int(response.usage.get("prompt_tokens", 0) or 0)
                 completion_tokens = int(response.usage.get("completion_tokens", 0) or 0)
+                turn_completion_tokens += completion_tokens
+                turn_reasoning_tokens += _reasoning_tokens_of(response.usage)
+                if on_usage is not None:
+                    await on_usage(turn_completion_tokens, turn_reasoning_tokens, iteration)
                 # The call's own model, which is not always ``self.model`` (a
                 # strategy rewrote it, or the chain fell back). Unknown to every
                 # table, 0 tells the UI to show its empty state rather than a
@@ -2319,6 +2326,7 @@ class AgentLoop:
         on_tool_event: Callable[[str, dict], Awaitable[None]] | None = None,
         on_episode_start: Callable[[int], Awaitable[None]] | None = None,
         on_retry: Callable[[int, int, str, bool], Awaitable[None]] | None = None,
+        on_usage: Callable[[int, int, int], Awaitable[None]] | None = None,
         origin: Origin | None = None,
         drain: Drain | None = None,
     ) -> TurnReply:
@@ -2390,6 +2398,7 @@ class AgentLoop:
             on_tool_event=on_tool_event,
             on_episode_start=on_episode_start,
             on_retry=on_retry,
+            on_usage=on_usage,
             drain=drain,
         )
         self._stash_recovery(key, outcome)
@@ -2592,6 +2601,7 @@ class AgentLoop:
             ToolEvent,
             ToolPhase,
             TurnRetry,
+            TurnUsage,
             Usage,
         )
         from opendde_harness.spine.message import Media
@@ -2641,6 +2651,9 @@ class AgentLoop:
             if discard:
                 streamed = False
             await emit(TurnRetry(attempt=attempt, total=total, reason=reason, discard=discard))
+
+        async def on_usage(completion_tokens: int, reasoning_tokens: int, calls: int) -> None:
+            await emit(TurnUsage(completion_tokens=completion_tokens, reasoning_tokens=reasoning_tokens, calls=calls))
 
         async def on_tool(phase: str, info: dict[str, Any]) -> None:
             if phase == "start":
@@ -2693,6 +2706,7 @@ class AgentLoop:
                 on_tool_event=on_tool,
                 on_episode_start=on_episode if stream else None,
                 on_retry=on_retry,
+                on_usage=on_usage if stream else None,
                 origin=req.origin,
                 drain=drain,
             )
@@ -2721,6 +2735,19 @@ class AgentLoop:
             usage_detail=dict(reply.usage),
             text=reply_text,
         )
+
+
+def _reasoning_tokens_of(usage: dict[str, Any]) -> int:
+    """The reasoning share of a call's output, where the vendor reports one.
+
+    OpenAI files it under ``completion_tokens_details.reasoning_tokens``;
+    LiteLLM keeps that shape for every vendor that has an equivalent. Zero
+    where nothing is reported, which is not the same as no reasoning.
+    """
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, dict):
+        return int(details.get("reasoning_tokens", 0) or 0)
+    return int(getattr(details, "reasoning_tokens", 0) or 0) if details is not None else 0
 
 
 def _merge_thinking_blocks(blocks: list[dict], incoming: list[dict] | None) -> None:

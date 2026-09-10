@@ -89,7 +89,11 @@ export function createSlashHandler(ctx: SlashHandlerContext): (cmd: string) => b
         const text = r?.warning ? `warning: ${r.warning}\n${body}` : body
         const long = text.length > 180 || text.split('\n').filter(Boolean).length > 2
 
-        long ? page(text, parsed.name[0]!.toUpperCase() + parsed.name.slice(1)) : sys(text)
+        if (long) {
+          page(text, parsed.name[0]!.toUpperCase() + parsed.name.slice(1))
+        } else {
+          sys(text)
+        }
       })
       .catch(() => {
         gw.request('command.dispatch', { arg: parsed.arg, name: parsed.name, session_id: sid })
