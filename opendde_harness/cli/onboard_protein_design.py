@@ -11,9 +11,7 @@ import typer
 
 from opendde_harness.cli.compute_assets import opendde_root, weights_root
 from opendde_harness.plugin.protein_design.core.asset_paths import DEFAULT_CHECKPOINT
-from opendde_harness.plugin.protein_design.core.constants import DEFAULT_COMPUTE_URL
-
-DEFAULT_OPENDDE_API_URL = "http://115.190.4.167:30080"
+from opendde_harness.plugin.protein_design.core.constants import DEFAULT_COMPUTE_URL, DEFAULT_OPENDDE_API_URL
 
 
 def deployment_paths(saved: dict[str, str], prepared: dict[str, str]) -> tuple[Path, dict[str, str]]:

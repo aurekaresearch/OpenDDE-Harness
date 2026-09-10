@@ -690,6 +690,7 @@ def test_local_docker_step_prints_lifecycle_then_folding_then_weights(wizard_run
     assert "? OpenDDE API URL" not in transcript and "Upstream API token" not in transcript
     assert "OpenDDE data (OPENDDE_ROOT_DIR)" not in transcript and "? Weights" not in transcript
     saved = outcome["saved"]
+    assert step.DEFAULT_OPENDDE_API_URL == "https://api.aurekabio.cloud"
     assert saved["fold_defaults"] == {"execution_mode": "api", "api_url": step.DEFAULT_OPENDDE_API_URL}
     assert saved["compute_docker"]["gpus"] == "all" and saved["compute_docker"]["idle_seconds"] == 600
     assert {"port", "container_name"}.isdisjoint(saved["compute_docker"])
@@ -736,8 +737,28 @@ def test_host_proxy_variables_reach_the_container_through_the_docker_host(settin
 
     assert env["http_proxy"] == env["HTTP_PROXY"] == "http://host.docker.internal:2080"
     assert env["https_proxy"] == "socks5://user:pw@host.docker.internal:1080"
-    assert set(env["no_proxy"].split(",")) == {"localhost", "127.0.0.1", "host.docker.internal"}
+    assert set(env["no_proxy"].split(",")) == {
+        "localhost",
+        "127.0.0.1",
+        "host.docker.internal",
+        "api.aurekabio.cloud",
+        "search-protrek.com",
+        "protenix-server.com",
+    }
+    assert env["NO_PROXY"] == env["no_proxy"]
     assert "--add-host=host.docker.internal:host-gateway" in args
+
+
+def test_public_service_bypass_preserves_existing_proxy_exclusions():
+    from opendde_harness.cli.onboard_compute import proxy_environment
+
+    env = proxy_environment({"HTTPS_PROXY": "http://127.0.0.1:17890", "NO_PROXY": "internal.example,::1"})
+
+    assert env["HTTPS_PROXY"] == "http://host.docker.internal:17890"
+    assert {"internal.example", "::1", "api.aurekabio.cloud", "search-protrek.com", "protenix-server.com"} <= set(
+        env["NO_PROXY"].split(",")
+    )
+    assert env["NO_PROXY"] == env["no_proxy"]
 
 
 def test_probe_failure_always_says_something(monkeypatch):

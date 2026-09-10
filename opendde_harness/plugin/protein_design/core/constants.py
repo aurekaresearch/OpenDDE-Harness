@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+DEFAULT_OPENDDE_API_URL = "https://api.aurekabio.cloud"
+
 DEFAULT_COMPUTE_PORT = 8080
 DEFAULT_COMPUTE_URL = f"http://127.0.0.1:{DEFAULT_COMPUTE_PORT}"
 

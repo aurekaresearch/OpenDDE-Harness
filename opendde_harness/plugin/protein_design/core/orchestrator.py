@@ -216,6 +216,8 @@ class DesignOrchestrator:
                     population=population,
                     working_parent=working_parent,
                 )
+                run_span.set(run_span_attributes(snapshot=run_state.snapshot, config=config)).checkpoint()
+                await self._notify(run_state.snapshot, on_progress)
                 while run_state.cycle < config.cycles:
                     running = await self._run_cycle(
                         run_state,
@@ -302,7 +304,9 @@ class DesignOrchestrator:
                     working_parent.consider(candidate)
             initial_admitted = [candidate for candidate in materialized if self._passes_gate(candidate)]
             initial_population = population.update(initial_admitted)
+            run_state.survivors = initial_population.survivors
             run_state.best = self._best(initial_population.survivors, config)
+            run_state.snapshot = run_state.snapshot.model_copy(update={"best_candidate": run_state.best})
             initial_actions = dict(initial_population.actions)
             for candidate in materialized:
                 if candidate.candidate_id not in initial_actions:
@@ -327,6 +331,48 @@ class DesignOrchestrator:
                     "history_candidates": initial_history,
                 }
             )
+            # Initial scoring is a visible result even if the first design cycle
+            # fails. Use the same baseline index as the persisted search history.
+            with trace.span(
+                "protein_design.cycle",
+                {
+                    **cycle_span_attributes(
+                        task_id=task_id,
+                        cycle=-1,
+                        candidates=initial_scored,
+                        cycle_best=self._best(materialized, config),
+                        global_best=run_state.best,
+                    ),
+                    "protein_design.phase": "initial_fold",
+                },
+                kind="protein_design",
+            ) as initial_span:
+                structure_artifacts = await self._persist_candidate_structures(
+                    initial_span,
+                    initial_scored,
+                    task_id=task_id,
+                    target_chain_ids=config.target_chain_ids,
+                    binder_chain_ids=list(config.binder_chains),
+                )
+                cycle_best = self._best(materialized, config)
+                initial_span.artifact(
+                    "protein_design.cycle",
+                    build_cycle_artifact(
+                        task_id=task_id,
+                        target=config.target,
+                        cycle=-1,
+                        objective_key=config.objective_key,
+                        minimize=config.minimize,
+                        candidates=initial_scored,
+                        cycle_best_id=cycle_best.candidate_id if cycle_best else None,
+                        global_best_id=run_state.best.candidate_id if run_state.best else None,
+                        known_candidate_ids=set(),
+                        structure_artifacts=structure_artifacts,
+                        population_candidate_ids={item.candidate_id for item in initial_population.survivors},
+                        admitted_candidate_ids={item.candidate_id for item in initial_admitted},
+                        population_actions=initial_actions,
+                    ),
+                )
 
     async def _run_cycle(
         self,

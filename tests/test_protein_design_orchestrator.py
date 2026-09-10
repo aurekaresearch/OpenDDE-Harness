@@ -690,3 +690,68 @@ def test_design_agent_returns_its_reasoning_with_the_tool_turn() -> None:
     assert result.report == "ok"
     assistant = [message for message in sent[-1] if message["role"] == "assistant"]
     assert assistant and assistant[0]["reasoning_content"] == "deciding which skill to load"
+
+
+@pytest.mark.parametrize("gate_passed", [True, False])
+def test_initial_structure_is_published_before_first_design_failure(tmp_path, monkeypatch, gate_passed):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from opendde_harness.tracing import spans
+    from opendde_harness.tracing.store import TraceStore
+
+    monkeypatch.setenv("OPENDDE_HARNESS_TRACING", "1")
+    monkeypatch.setattr(spans, "_store", TraceStore(tmp_path))
+    compute = FakeCompute()
+    original_wait = compute.wait_fold
+
+    async def wait_fold(job_id, **kwargs):
+        result = await original_wait(job_id, **kwargs)
+        for candidate in result.result["candidates"]:
+            candidate["metadata"]["gate_passed"] = gate_passed
+            candidate["metrics"]["gate_passed"] = float(gate_passed)
+        return result
+
+    async def read_structure(*args, **kwargs):
+        return SimpleNamespace(filename="seed.cif", format="cif", byte_count=10, text="data_seed\n")
+
+    async def fail_design(*args, **kwargs):
+        raise RuntimeError("first design failed")
+
+    monkeypatch.setattr(compute, "wait_fold", wait_fold)
+    monkeypatch.setattr(compute, "read_structure", read_structure)
+    phases = FakePhases()
+    monkeypatch.setattr(phases, "design_cycle", fail_design)
+    orchestrator = DesignOrchestrator(compute, DesignMemory(None, agent_id="test"), phases)
+    snapshots = []
+    with pytest.raises(RuntimeError, match="first design failed"):
+        asyncio.run(
+            orchestrator.run(
+                "task-initial",
+                make_config(cycle_retry_limit=0, skip_failed_cycles=False),
+                stop_event=asyncio.Event(),
+                adjustments={},
+                on_progress=snapshots.append,
+            )
+        )
+
+    records = [json.loads(line) for line in (tmp_path / "logs/audit-spans.log").read_text().splitlines()]
+    cycles = [record for record in records if record["name"] == "protein_design.cycle"]
+    assert len(cycles) == 1
+    attrs = cycles[0]["attributes"]
+    assert attrs["protein_design.cycle_index"] == -1
+    artifact = json.loads(Path(attrs["protein_design.cycle.artifact_path"]).read_text())
+    candidate = artifact["candidates"][0]
+    assert candidate["candidate_id"] == "seed"
+    assert candidate["metrics"]["loss"] == 1.0
+    structure = json.loads(Path(candidate["structure_artifact_path"]).read_text())
+    assert structure["text"] == "data_seed\n"
+    assert structure["target_chain_ids"] == ["A"]
+    assert structure["binder_chain_ids"] == ["D"]
+    assert artifact["population_candidate_ids"] == (["seed"] if gate_passed else [])
+    assert artifact["admitted_candidate_ids"] == (["seed"] if gate_passed else [])
+    assert snapshots[-1].cycle == 0
+    assert (snapshots[-1].best_candidate is not None) == gate_passed
+    if gate_passed:
+        assert any(s.status.value == "running" and s.best_candidate is not None for s in snapshots)
