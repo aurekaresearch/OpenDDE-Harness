@@ -217,17 +217,10 @@ class FoldConfig:
             self.gpus = "none"
         if mode == API_FOLD_EXECUTION_MODE:
             from opendde_harness.plugin.protein_design.servers.backends.opendde_api import (
-                normalize_opendde_api_url,
+                resolve_opendde_api_url,
             )
 
-            self.api_url = (
-                str(self.api_url or os.environ.get("OPENDDE_HARNESS_OPENDDE_API_URL", "")).strip().rstrip("/") or None
-            )
-            if not self.api_url:
-                raise ValueError(
-                    "fold.api_url or OPENDDE_HARNESS_OPENDDE_API_URL is required when execution_mode is 'api'"
-                )
-            self.api_url = normalize_opendde_api_url(self.api_url)
+            self.api_url = resolve_opendde_api_url(self.api_url)
             if self.api_poll_interval_seconds <= 0:
                 raise ValueError("fold.api_poll_interval_seconds must be greater than zero")
             if self.api_timeout_seconds <= 0 or self.api_request_timeout_seconds <= 0:

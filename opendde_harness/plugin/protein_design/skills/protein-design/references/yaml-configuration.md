@@ -269,7 +269,7 @@ Supported router keys are exactly:
 | `fold.enable_msa_search` | Backend-side fallback search during Fold. Keep `false` for reviewed configurations; use `protein_design_search_target_msa` before launch so paths and provenance are explicit. |
 | `fold.execution_mode` | `local` (default), `docker`, or `api`. API mode submits an asynchronous remote OpenDDE job and downloads its result archive. |
 | `fold.image` | Omit this field. OpenDDE uses the configured persistent compute image. |
-| `fold.api_url` | Required in API mode unless `OPENDDE_HARNESS_OPENDDE_API_URL` is set. Example: `http://115.190.4.167:30080`. |
+| `fold.api_url` | External gateway origin; defaults to `https://api.aurekabio.cloud`. Explicit YAML overrides `OPENDDE_HARNESS_OPENDDE_API_URL`, which overrides the default. |
 | `fold.api_poll_interval_seconds` | Remote job polling interval; default `5`. |
 | `fold.api_timeout_seconds` | Overall remote job timeout including queue and warm-up; default `7200`. |
 | `fold.api_request_timeout_seconds` | Timeout for each submit, status, or download HTTP request; default `60`. |
@@ -299,7 +299,7 @@ design:
 fold:
   model: opendde
   execution_mode: api
-  api_url: http://115.190.4.167:30080
+  api_url: https://api.aurekabio.cloud
   seeds: [973520]
   diffusion_samples: 1
   diffusion_steps: 200

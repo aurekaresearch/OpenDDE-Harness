@@ -298,10 +298,12 @@ class PythonProteinDesignHarness:
         elif mode == "api":
             from opendde_harness.plugin.protein_design.servers.backends.opendde_api import (
                 OpenDDEJobClient,
+                resolve_opendde_api_url,
             )
 
-            resolved_api_url = str(api_url or os.environ.get("OPENDDE_HARNESS_OPENDDE_API_URL", "")).strip().rstrip("/")
+            resolved_api_url = api_url
             try:
+                resolved_api_url = resolve_opendde_api_url(api_url)
                 with OpenDDEJobClient(resolved_api_url) as client:
                     client.probe()
                     api_ready = True

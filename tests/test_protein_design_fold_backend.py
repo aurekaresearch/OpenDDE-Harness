@@ -88,3 +88,77 @@ def test_api_probe_requires_the_opendde_job_schema(payload, valid):
         else:
             with pytest.raises(OpenDDEAPIError, match="job API"):
                 client.probe()
+
+
+@pytest.mark.parametrize(
+    "configured, environment, expected",
+    [
+        (None, None, "https://api.aurekabio.cloud"),
+        (None, "https://gateway.example.org/", "https://gateway.example.org"),
+        ("https://explicit.example.org/", "https://gateway.example.org", "https://explicit.example.org"),
+    ],
+)
+def test_api_gateway_resolution(configured, environment, expected, monkeypatch):
+    from opendde_harness.plugin.protein_design.servers.backends.fold import FoldConfig
+    from opendde_harness.plugin.protein_design.servers.backends.opendde_api import OpenDDEJobClient
+
+    monkeypatch.delenv("OPENDDE_HARNESS_OPENDDE_API_URL", raising=False)
+    if environment:
+        monkeypatch.setenv("OPENDDE_HARNESS_OPENDDE_API_URL", environment)
+    config = FoldConfig(execution_mode="api", api_url=configured)
+    assert config.api_url == expected
+    with OpenDDEJobClient(configured) as client:
+        assert str(client._client.base_url).rstrip("/") == expected
+
+
+def test_external_gateway_job_downloads_nested_artifacts(tmp_path, monkeypatch):
+    import io
+    import json
+    import zipfile
+
+    import httpx
+
+    from opendde_harness.plugin.protein_design.servers.backends.opendde_api import OpenDDEJobClient
+
+    monkeypatch.delenv("OPENDDE_HARNESS_OPENDDE_API_URL", raising=False)
+    contents = io.BytesIO()
+    structure = "ab1/ab1/seed_0/predictions/ab1_sample_0.cif"
+    with zipfile.ZipFile(contents, "w") as archive:
+        archive.writestr(structure, "data_ab1\n")
+    requests = []
+
+    def handle(request):
+        assert request.url.host == "api.aurekabio.cloud"
+        assert request.url.scheme == "https"
+        requests.append((request.method, request.url.path))
+        if request.method == "POST":
+            body = json.loads(request.content)
+            assert body == {
+                "instances": [{"name": "ab1", "chains": [{"id": "H", "sequence": "EVQLVESGGG"}]}],
+                "parameters": {"n_samples": 1, "n_step": 200, "need_atom_confidence": True, "dry_run": False},
+            }
+            return httpx.Response(202, json={"run_id": "test-job", "state": "PENDING", "done": False})
+        if request.url.path.endswith("/download"):
+            return httpx.Response(200, content=contents.getvalue())
+        return httpx.Response(
+            200,
+            json={
+                "done": True,
+                "state": "COMPLETE",
+                "response": {"predictions": [{"structure_cif": None, "output_dir": "/nfs/remote/output"}]},
+            },
+        )
+
+    with OpenDDEJobClient(transport=httpx.MockTransport(handle)) as client:
+        job = client.submit(
+            [{"name": "ab1", "chains": [{"id": "H", "sequence": "EVQLVESGGG"}]}], n_samples=1, n_step=200
+        )
+        client.wait(job["run_id"], poll_interval_seconds=1, timeout_seconds=10)
+        archive = client.download(job["run_id"], tmp_path / "result.zip")
+        client.extract_download(archive, tmp_path / "output")
+    assert (tmp_path / "output" / structure).read_text() == "data_ab1\n"
+    assert requests == [
+        ("POST", "/api/v1/folding/opendde/jobs"),
+        ("GET", "/api/v1/folding/opendde/jobs/test-job"),
+        ("GET", "/api/v1/folding/opendde/jobs/test-job/download"),
+    ]

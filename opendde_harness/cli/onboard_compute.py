@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -24,7 +25,8 @@ from opendde_harness.cli.compute_environment import (
     load_environment,
 )
 from opendde_harness.plugin.protein_design.core.asset_paths import DEFAULT_CHECKPOINT, OPENDDE_COMMON_ASSETS
-from opendde_harness.plugin.protein_design.core.constants import DEFAULT_COMPUTE_PORT
+from opendde_harness.plugin.protein_design.core.constants import DEFAULT_COMPUTE_PORT, DEFAULT_OPENDDE_API_URL
+from opendde_harness.plugin.protein_design.core.external import DEFAULT_MSA_SERVER_URL, DEFAULT_PROTREK_URL
 from opendde_harness.plugin.protein_design.servers import local_service
 
 MANAGED_LABEL = "org.opendde-harness.compute"
@@ -517,7 +519,12 @@ def proxy_environment(source: Mapping[str, str] | None = None) -> dict[str, str]
     if not resolved:
         return {}
     bypass = [item.strip() for item in resolved.get("no_proxy", "").split(",") if item.strip()]
-    for host in ("localhost", "127.0.0.1", DOCKER_HOST_ALIAS):
+    # These public services are directly reachable; a host loopback proxy
+    # may not listen on the Docker bridge even after its hostname is rewritten.
+    service_hosts = [
+        urlsplit(url).hostname for url in (DEFAULT_OPENDDE_API_URL, DEFAULT_PROTREK_URL, DEFAULT_MSA_SERVER_URL)
+    ]
+    for host in ("localhost", "127.0.0.1", DOCKER_HOST_ALIAS, *service_hosts):
         if host not in bypass:
             bypass.append(host)
     resolved["no_proxy"] = ",".join(bypass)

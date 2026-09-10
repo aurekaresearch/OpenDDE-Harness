@@ -8,6 +8,7 @@ import logging
 import math
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -216,6 +217,8 @@ class DesignOrchestrator:
                     population=population,
                     working_parent=working_parent,
                 )
+                run_span.set(run_span_attributes(snapshot=run_state.snapshot, config=config)).checkpoint()
+                await self._notify(run_state.snapshot, on_progress)
                 while run_state.cycle < config.cycles:
                     running = await self._run_cycle(
                         run_state,
@@ -270,6 +273,55 @@ class DesignOrchestrator:
                 await self._notify(run_state.snapshot, on_progress)
                 raise
 
+    async def _publish_fold_result(
+        self,
+        span: Any,
+        candidates: list[Candidate],
+        *,
+        task_id: str,
+        config: WorkflowConfig,
+        cycle: int,
+        best: Candidate | None,
+        known_candidate_ids: set[str],
+        phase: str = "fold_complete",
+    ) -> dict[str, str]:
+        cycle_best = self._best([item for item in candidates if self._is_scored_candidate(item)], config)
+        span.set(
+            {
+                **cycle_span_attributes(
+                    task_id=task_id,
+                    cycle=cycle,
+                    candidates=candidates,
+                    cycle_best=cycle_best,
+                    global_best=best,
+                ),
+                "protein_design.phase": phase,
+            }
+        )
+        structures = await self._persist_candidate_structures(
+            span,
+            candidates,
+            task_id=task_id,
+            target_chain_ids=config.target_chain_ids,
+            binder_chain_ids=list(config.binder_chains),
+        )
+        span.artifact(
+            "protein_design.cycle",
+            build_cycle_artifact(
+                task_id=task_id,
+                target=config.target,
+                cycle=cycle,
+                objective_key=config.objective_key,
+                minimize=config.minimize,
+                candidates=candidates,
+                cycle_best_id=cycle_best.candidate_id if cycle_best else None,
+                global_best_id=best.candidate_id if best else None,
+                known_candidate_ids=known_candidate_ids,
+                structure_artifacts=structures,
+            ),
+        ).checkpoint()
+        return structures
+
     async def _bootstrap_initial_fold(
         self,
         run_state: _RunState,
@@ -302,7 +354,9 @@ class DesignOrchestrator:
                     working_parent.consider(candidate)
             initial_admitted = [candidate for candidate in materialized if self._passes_gate(candidate)]
             initial_population = population.update(initial_admitted)
+            run_state.survivors = initial_population.survivors
             run_state.best = self._best(initial_population.survivors, config)
+            run_state.snapshot = run_state.snapshot.model_copy(update={"best_candidate": run_state.best})
             initial_actions = dict(initial_population.actions)
             for candidate in materialized:
                 if candidate.candidate_id not in initial_actions:
@@ -315,6 +369,48 @@ class DesignOrchestrator:
                 config=config,
             )
             run_state.search_history.extend(initial_history)
+            # Initial scoring is a visible result even if the first design cycle
+            # fails. Use the same baseline index as the persisted search history.
+            with trace.span(
+                "protein_design.cycle",
+                {
+                    **cycle_span_attributes(
+                        task_id=task_id,
+                        cycle=-1,
+                        candidates=initial_scored,
+                        cycle_best=self._best(materialized, config),
+                        global_best=run_state.best,
+                    ),
+                    "protein_design.phase": "initial_fold",
+                },
+                kind="protein_design",
+            ) as initial_span:
+                structure_artifacts = await self._persist_candidate_structures(
+                    initial_span,
+                    initial_scored,
+                    task_id=task_id,
+                    target_chain_ids=config.target_chain_ids,
+                    binder_chain_ids=list(config.binder_chains),
+                )
+                cycle_best = self._best(materialized, config)
+                initial_span.artifact(
+                    "protein_design.cycle",
+                    build_cycle_artifact(
+                        task_id=task_id,
+                        target=config.target,
+                        cycle=-1,
+                        objective_key=config.objective_key,
+                        minimize=config.minimize,
+                        candidates=initial_scored,
+                        cycle_best_id=cycle_best.candidate_id if cycle_best else None,
+                        global_best_id=run_state.best.candidate_id if run_state.best else None,
+                        known_candidate_ids=set(),
+                        structure_artifacts=structure_artifacts,
+                        population_candidate_ids={item.candidate_id for item in initial_population.survivors},
+                        admitted_candidate_ids={item.candidate_id for item in initial_admitted},
+                        population_actions=initial_actions,
+                    ),
+                )
             await self._compute.update_population(
                 {
                     "task_id": task_id,
@@ -345,6 +441,45 @@ class DesignOrchestrator:
         stop_event: asyncio.Event,
         on_progress: ProgressCallback | None,
         run_span: Any,
+    ) -> bool:
+        # One span per fold attempt; completion replaces its live checkpoint.
+        with ExitStack() as cycle_trace_stack:
+            return await self._run_cycle_traced(
+                run_state,
+                task_id,
+                config,
+                analysis=analysis,
+                adjustments=adjustments,
+                population=population,
+                parent_sampler=parent_sampler,
+                working_parent=working_parent,
+                recurring_offenders=recurring_offenders,
+                failed_cycles=failed_cycles,
+                known_candidate_ids=known_candidate_ids,
+                stop_event=stop_event,
+                on_progress=on_progress,
+                run_span=run_span,
+                cycle_trace_stack=cycle_trace_stack,
+            )
+
+    async def _run_cycle_traced(
+        self,
+        run_state: _RunState,
+        task_id: str,
+        config: WorkflowConfig,
+        *,
+        analysis: Any,
+        adjustments: dict[str, Any],
+        population: ConstrainedElitePopulation,
+        parent_sampler: ParentSampler,
+        working_parent: WorkingParentTracker,
+        recurring_offenders: dict[str, int],
+        failed_cycles: list[dict[str, Any]],
+        known_candidate_ids: set[str],
+        stop_event: asyncio.Event,
+        on_progress: ProgressCallback | None,
+        run_span: Any,
+        cycle_trace_stack: ExitStack,
     ) -> bool:
         """Run one search cycle. Returns False when the task was stopped."""
 
@@ -463,6 +598,22 @@ class DesignOrchestrator:
             )
             try:
                 cycle_candidates = await fold_task
+                cycle_span = cycle_trace_stack.enter_context(
+                    trace.span(
+                        "protein_design.cycle",
+                        {"protein_design.cycle_attempt": run_state.cycle_attempt},
+                        kind="protein_design",
+                    )
+                )
+                structure_artifacts = await self._publish_fold_result(
+                    cycle_span,
+                    cycle_candidates,
+                    task_id=task_id,
+                    config=config,
+                    cycle=run_state.cycle,
+                    best=run_state.best,
+                    known_candidate_ids=known_candidate_ids,
+                )
                 run_state.total_scored_candidates += sum(
                     self._is_scored_candidate(candidate) for candidate in cycle_candidates
                 )
@@ -653,6 +804,47 @@ class DesignOrchestrator:
             return True
 
         should_reflect = (run_state.cycle + 1) % config.reflection_interval == 0
+        cycle_span.set(
+            {
+                **cycle_span_attributes(
+                    task_id=task_id,
+                    cycle=run_state.cycle,
+                    candidates=cycle_candidates,
+                    cycle_best=cycle_best,
+                    global_best=run_state.best,
+                ),
+                "protein_design.agent.role": "design",
+                "protein_design.skill.selected": (design.selected_skill_id if design is not None else None),
+                "protein_design.gate.passed": len(gate_passed),
+                "protein_design.quality.passed": len(admitted),
+                "protein_design.reflection.scheduled": should_reflect,
+                "protein_design.memory.retrieved": (len(design.memories) if design is not None else 0),
+                "protein_design.memory.skills_retrieved": (len(design.learned_skill_ids) if design is not None else 0),
+                "protein_design.memory.skills_applied": (
+                    list(design.applied_learned_skill_ids) if design is not None else []
+                ),
+            }
+        )
+        cycle_span.set({"protein_design.phase": "quality_complete"})
+        cycle_span.artifact(
+            "protein_design.cycle",
+            build_cycle_artifact(
+                task_id=task_id,
+                target=config.target,
+                cycle=run_state.cycle,
+                objective_key=config.objective_key,
+                minimize=config.minimize,
+                candidates=cycle_candidates,
+                cycle_best_id=cycle_best.candidate_id if cycle_best else None,
+                global_best_id=run_state.best.candidate_id if run_state.best else None,
+                known_candidate_ids=known_candidate_ids,
+                structure_artifacts=structure_artifacts,
+                population_candidate_ids={item.candidate_id for item in run_state.survivors},
+                admitted_candidate_ids={item.candidate_id for item in admitted},
+                population_actions=population_actions,
+            ),
+        )
+        cycle_span.checkpoint()
         if should_reflect:
             self._event("evolution_tree")
             self._event("reflection")
@@ -734,54 +926,7 @@ class DesignOrchestrator:
         run_state.previous_skill_id = selected_skill_id or run_state.previous_skill_id
         self._event("trajectory")
         self._event("visualization")
-        with trace.span(
-            "protein_design.cycle",
-            {
-                **cycle_span_attributes(
-                    task_id=task_id,
-                    cycle=run_state.cycle,
-                    candidates=cycle_candidates,
-                    cycle_best=cycle_best,
-                    global_best=run_state.best,
-                ),
-                "protein_design.agent.role": "design",
-                "protein_design.skill.selected": (design.selected_skill_id if design is not None else None),
-                "protein_design.gate.passed": len(gate_passed),
-                "protein_design.quality.passed": len(admitted),
-                "protein_design.reflection.scheduled": should_reflect,
-                "protein_design.memory.retrieved": (len(design.memories) if design is not None else 0),
-                "protein_design.memory.skills_retrieved": (len(design.learned_skill_ids) if design is not None else 0),
-                "protein_design.memory.skills_applied": (
-                    list(design.applied_learned_skill_ids) if design is not None else []
-                ),
-            },
-            kind="protein_design",
-        ) as cycle_span:
-            structure_artifacts = await self._persist_candidate_structures(
-                cycle_span,
-                cycle_candidates,
-                task_id=task_id,
-                target_chain_ids=config.target_chain_ids,
-                binder_chain_ids=list(config.binder_chains),
-            )
-            cycle_span.artifact(
-                "protein_design.cycle",
-                build_cycle_artifact(
-                    task_id=task_id,
-                    target=config.target,
-                    cycle=run_state.cycle,
-                    objective_key=config.objective_key,
-                    minimize=config.minimize,
-                    candidates=cycle_candidates,
-                    cycle_best_id=cycle_best.candidate_id if cycle_best else None,
-                    global_best_id=run_state.best.candidate_id if run_state.best else None,
-                    known_candidate_ids=known_candidate_ids,
-                    structure_artifacts=structure_artifacts,
-                    population_candidate_ids={item.candidate_id for item in run_state.survivors},
-                    admitted_candidate_ids={item.candidate_id for item in admitted},
-                    population_actions=population_actions,
-                ),
-            )
+        cycle_span.set({"protein_design.phase": "cycle_complete"}).checkpoint()
         known_candidate_ids.update(item.candidate_id for item in cycle_candidates)
         run_state.snapshot = TaskSnapshot(
             task_id=task_id,
@@ -849,6 +994,17 @@ class DesignOrchestrator:
                     )
                     refolded = self._read_candidates(folded.result or {}, config)
                     terminal = self._merge_post_refold_candidates(refolded, terminal)
+                    with trace.span("protein_design.cycle", kind="protein_design") as refold_span:
+                        await self._publish_fold_result(
+                            refold_span,
+                            terminal,
+                            task_id=task_id,
+                            config=config,
+                            cycle=config.cycles,
+                            best=run_state.best,
+                            known_candidate_ids={item["candidate_id"] for item in run_state.search_history},
+                            phase="post_refold",
+                        )
                     await self._post_refold_pose_evidence(terminal, config, task_id)
                     if not any(self._post_filter_eligible(item) for item in terminal):
                         post_refold_error = folded.error or "post-refold returned no usable candidates"
@@ -931,6 +1087,11 @@ class DesignOrchestrator:
             )
             final_selection["target_chain_ids"] = list(config.target_chain_ids)
             final_selection["binder_chain_ids"] = list(config.binder_chains)
+        attach_artifact(
+            run_span,
+            "protein_design.final_selection",
+            final_selection,
+        )
         await self._compute.update_population(
             {
                 "task_id": task_id,
@@ -942,11 +1103,6 @@ class DesignOrchestrator:
                 "minimize": config.minimize,
                 "final_selection": final_selection,
             }
-        )
-        attach_artifact(
-            run_span,
-            "protein_design.final_selection",
-            final_selection,
         )
         return terminal, final_selection
 

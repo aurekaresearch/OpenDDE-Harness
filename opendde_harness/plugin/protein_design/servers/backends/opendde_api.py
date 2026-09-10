@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import time
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -10,6 +12,10 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
 import httpx
+
+from opendde_harness.plugin.protein_design.core.constants import DEFAULT_OPENDDE_API_URL
+
+logger = logging.getLogger(__name__)
 
 
 class OpenDDEAPIError(RuntimeError):
@@ -33,18 +39,25 @@ def normalize_opendde_api_url(value: str) -> str:
     return normalized
 
 
+def resolve_opendde_api_url(value: str | None = None) -> str:
+    """Resolve an explicit gateway, environment override, or the public gateway."""
+    return normalize_opendde_api_url(
+        value or os.environ.get("OPENDDE_HARNESS_OPENDDE_API_URL") or DEFAULT_OPENDDE_API_URL
+    )
+
+
 class OpenDDEJobClient:
     JOBS_PATH = "/api/v1/folding/opendde/jobs"
 
     def __init__(
         self,
-        base_url: str,
+        base_url: str | None = None,
         *,
         request_timeout_seconds: float = 60.0,
         token: str | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        normalized = normalize_opendde_api_url(base_url)
+        normalized = resolve_opendde_api_url(base_url)
         headers = {"Authorization": f"Bearer {token}"} if token else None
         self._client = httpx.Client(
             base_url=normalized,
@@ -148,21 +161,56 @@ class OpenDDEJobClient:
                 raise TimeoutError(f"OpenDDE job {run_id} did not finish within {timeout_seconds:g}s{stalled}")
             time.sleep(max(0.05, poll_interval_seconds))
 
-    def download(self, run_id: str, destination: Path) -> Path:
+    def download(
+        self,
+        run_id: str,
+        destination: Path,
+        *,
+        retry_limit: int = 5,
+        retry_delay_seconds: float = 3.0,
+    ) -> Path:
+        """Retry transfers of the same completed job, never resubmit inference."""
+        if retry_limit < 0 or retry_delay_seconds < 0:
+            raise ValueError("download retry limit and delay must be non-negative")
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(destination.suffix + ".part")
-        try:
-            with self._client.stream("GET", f"{self.JOBS_PATH}/{run_id}/download") as response:
-                self._raise_for_status(response, {200})
-                with temporary.open("wb") as handle:
-                    for chunk in response.iter_bytes():
-                        handle.write(chunk)
-            temporary.replace(destination)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
-        return destination
+        for attempt in range(retry_limit + 1):
+            try:
+                with self._client.stream("GET", f"{self.JOBS_PATH}/{run_id}/download") as response:
+                    response.raise_for_status()
+                    with temporary.open("wb") as handle:
+                        for chunk in response.iter_bytes():
+                            handle.write(chunk)
+                # A closed stream alone does not guarantee an intact archive.
+                with zipfile.ZipFile(temporary) as bundle:
+                    damaged_member = bundle.testzip()
+                    if damaged_member is not None:
+                        raise zipfile.BadZipFile(f"CRC check failed for {damaged_member}")
+                temporary.replace(destination)
+                return destination
+            except (httpx.TransportError, httpx.HTTPStatusError, zipfile.BadZipFile) as exc:
+                retryable = not isinstance(exc, httpx.HTTPStatusError) or (
+                    exc.response.status_code in {408, 429} or 500 <= exc.response.status_code <= 599
+                )
+                if not retryable or attempt == retry_limit:
+                    raise OpenDDEAPIError(
+                        f"OpenDDE job {run_id} result download failed after {attempt + 1} attempts; "
+                        f"retry downloading this job without resubmitting prediction: {exc}"
+                    ) from exc
+                logger.warning(
+                    "OpenDDE job %s download attempt %s failed; retry %s/%s in %gs: %s",
+                    run_id,
+                    attempt + 1,
+                    attempt + 1,
+                    retry_limit,
+                    retry_delay_seconds,
+                    exc,
+                )
+            finally:
+                temporary.unlink(missing_ok=True)
+            time.sleep(retry_delay_seconds)
+        raise AssertionError("unreachable download retry state")
 
     @staticmethod
     def extract_download(archive: Path, destination: Path) -> None:

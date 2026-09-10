@@ -179,15 +179,17 @@ design:
 fold:
   model: opendde
   execution_mode: api
-  api_url: https://opendde-api.example.com
+  api_url: https://api.aurekabio.cloud
   seeds: [973520]
   diffusion_samples: 1
   diffusion_steps: 200
   use_msa: true
 ```
 
-The URL can instead be supplied to the compute service as
-`OPENDDE_HARNESS_OPENDDE_API_URL`. The wizard no longer asks for an upstream API
+API mode uses the external HTTPS gateway `https://api.aurekabio.cloud` by default.
+Set `fold.api_url` to override it, or supply `OPENDDE_HARNESS_OPENDDE_API_URL`
+to the compute service (explicit YAML takes precedence). No cluster-internal
+service address or shared NFS access is needed. The wizard no longer asks for an upstream API
 token and the compute service sends none; the hosted folding API is unauthenticated.
 The remote service owns GPU scheduling and MSA/template preparation. Local GPU
 and model paths do not control remote folding. Local `pairedMsaPath` or
@@ -200,6 +202,15 @@ SolubleMPNN and ESM2 650M weights mounted from the host, but no OpenDDE
 checkpoint or common data. Merely installing the host client does not provision
 this scientific runtime. Existing container environment settings and mounts are
 not changed by a task YAML.
+
+API result downloads automatically retry transport errors, HTTP 408/429/5xx,
+and invalid ZIP archives up to five times after the initial attempt, waiting
+three seconds between attempts. Each attempt downloads the same completed job
+from the beginning; it does not resubmit prediction. The ZIP is checked before
+replacing the destination file. Authentication and not-found errors fail
+immediately. If retries are exhausted, the error includes the upstream job ID
+for a later download. This policy does not change the separate fold-job wait
+timeout. Restart or recreate an existing compute service to load updated code.
 
 API requests default to `need_atom_confidence: true`. The downloaded ZIP includes
 the matching `full_data_sample_*.json` with atom pLDDT, token PAE, and contact
@@ -406,3 +417,15 @@ Run `uv run pytest -q` from the source checkout. The tests cover REST contracts,
 job scheduling, structured-output handling, orchestration, memory hooks, and
 plugin discovery. Real model inference and external-service availability require
 validation on the intended compute deployment.
+
+### Live fold result visibility
+
+Initial scoring (cycle -1), every search cycle, and terminal post-refolding
+(cycle equal to the configured cycle count) publish scores and structure artifacts
+as soon as folding returns. Search-cycle checkpoints are updated under the same
+trace span after quality assessment, so normal completion does not duplicate a
+round. Early checkpoints do not claim population admission or final selection.
+Results remain visible if subsequent speculation, quality assessment, population
+persistence, reflection, or memory work blocks or fails. Terminal refold results
+are visible before pose analysis and final filtering. These changes require a
+new worker process; they do not backfill historical runs automatically.

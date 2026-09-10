@@ -526,14 +526,11 @@ class WorkflowConfigLoader:
             .lower()
         )
         if fold_execution_mode == "api":
-            api_url = str(fold.get("api_url") or os.environ.get("OPENDDE_HARNESS_OPENDDE_API_URL", "")).strip()
-            if not api_url:
-                raise ValueError("fold.api_url is required for fold.execution_mode: api")
             from opendde_harness.plugin.protein_design.servers.backends.opendde_api import (
-                normalize_opendde_api_url,
+                resolve_opendde_api_url,
             )
 
-            normalize_opendde_api_url(api_url)
+            resolve_opendde_api_url(fold.get("api_url"))
             if (
                 str(design.get("optimization_metric", "loss")).lower() == "loss"
                 and fold.get("need_atom_confidence") is False
