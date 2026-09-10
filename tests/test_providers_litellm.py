@@ -137,12 +137,12 @@ def test_tool_call_ids_survive_except_where_a_backend_demands_short_ones():
 
 
 def test_qwen_gets_dashscope_thinking_switch_instead_of_an_effort(clean_env):
-    """DashScope has no reasoning_effort, and drop_params removed it silently."""
+    """DashScope has no reasoning_effort; its depth travels as a thinking budget."""
     provider = LiteLLMProvider(api_key="sk", default_model="dashscope/qwen-plus", wire="chat")
     kwargs = _kwargs(provider, responses=False, stream=False, tools=None, reasoning_effort="high")
 
     assert "reasoning_effort" not in kwargs
-    assert kwargs["extra_body"] == {"enable_thinking": True}
+    assert kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 16384}
 
 
 def test_redacted_thinking_stays_its_own_block():
@@ -548,3 +548,23 @@ async def test_a_temperature_retry_spends_the_same_first_token_budget(clean_env,
         async for _ in provider.chat_stream([{"role": "user", "content": "hi"}]):
             pass
     assert len(attempts) == 2
+
+
+def test_a_models_overlay_effort_beats_the_global_default(clean_env):
+    from opendde_harness.config.schema import ModelOverlay
+    from opendde_harness.providers.base import GenerationSettings
+    from opendde_harness.providers.wire import merge_key
+
+    provider = LiteLLMProvider(
+        api_key="sk",
+        default_model="custom/deep-thinker",
+        wire="chat",
+        provider_name="custom",
+        model_overlays={merge_key("custom", "deep-thinker"): ModelOverlay(reasoningEffort="high")},
+    )
+    provider.generation = GenerationSettings(reasoning_effort="low")
+
+    assert provider.effort_for("custom/deep-thinker") == "high"
+    assert provider.effort_for("custom/other") == "low"
+    provider.generation = GenerationSettings()
+    assert provider.effort_for("custom/other") is None

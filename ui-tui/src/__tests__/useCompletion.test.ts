@@ -274,17 +274,16 @@ function HookSpy({
   input,
   blocked,
   gw,
-  out
+  report
 }: {
   input: string
   blocked: boolean
   gw: GatewayClient
-  out: { completions: { display: string }[]; gwCallCount: number }
+  report: (out: { completions: { display: string }[]; gwCallCount: number }) => void
 }) {
   const { completions } = useCompletion(input, blocked, gw)
 
-  out.completions = completions
-  out.gwCallCount = (gw.request as ReturnType<typeof vi.fn>).mock.calls.length
+  report({ completions, gwCallCount: (gw.request as ReturnType<typeof vi.fn>).mock.calls.length })
 
   return React.createElement(React.Fragment, null)
 }
@@ -301,7 +300,7 @@ describe('useCompletion slash branch — no complete.slash RPC', () => {
     const gw = { request: vi.fn(() => Promise.resolve(null)), getLogTail: vi.fn(() => '') } as unknown as GatewayClient
     const out = { completions: [] as { display: string }[], gwCallCount: 0 }
 
-    render(React.createElement(HookSpy, { input: '/s', blocked: false, gw, out }))
+    render(React.createElement(HookSpy, { input: '/s', blocked: false, gw, report: next => Object.assign(out, next) }))
 
     // Slash branch is synchronous — no debounce timer needed.
     // Advance timers well past the 60ms debounce to confirm no delayed RPC fires either.
@@ -321,7 +320,9 @@ describe('useCompletion slash branch — no complete.slash RPC', () => {
     } as unknown as GatewayClient
     const out = { completions: [] as { display: string }[], gwCallCount: 0 }
 
-    render(React.createElement(HookSpy, { input: './src/', blocked: false, gw, out }))
+    render(
+      React.createElement(HookSpy, { input: './src/', blocked: false, gw, report: next => Object.assign(out, next) })
+    )
 
     await vi.runAllTimersAsync()
 

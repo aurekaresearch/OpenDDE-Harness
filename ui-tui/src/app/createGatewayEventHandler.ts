@@ -256,6 +256,13 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         turnController.recordEpisodeStart(Number(ev.payload?.index ?? 0))
 
         return
+      case 'turn.usage': {
+        const p = ev.payload ?? {}
+
+        turnController.recordUsage(Number(p.completion_tokens ?? 0), Number(p.reasoning_tokens ?? 0))
+
+        return
+      }
       case 'turn.retry': {
         const p = ev.payload ?? {}
 

@@ -140,7 +140,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     (info: null | SessionInfo = null) => {
       turnController.idle()
       turnController.clearReasoning()
-      turnController.turnTools = []
+      turnController.clearToolTrail()
       turnController.persistedToolLabels.clear()
 
       setHistoryItems(info ? [introMsg(info)] : [])

@@ -11,6 +11,7 @@ import type { ApprovalRespondResponse, ConfigSetResponse } from '../gatewayTypes
 import type { InputHandlerContext, InputHandlerResult } from './interfaces.js'
 
 import { TYPING_IDLE_MS } from '../config/timing.js'
+import { sectionMode, toggledSectionMode } from '../domain/details.js'
 import { buildApprovalRespond } from '../lib/approval.js'
 import { overlayPaneRows } from '../lib/overlayMetrics.js'
 import { isAction, isCopyShortcut, isMac } from '../lib/platform.js'
@@ -162,6 +163,7 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
   }
 
   const cycleHistory = (dir: 1 | -1) => {
+    const { historyDraftRef } = cRefs
     const h = cRefs.historyRef.current
     const cur = cState.historyIdx
 
@@ -171,7 +173,7 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       }
 
       if (cur === null) {
-        cRefs.historyDraftRef.current = cState.input
+        cActions.setHistoryDraft(cState.input)
       }
 
       const index = cur === null ? h.length - 1 : Math.max(0, cur - 1)
@@ -191,7 +193,7 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
 
     if (next >= h.length) {
       cActions.setHistoryIdx(null)
-      cActions.setInput(cRefs.historyDraftRef.current)
+      cActions.setInput(historyDraftRef.current)
     } else {
       cActions.setHistoryIdx(next)
       cActions.setInput(h[next] ?? '')
@@ -356,7 +358,9 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
         !cState.input || (cursor !== null && cState.input.lastIndexOf('\n', Math.max(0, cursor - 1)) < 0)
 
       if (noLineAbove) {
-        cycleQueue(1) || cycleHistory(-1)
+        if (!cycleQueue(1)) {
+          cycleHistory(-1)
+        }
 
         return
       }
@@ -368,7 +372,9 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       const noLineBelow = !cState.input || (cursor !== null && cState.input.indexOf('\n', cursor) < 0)
 
       if (noLineBelow || cState.historyIdx !== null) {
-        cycleQueue(-1) || cycleHistory(1)
+        if (!cycleQueue(-1)) {
+          cycleHistory(1)
+        }
 
         return
       }
@@ -398,6 +404,24 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       cActions.removeQueue(cState.queueEditIdx)
 
       return cActions.clearIn()
+    }
+
+    // pi's two visibility keys: Ctrl+T shows or hides thinking blocks,
+    // Ctrl+O expands or collapses tool output. Applied to the live stream
+    // and the transcript at once, and persisted like `/details <section>`.
+    if (isCtrl(key, ch, 't') || isCtrl(key, ch, 'o')) {
+      const name = ch.toLowerCase() === 't' ? 'thinking' : 'tools'
+      const current = sectionMode(name, live.detailsMode, live.sections, live.detailsModeCommandOverride)
+      const next = toggledSectionMode(name, current)
+
+      patchUiState(state => ({
+        ...state,
+        sections: { ...state.sections, [name]: next },
+        ...(name === 'thinking' && { showReasoning: next !== 'hidden' })
+      }))
+      gateway.rpc<ConfigSetResponse>('config.set', { key: `details_mode.${name}`, value: next }).catch(() => {})
+
+      return void actions.sys(`${name}: ${next}`)
     }
 
     if (key.ctrl && ch.toLowerCase() === 'c') {

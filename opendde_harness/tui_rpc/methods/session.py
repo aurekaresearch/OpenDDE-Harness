@@ -145,12 +145,18 @@ async def _default_session_info(
     ``agent_loop=None`` triggers graceful fallback (``tools={}``, ``skills={}``,
     zero usage, ``lazy=True``); version is always real (cached at module load).
     """
+    from opendde_harness.providers.catalog import overlay_for
+
     model_id = config.agents.defaults.model
     usage = await _baseline_usage(agent_loop)
+    overlay = overlay_for(config.providers.model_overlays(), model_id or "")
     info: dict[str, Any] = {
         "model": model_id,
         "model_id": model_id,
         "provider": config.agents.defaults.provider,
+        # The level this model thinks at: its overlay, else the global default,
+        # else the vendor's own (shown as nothing).
+        "reasoning_effort": getattr(overlay, "reasoning_effort", None) or config.agents.defaults.reasoning_effort,
         "context_window": usage["context_max"],
         "lazy": agent_loop is None,
         "skills": _enumerate_skills(agent_loop),

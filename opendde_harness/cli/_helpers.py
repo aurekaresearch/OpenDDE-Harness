@@ -123,7 +123,7 @@ def make_provider(config: Config):
             raise MissingCredentialsError(reason, provider=provider_name or "")
 
     if client == "codex":
-        provider = OpenAICodexProvider(default_model=model)
+        provider = OpenAICodexProvider(default_model=model, model_overlays=model_overlays)
     elif client == "minimax_oauth":
         from opendde_harness.providers.minimax_oauth_provider import MiniMaxOAuthProvider
 

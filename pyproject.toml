@@ -1,6 +1,6 @@
 [project]
 name = "opendde-harness"
-version = "0.0.2"
+version = "0.0.3"
 readme = "README.md"
 description = "OpenDDE Harness - antibody design harness: agent runtime, protein-design plugin, and compute service"
 requires-python = ">=3.12"

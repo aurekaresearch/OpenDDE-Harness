@@ -106,6 +106,12 @@ def describe(provider: str, model: str, *, overlay: "ModelOverlay | None" = None
     ref = stored_model_id(provider, model)
     entry = _snapshot().get(provider, {}).get("models", {}).get(_vendor_id(provider, model))
 
+    if not entry:
+        # A relay or a self-hosted server serves the vendor's model under the
+        # vendor's own name; the name is what the user reads, so the label
+        # comes from whichever provider row carries it.
+        entry = _any_provider_row(_vendor_id(provider, model))
+
     if entry:
         row = ModelRow(
             ref=ref,
@@ -184,18 +190,22 @@ def served_limit(model: str) -> dict | None:
 def native_limit(model: str) -> dict | None:
     """The vendor's own limit for this model, from the canonical table, or None.
 
-    Matched by exact key only, over the ids LiteLLM's table files this model
+    Matched by exact key first, over the ids LiteLLM's table files this model
     under -- the stored id, or the vendor's own spelling for a regional
-    instance of that vendor. Nothing else: no prefix stripping, no basename
-    match, no case folding, and not the id the request goes out under. The
-    wire id names the *driver*, and for a custom endpoint, a gateway or a
-    reseller that is another vendor's namespace: ``custom/gpt-5.6-terra``
-    goes out as ``openai/gpt-5.6-terra``, and reading OpenAI's native window
-    for it answered a relay that caps at 262k with 1,050,000 -- nothing was
-    trimmed and every request past the cap was refused. Under-estimating a
-    window wastes context; over-estimating one is a hard 400 on every request,
-    so such an endpoint is unknown here and declared through its overlay.
+    instance of that vendor. Then by the model's own name: a relay or a
+    self-hosted server serves ``deepseek-v4-flash`` under its own prefix,
+    and the prefix is only where it is reached, not what it is. The name is
+    matched exactly (no case folding) and only when one vendor carries it,
+    which every name in the bundled table satisfies. A relay that caps a
+    model below the vendor's window declares the cap in the model's
+    overlay, which is read before this. Never through the wire id: that
+    names the driver, and ``custom/x`` going out as ``openai/x`` says
+    nothing about ``x``.
     """
+    return _limit_of(_native_row_for(model))
+
+
+def _native_row_for(model: str) -> dict | None:
     from opendde_harness.providers.wire import metadata_candidates
 
     if not model:
@@ -206,7 +216,51 @@ def native_limit(model: str) -> dict | None:
     for key in metadata_candidates(model):
         entry = table.get(key)
         if isinstance(entry, dict):
-            return _limit_of(entry)
+            return entry
+    return _bare_row(model)
+
+
+def _bare_row(model: str) -> dict | None:
+    """The canonical row whose model name is this prefixed id's own, or None."""
+    from opendde_harness.providers.registry import split_model_id
+
+    provider, name = split_model_id(model)
+    if not provider or not name:
+        return None
+    return _bare_index().get(name)
+
+
+_bare_cache: tuple[int, dict[str, dict]] | None = None
+
+
+def _bare_index() -> dict[str, dict]:
+    """Model name -> canonical row, for the names exactly one vendor carries."""
+    global _bare_cache
+    table = _snapshot().get("_models")
+    if not isinstance(table, dict):
+        return {}
+    # Keyed on the table object, so a test that swaps the snapshot is indexed too.
+    if _bare_cache is not None and _bare_cache[0] == id(table):
+        return _bare_cache[1]
+    rows: dict[str, dict | None] = {}
+    for key, entry in table.items():
+        _, _, name = key.partition("/")
+        if not name or not isinstance(entry, dict):
+            continue
+        rows[name] = None if name in rows else entry
+    index = {name: entry for name, entry in rows.items() if entry is not None}
+    _bare_cache = (id(table), index)
+    return index
+
+
+def _any_provider_row(name: str) -> dict | None:
+    """The first provider row carrying this model name, for its label only."""
+    for section, block in _snapshot().items():
+        if section == "_models" or not isinstance(block, dict):
+            continue
+        entry = (block.get("models") or {}).get(name)
+        if isinstance(entry, dict):
+            return entry
     return None
 
 
@@ -219,7 +273,12 @@ def model_reasoning(model: str) -> bool | None:
     """
     from opendde_harness.providers.wire import metadata_candidates
 
-    rows = (_builtin_row(model), _provider_row(model), *(_native_row(key) for key in metadata_candidates(model or "")))
+    rows = (
+        _builtin_row(model),
+        _provider_row(model),
+        *(_native_row(key) for key in metadata_candidates(model or "")),
+        _bare_row(model or ""),
+    )
     for entry in rows:
         if isinstance(entry, dict) and isinstance(entry.get("reasoning"), bool):
             return entry["reasoning"]

@@ -126,6 +126,13 @@ export function useComposerState({ gw, onClipboardPaste, submitRef }: UseCompose
   const { historyRef, historyIdx, setHistoryIdx, historyDraftRef, pushHistory } = useInputHistory()
   const { completions, compIdx, setCompIdx, compReplace } = useCompletion(input, isBlocked, gw)
 
+  const setHistoryDraft = useCallback(
+    (text: string) => {
+      historyDraftRef.current = text
+    },
+    [historyDraftRef]
+  )
+
   const clearIn = useCallback(() => {
     setInput('')
     setInputBuf([])
@@ -287,6 +294,7 @@ export function useComposerState({ gw, onClipboardPaste, submitRef }: UseCompose
       removeQueue: removeQ,
       replaceQueue: replaceQ,
       setCompIdx,
+      setHistoryDraft,
       setHistoryIdx,
       setInput,
       setInputBuf,
@@ -304,6 +312,7 @@ export function useComposerState({ gw, onClipboardPaste, submitRef }: UseCompose
       removeQ,
       replaceQ,
       setCompIdx,
+      setHistoryDraft,
       setHistoryIdx,
       setQueueEdit,
       syncQueue

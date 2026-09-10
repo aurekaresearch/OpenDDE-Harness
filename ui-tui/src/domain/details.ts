@@ -79,3 +79,14 @@ export const sectionMode = (
 ): DetailsMode => sections?.[name] ?? (commandOverride ? global : (SECTION_DEFAULTS[name] ?? global))
 
 export const nextDetailsMode = (m: DetailsMode): DetailsMode => MODES[(MODES.indexOf(m) + 1) % MODES.length]!
+
+// The two hotkey toggles pi binds: thinking blocks flip between hidden and
+// shown (Ctrl+T), tool output between collapsed and expanded (Ctrl+O). A
+// hidden tools section is shown expanded so the key never leaves it invisible.
+export const toggledSectionMode = (name: SectionName, current: DetailsMode): DetailsMode => {
+  if (name === 'thinking') {
+    return current === 'hidden' ? 'expanded' : 'hidden'
+  }
+
+  return current === 'expanded' ? 'collapsed' : 'expanded'
+}

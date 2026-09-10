@@ -150,6 +150,19 @@ class EpisodeStartEvent(_Strict):
     payload: EpisodeStartPayload
 
 
+class TurnUsagePayload(_Strict):
+    """Cumulative output of this turn's model calls so far, vendor-counted."""
+
+    completion_tokens: int
+    reasoning_tokens: int
+    calls: int
+
+
+class TurnUsageEvent(_Strict):
+    type: Literal["turn.usage"]
+    payload: TurnUsagePayload
+
+
 class TurnRetryPayload(_Strict):
     attempt: int
     total: int
@@ -270,6 +283,7 @@ TurnEvent = Annotated[
         MessageStartEvent,
         EpisodeStartEvent,
         TurnRetryEvent,
+        TurnUsageEvent,
         TokenDeltaEvent,
         ThinkingDeltaEvent,
         ToolStartEvent,
@@ -646,6 +660,24 @@ class ModelRemoveModelResult(_Strict):
     provider: ModelOptionProvider
 
 
+class ModelOverlayParams(_Strict):
+    """One overlay field of the current model. ``field`` is reasoning_effort
+    (pi's off/minimal/low/medium/high/xhigh/max), context_window_tokens or
+    max_output_tokens (a count, ``128k`` allowed); ``default`` clears it."""
+
+    field: str
+    value: str
+    session_id: str | None = None
+
+
+class ModelOverlayResult(_Strict):
+    model: str
+    field: str
+    value: str | int | None = None
+    #: The window the loop runs with after the change, for a size field.
+    context_window_tokens: int | None = None
+
+
 class ProviderEndpointInfo(_Strict):
     """One of a provider section's endpoints, as the picker shows it."""
 
@@ -961,6 +993,7 @@ METHOD_MODELS: dict[str, tuple[type[BaseModel], type[BaseModel]]] = {
     "model.disconnect": (ModelDisconnectParams, ModelDisconnectResult),
     "model.add_model": (ModelAddModelParams, ModelAddModelResult),
     "model.remove_model": (ModelRemoveModelParams, ModelRemoveModelResult),
+    "model.overlay": (ModelOverlayParams, ModelOverlayResult),
     "model.endpoints": (ModelEndpointsParams, ModelEndpointsResult),
     "model.add_endpoint": (ModelAddEndpointParams, ModelAddEndpointResult),
     "model.remove_endpoint": (ModelRemoveEndpointParams, ModelRemoveEndpointResult),
@@ -1017,6 +1050,7 @@ __all__ = [
     "MessageStartEvent",
     "EpisodeStartEvent",
     "TurnRetryEvent",
+    "TurnUsageEvent",
     "TokenDeltaEvent",
     "ThinkingDeltaEvent",
     "ToolStartEvent",

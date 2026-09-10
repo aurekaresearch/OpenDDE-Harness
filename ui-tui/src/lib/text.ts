@@ -121,14 +121,16 @@ export const pasteTokenLabel = (text: string, lineCount: number) => {
     : `[[ ${preview} [${fmtK(lineCount)} lines] ]]`
 }
 
-const THINKING_STATUS_RE = new RegExp(`^(?:${VERBS.join('|')})\\.{0,3}$`, 'i')
-const THINKING_STATUS_CHUNK_RE = new RegExp(`[^A-Za-z\n]+\\s*(?:${VERBS.join('|')})\\.{0,3}\\s*`, 'giu')
+const THINKING_STATUS_RE = new RegExp(`^(?:${VERBS.join('|')})$`, 'i')
+// Mid-line, only a fragment carrying the ticker's own ellipsis is status: the
+// verbs are ordinary words, so "we are benchmarking the two" must survive.
+const THINKING_STATUS_CHUNK_RE = new RegExp(`[^A-Za-z\n]+\\s*(?:${VERBS.join('|')})(?:\\.{1,3}|\u2026)\\s*`, 'giu')
 
 export const cleanThinkingText = (reasoning: string) =>
   reasoning
     .split('\n')
     .map(line => line.replace(THINKING_STATUS_CHUNK_RE, '').trim())
-    .filter(line => line && !THINKING_STATUS_RE.test(line.replace(/\.\.\.$/, '').trim()))
+    .filter(line => line && !THINKING_STATUS_RE.test(line.replace(/(?:\.{1,3}|\u2026)$/, '').trim()))
     .join('\n')
     .replace(/([^\n])(?=\*\*[^*\n][^\n]*?\*\*)/g, '$1\n\n')
     .replace(/\n{3,}/g, '\n\n')

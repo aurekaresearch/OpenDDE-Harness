@@ -14,7 +14,11 @@ const upperBound = (offsets: ArrayLike<number>, target: number) => {
   while (lo < hi) {
     const mid = (lo + hi) >> 1
 
-    offsets[mid]! <= target ? (lo = mid + 1) : (hi = mid)
+    if (offsets[mid]! <= target) {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
   }
 
   return lo

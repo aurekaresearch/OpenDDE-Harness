@@ -5,7 +5,14 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { isSectionName, parseDetailsMode, resolveSections, SECTION_NAMES, sectionMode } from '../domain/details.js'
+import {
+  isSectionName,
+  parseDetailsMode,
+  resolveSections,
+  SECTION_NAMES,
+  sectionMode,
+  toggledSectionMode
+} from '../domain/details.js'
 
 describe('parseDetailsMode', () => {
   it('accepts the canonical modes case-insensitively', () => {
@@ -116,5 +123,19 @@ describe('sectionMode', () => {
     expect(sectionMode('subagents', 'hidden', { subagents: 'expanded' })).toBe('expanded')
     expect(sectionMode('thinking', 'hidden', { thinking: 'collapsed' })).toBe('collapsed')
     expect(sectionMode('activity', 'hidden', { activity: 'expanded' })).toBe('expanded')
+  })
+})
+
+describe('toggledSectionMode', () => {
+  it('flips thinking between hidden and shown, as Ctrl+T does in pi', () => {
+    expect(toggledSectionMode('thinking', 'expanded')).toBe('hidden')
+    expect(toggledSectionMode('thinking', 'collapsed')).toBe('hidden')
+    expect(toggledSectionMode('thinking', 'hidden')).toBe('expanded')
+  })
+
+  it('flips tool output between collapsed and expanded, never hidden', () => {
+    expect(toggledSectionMode('tools', 'expanded')).toBe('collapsed')
+    expect(toggledSectionMode('tools', 'collapsed')).toBe('expanded')
+    expect(toggledSectionMode('tools', 'hidden')).toBe('expanded')
   })
 })

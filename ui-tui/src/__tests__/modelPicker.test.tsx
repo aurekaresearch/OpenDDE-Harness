@@ -42,6 +42,13 @@ const RIGHT = '[C'
 
 const ESCAPE = String.fromCharCode(27)
 
+// The list stages spend every printable key on the filter, so their actions are
+// control chords: what the terminal sends for Ctrl+A / Ctrl+D / Ctrl+E / Ctrl+X.
+const CTRL_A = String.fromCharCode(1)
+const CTRL_D = String.fromCharCode(4)
+const CTRL_E = String.fromCharCode(5)
+const CTRL_X = String.fromCharCode(24)
+
 const anthropic: ModelOptionProvider = {
   auth_type: 'key',
   authenticated: true,
@@ -90,6 +97,22 @@ const deepseek: ModelOptionProvider = {
   needs_api_base: false,
   slug: 'deepseek',
   total_models: 1
+}
+
+const relay: ModelOptionProvider = {
+  auth_type: 'endpoint',
+  authenticated: true,
+  is_current: true,
+  key_env: null,
+  model_labels: {
+    'deepseek-v4-flash': { label: 'DeepSeek-V4-Flash' },
+    'gpt-5.6-terra': { label: 'GPT-5.6 Terra' }
+  },
+  models: ['claude-sonnet-4-6', 'gpt-5.6-terra', 'deepseek-v4-flash'],
+  name: 'Custom',
+  needs_api_base: true,
+  slug: 'custom',
+  total_models: 3
 }
 
 const oauthProvider: ModelOptionProvider = {
@@ -499,8 +522,8 @@ describe('ModelPicker', () => {
     const h = mount([{ ...deepseek, is_current: true }, oauthProvider])
     await delay(60)
 
-    await h.type('d')
-    await waitForFrame(h, 'serves your current model')
+    await h.type(CTRL_D)
+    await waitForFrame(h, 'pick another one after disconnecting')
 
     h.unmount()
   })
@@ -641,8 +664,8 @@ describe('ModelPicker', () => {
     await h.type(ENTER)
     await waitForFrame(h, 'step 2/2')
 
-    // 'a' opens the add-model sub-input.
-    await h.type('a')
+    // Ctrl+A opens the add-model sub-input.
+    await h.type(CTRL_A)
     expect(h.frame()).toContain('Type the full model id')
 
     await h.type('claude-opus-4')
@@ -672,7 +695,7 @@ describe('ModelPicker', () => {
     expect(h.frame()).toContain('claude-sonnet-4-6')
 
     // Delete the highlighted (first) model.
-    await h.type('d')
+    await h.type(CTRL_D)
 
     expect(h.gw.request).toHaveBeenCalledWith(
       'model.remove_model',
@@ -700,7 +723,7 @@ describe('ModelPicker', () => {
     await h.type(ENTER)
     await waitForFrame(h, 'step 2/2')
 
-    await h.type('e')
+    await h.type(CTRL_E)
     await waitForFrame(h, 'eu · ****set**** · https://eu.example.test/v1')
 
     expect(h.gw.request).toHaveBeenCalledWith('model.endpoints', expect.objectContaining({ slug: 'anthropic' }))
@@ -727,11 +750,11 @@ describe('ModelPicker', () => {
 
     await h.type(ENTER)
     await waitForFrame(h, 'step 2/2')
-    await h.type('e')
+    await h.type(CTRL_E)
     await waitForFrame(h, 'no endpoints')
 
     // label -> Enter -> key -> Enter -> base -> Enter submits.
-    await h.type('a')
+    await h.type(CTRL_A)
     await h.type('eu')
     await h.type(ENTER)
     await h.type('sk-eu')
@@ -763,11 +786,11 @@ describe('ModelPicker', () => {
 
     await h.type(ENTER)
     await waitForFrame(h, 'step 2/2')
-    await h.type('e')
+    await h.type(CTRL_E)
     await waitForFrame(h, 'no endpoints')
 
     // label -> Enter -> (blank key) -> Enter -> (blank base) -> Enter attempts submit.
-    await h.type('a')
+    await h.type(CTRL_A)
     await h.type('eu')
     await h.type(ENTER)
     await h.type(ENTER)
@@ -796,14 +819,14 @@ describe('ModelPicker', () => {
 
     await h.type(ENTER)
     await waitForFrame(h, 'step 2/2')
-    await h.type('e')
+    await h.type(CTRL_E)
     // Not `'no endpoints'`: the fake terminal's escape stripping mangles that
     // exact run at this render depth (see the endpoints-list test above) --
     // `'a adds one'` sits on the same line without falling in the mangled span.
-    await waitForFrame(h, 'a adds one')
+    await waitForFrame(h, 'Endpoints for Ollama')
 
     // label -> Enter -> (blank key) -> Enter -> base -> Enter submits.
-    await h.type('a')
+    await h.type(CTRL_A)
     await h.type('local')
     await h.type(ENTER)
     await h.type(ENTER)
@@ -839,11 +862,11 @@ describe('ModelPicker', () => {
 
     await h.type(ENTER)
     await waitForFrame(h, 'step 2/2')
-    await h.type('e')
+    await h.type(CTRL_E)
     await waitForFrame(h, 'eu · ****set****')
 
     await h.type(DOWN)
-    await h.type('d')
+    await h.type(CTRL_D)
 
     expect(h.gw.request).toHaveBeenCalledWith(
       'model.remove_endpoint',
@@ -859,7 +882,7 @@ describe('ModelPicker', () => {
 
     await h.type(ENTER)
     await waitForFrame(h, 'step 2/2')
-    await h.type('e')
+    await h.type(CTRL_E)
     await waitForFrame(h, 'no endpoints')
 
     // Asserted by what the next Enter reaches rather than by screen text:
@@ -872,6 +895,76 @@ describe('ModelPicker', () => {
     await delay(30)
 
     expect(h.onSelect).toHaveBeenCalledWith('claude-sonnet-4-6', 'anthropic')
+
+    h.unmount()
+  })
+
+  it('narrows the model list to what is typed, and Enter takes the match', async () => {
+    const h = mount([relay])
+    await delay(60)
+
+    await h.type(ENTER)
+    await waitForFrame(h, 'step 2/2')
+    // The relay lists its models with the one in use first; typing reaches the
+    // third without walking past the other two.
+    await h.type('flash')
+    await delay(30)
+    await h.type(ENTER)
+    await delay(30)
+
+    expect(h.onSelect).toHaveBeenCalledWith('deepseek-v4-flash', 'custom')
+
+    h.unmount()
+  })
+
+  it('matches a model on its vendor label as well as its id', async () => {
+    const h = mount([relay])
+    await delay(60)
+
+    await h.type(ENTER)
+    await waitForFrame(h, 'step 2/2')
+    await h.type('terra')
+    await delay(30)
+    await h.type(ENTER)
+    await delay(30)
+
+    expect(h.onSelect).toHaveBeenCalledWith('gpt-5.6-terra', 'custom')
+
+    h.unmount()
+  })
+
+  it('narrows the provider list too, and moves the cursor onto the match', async () => {
+    const h = mount([anthropic, { ...deepseek, is_current: false }])
+    await delay(60)
+
+    await h.type('deep')
+    await delay(30)
+    await h.type(ENTER)
+    await waitForFrame(h, 'step 2/2')
+    await h.type(ENTER)
+    await delay(30)
+
+    expect(h.onSelect).toHaveBeenCalledWith('deepseek-chat', 'deepseek')
+
+    h.unmount()
+  })
+
+  it('drops the filter on Esc before it leaves the screen', async () => {
+    const h = mount([anthropic, { ...deepseek, is_current: false }])
+    await delay(60)
+
+    await h.type('deep')
+    await delay(30)
+    // Ink holds a lone ESC back to see whether it opens a sequence.
+    await h.type(ESCAPE)
+    await delay(120)
+
+    expect(h.onCancel).not.toHaveBeenCalled()
+
+    await h.type(ESCAPE)
+    await delay(120)
+
+    expect(h.onCancel).toHaveBeenCalled()
 
     h.unmount()
   })

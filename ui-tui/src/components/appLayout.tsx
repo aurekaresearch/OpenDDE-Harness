@@ -33,6 +33,7 @@ import { MessageLine } from './messageLine.js'
 import { QueuedMessages } from './queuedMessages.js'
 import { LiveTodoPanel, StreamingAssistant } from './streamingAssistant.js'
 import { TextInput, type TextInputMouseApi } from './textInput.js'
+import { TurnActivity } from './turnActivity.js'
 
 const PromptPrefix = memo(function PromptPrefix({
   bold = false,
@@ -283,6 +284,7 @@ const ComposerPane = memo(function ComposerPane({
               </Box>
             ))}
 
+            <TurnActivity t={ui.theme} turnStartedAt={status.turnStartedAt} />
             <Text color={ui.theme.color.primary}>{'─'.repeat(Math.max(1, composer.cols - 2))}</Text>
             <Box
               onMouseDown={captureInputDrag}
@@ -310,13 +312,7 @@ const ComposerPane = memo(function ComposerPane({
                   onPaste={composer.handleTextPaste}
                   onSubmit={composer.submit}
                   placeholder={
-                    composer.empty
-                      ? PLACEHOLDER
-                      : ui.busy
-                        ? ui.escapeArmed
-                          ? 'In Progress, press Ctrl+C again to force quit'
-                          : 'Ctrl+C to interrupt…'
-                        : ''
+                    composer.empty ? PLACEHOLDER : ui.busy && ui.escapeArmed ? 'press Ctrl+C again to force quit' : ''
                   }
                   value={composer.input}
                 />
@@ -388,7 +384,6 @@ const StatusRulePane = memo(function StatusRulePane({
   return (
     <Box marginTop={at === 'top' ? 1 : 0}>
       <StatusRule
-        busy={ui.busy}
         cols={composer.cols}
         cwdLabel={status.cwdLabel}
         model={ui.info?.model ?? ''}
@@ -401,7 +396,6 @@ const StatusRulePane = memo(function StatusRulePane({
         status={ui.status}
         statusColor={status.statusColor}
         t={ui.theme}
-        turnStartedAt={status.turnStartedAt}
         usage={ui.usage}
       />
     </Box>

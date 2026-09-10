@@ -848,6 +848,9 @@ def model_set_cmd(
     ),
     context_window: int = typer.Option(0, "--context-window", help="Context window in tokens"),
     max_output_tokens: int = typer.Option(0, "--max-output-tokens", help="Output ceiling in tokens"),
+    reasoning_effort: str = typer.Option(
+        "", "--reasoning-effort", help="Thinking level for this model: off, minimal, low, medium, high, xhigh, max"
+    ),
     label: str = typer.Option("", "--label", help="Display name in the picker"),
     description: str = typer.Option("", "--description", help="One-line description in the picker"),
 ):
@@ -857,6 +860,7 @@ def model_set_cmd(
 
         ddeharness provider model set custom gpt-5.6-terra --wire responses --context-window 262144
         ddeharness provider model set hosted-vllm qwen3-32b --context-window 32768 --max-output-tokens 4096
+        ddeharness provider model set openai-codex gpt-5.6-luna --reasoning-effort high
     """
     from pydantic import ValidationError
 
@@ -869,13 +873,15 @@ def model_set_cmd(
         fields["context_window_tokens"] = context_window
     if max_output_tokens:
         fields["max_output_tokens"] = max_output_tokens
+    if reasoning_effort:
+        fields["reasoning_effort"] = reasoning_effort
     if label:
         fields["label"] = label
     if description:
         fields["description"] = description
     if not fields:
         raise typer.BadParameter(
-            "pass at least one of --wire, --context-window, --max-output-tokens, --label, --description"
+            "pass at least one of --wire, --context-window, --max-output-tokens, --reasoning-effort, --label, --description"
         )
 
     try:

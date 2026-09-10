@@ -138,7 +138,21 @@ class TurnRetry:
     conversation_id: str | None = None
 
 
-RunnerEvent = ToolEvent | Text | MediaOut | StreamDelta | Reasoning | Notice | EpisodeStart | TurnRetry
+@dataclass(frozen=True)
+class TurnUsage:
+    """What the model calls of this turn have produced so far, as the vendor
+    counted it: cumulative output tokens, and the reasoning share where the
+    vendor reports one. Sent after each call; a live display adds its own
+    estimate of the call in flight on top."""
+
+    completion_tokens: int
+    reasoning_tokens: int
+    calls: int
+    source: Source | None = None
+    conversation_id: str | None = None
+
+
+RunnerEvent = ToolEvent | Text | MediaOut | StreamDelta | Reasoning | Notice | EpisodeStart | TurnRetry | TurnUsage
 # Same union, named for its delivery role: what the hub routes and an Outlet renders.
 Deliverable = RunnerEvent
 TurnEvent = TurnStarted | TurnFailed | TurnEnded | RunnerEvent

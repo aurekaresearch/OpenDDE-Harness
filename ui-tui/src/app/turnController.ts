@@ -138,6 +138,10 @@ class TurnController {
   bufRef = ''
   episodes: Episode[] = []
   private lastEpisodeStartMs = 0
+  // Vendor-counted output of the finished calls, and the characters streamed
+  // by the call in flight since then; together they are `outputTokens`.
+  private countedOutputTokens = 0
+  private inflightChars = 0
   // Where the current model call's segments begin, so a discarding retry
   // removes only that call's trail and keeps earlier calls' work.
   private callSegmentStart = 0
@@ -656,6 +660,7 @@ class TurnController {
       return
     }
 
+    this.settleRetry()
     this.pruneTransient()
     this.endReasoningPhase()
 
@@ -667,6 +672,8 @@ class TurnController {
       ep.reasoningMs = Date.now() - this.lastEpisodeStartMs
       this.publishEpisodes()
     }
+
+    this.countInflight(text)
 
     // Always accumulate the raw text delta.  The pre-#16391 path replaced
     // the entire buffer with `rendered` (an *incremental* Rich ANSI
@@ -726,6 +733,15 @@ class TurnController {
     const why = reason ? `: ${reason}` : ''
 
     this.pushActivity(`retrying ${attempt}/${total}${why}`, 'warn')
+    // The activity line reads "retrying 2/4 (network)" in place of its verb,
+    // as Codex's spinner does, until the re-run delivers something.
+    patchTurnState({ retry: { attempt, reason, total } })
+  }
+
+  private settleRetry() {
+    if (getTurnState().retry) {
+      patchTurnState({ retry: null })
+    }
   }
 
   // Boundary marker: the backend has started a new model call. Opens a fresh
@@ -812,12 +828,14 @@ class TurnController {
       return
     }
 
+    this.settleRetry()
     if (!this.activeReasoningText.trim() && this.pendingSegmentTools.length) {
       this.flushStreamingSegment()
     }
 
     this.reasoningText += text
     this.activeReasoningText += text
+    this.countInflight(text)
 
     if (this.reasoningText.length > 80_000) {
       this.reasoningText = this.reasoningText.slice(-60_000)
@@ -942,6 +960,23 @@ class TurnController {
     return line
   }
 
+  /** Drop one tool's trail rows, for a caller that answered it out of band. */
+  dropToolTrail(label: string) {
+    this.turnTools = this.turnTools.filter(line => !sameToolTrailGroup(label, line))
+    patchTurnState({ turnTrail: this.turnTools })
+  }
+
+  /** Forget the trail, for a caller replacing the visible history. */
+  clearToolTrail() {
+    this.turnTools = []
+  }
+
+  /** A send is starting: the stream buffer still holds the last turn's text. */
+  beginSend() {
+    this.bufRef = ''
+    this.interrupted = false
+  }
+
   private publishToolState() {
     patchTurnState({
       streamPendingTools: this.pendingSegmentTools,
@@ -978,6 +1013,7 @@ class TurnController {
       return
     }
 
+    this.settleRetry()
     this.flushStreamingSegment()
     this.closeReasoningSegment()
     this.pruneTransient()
@@ -1018,7 +1054,7 @@ class TurnController {
     this.turnTools = []
     this.toolTokenAcc = 0
     this.persistedToolLabels.clear()
-    patchTurnState({ activity: [], outcome: '' })
+    patchTurnState({ activity: [], outcome: '', retry: null })
   }
 
   fullReset() {
@@ -1062,6 +1098,8 @@ class TurnController {
     this.endReasoningPhase()
     this.clearReasoning()
     this.callSegmentStart = 0
+    this.countedOutputTokens = 0
+    this.inflightChars = 0
     this.activeTools = []
     this.activeReasoningText = ''
     this.reasoningSegmentIndex = null
@@ -1070,7 +1108,37 @@ class TurnController {
     this.interrupted = false
     this.persistedToolLabels.clear()
     patchUiState({ busy: true })
-    patchTurnState({ activity: [], outcome: '', subagents: [], toolTokens: 0, tools: [], turnTrail: [] })
+    patchTurnState({
+      activity: [],
+      outcome: '',
+      outputTokens: 0,
+      retry: null,
+      subagents: [],
+      toolTokens: 0,
+      tools: [],
+      turnTrail: []
+    })
+  }
+
+  // The vendor's count for the calls finished so far replaces the estimate
+  // of what they streamed; the next call's estimate starts from zero.
+  recordUsage(completionTokens: number, reasoningTokens: number) {
+    if (this.interrupted) {
+      return
+    }
+
+    this.countedOutputTokens = Math.max(completionTokens, reasoningTokens)
+    this.inflightChars = 0
+    this.publishOutputTokens()
+  }
+
+  private countInflight(text: string) {
+    this.inflightChars += text.length
+    this.publishOutputTokens()
+  }
+
+  private publishOutputTokens() {
+    patchTurnState({ outputTokens: this.countedOutputTokens + estimateTokensRough(' '.repeat(this.inflightChars)) })
   }
 
   upsertSubagent(

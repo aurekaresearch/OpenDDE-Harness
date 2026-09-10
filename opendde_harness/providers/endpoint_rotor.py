@@ -371,6 +371,11 @@ class EndpointRotorProvider(LLMProvider):
         return self._inners[0].wire_model_id(model)
 
     @property
+    def model_overlays(self) -> dict[str, Any]:
+        """Delegates to the first endpoint's inner, same reasoning as ``model_overrides``."""
+        return getattr(self._inners[0], "model_overlays", None) or {}
+
+    @property
     def model_overrides(self) -> dict[str, dict[str, Any]]:
         """Delegates to the first endpoint's inner, same reasoning as ``can_serve``:
         every inner was built from this same section, so the overrides are one

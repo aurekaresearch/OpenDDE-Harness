@@ -3,7 +3,7 @@
 // Modifications Copyright (c) 2026 EverMind.
 // See NOTICES.md and LICENSES/MIT-hermes-agent.txt.
 
-import { Box, type ScrollBoxHandle, Text } from '@hermes/ink'
+import { Box, type ScrollBoxHandle, stringWidth, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import unicodeSpinners from 'unicode-animations'
@@ -14,22 +14,15 @@ import type { Msg, Usage } from '../types.js'
 
 import { $delegationState } from '../app/delegationStore.js'
 import { useTurnSelector } from '../app/turnStore.js'
-import { $uiState } from '../app/uiStore.js'
 import { FACES } from '../content/faces.js'
-import { VERBS } from '../content/verbs.js'
 import { fmtDuration } from '../domain/messages.js'
 import { stickyPromptFromViewport } from '../domain/viewport.js'
 import { buildSubagentTree, treeTotals, widthByDepth } from '../lib/subagentTree.js'
 import { fmtK } from '../lib/text.js'
 import { useScrollbarSnapshot, useViewportSnapshot } from '../lib/viewportStore.js'
 
-const FACE_TICK_MS = 2500
+export const FACE_TICK_MS = 2500
 const HEART_COLORS = ['#ff5fa2', '#ff4d6d']
-
-// Keep verb segment width stable so status-bar content to the right doesn't
-// jitter when the ticker rotates between short/long verbs.
-export const VERB_PAD_LEN = VERBS.reduce((max, v) => Math.max(max, v.length), 0) + 1 // + ellipsis
-export const padVerb = (verb: string) => `${verb}…`.padEnd(VERB_PAD_LEN, ' ')
 
 // Compact alternates for the `emoji` and `ascii` indicator styles.
 const emojiFrames = (brandMark: string) => [`${brandMark} `, '🌀', '🤔', '✨', '🍵', '🔮']
@@ -42,14 +35,28 @@ const SPINNER_TICK_MS = 100
 interface IndicatorRender {
   frame: string
   intervalMs: number
-  // When false, FaceTicker hides the rotating verb and just shows the
+  // When false, TurnActivity hides the rotating verb and just shows the
   // glyph + duration.  Lets `unicode` stay minimal while the other
   // styles keep the verb-rotation flavour users associate with the
   // running… status.
   showVerb: boolean
 }
 
-const renderIndicator = (style: IndicatorStyle, tick: number, brandMark: string): IndicatorRender => {
+// Columns the widest frame of a style takes. The indicator sits in a box of
+// this width so the text after it stays put while the frames change.
+export const indicatorWidth = (style: IndicatorStyle, brandMark: string): number => {
+  const frames =
+    style === 'kaomoji'
+      ? FACES
+      : style === 'emoji'
+        ? emojiFrames(brandMark)
+        : style === 'ascii'
+          ? ASCII_FRAMES
+          : unicodeSpinners.braille.frames
+  return frames.reduce((max, frame) => Math.max(max, stringWidth(frame)), 1)
+}
+
+export const renderIndicator = (style: IndicatorStyle, tick: number, brandMark: string): IndicatorRender => {
   if (style === 'kaomoji') {
     return { frame: FACES[tick % FACES.length] ?? '', intervalMs: FACE_TICK_MS, showVerb: true }
   }
@@ -80,55 +87,6 @@ const renderIndicator = (style: IndicatorStyle, tick: number, brandMark: string)
   const frame = spinner.frames[tick % spinner.frames.length] ?? '⠋'
 
   return { frame, intervalMs: Math.max(SPINNER_TICK_MS, spinner.interval), showVerb: false }
-}
-
-function FaceTicker({ color, startedAt }: { color: string; startedAt?: null | number }) {
-  const ui = useStore($uiState)
-  const style = ui.indicatorStyle
-  const [tick, setTick] = useState(() => Math.floor(Math.random() * 1000))
-  const [verbTick, setVerbTick] = useState(() => Math.floor(Math.random() * VERBS.length))
-  const [now, setNow] = useState(() => Date.now())
-
-  // Pre-compute cadence + verb-visibility for the active style so an
-  // `/indicator` switch re-arms the interval (and skips the verb timer
-  // for verb-less styles like `unicode`) without leaving the previous
-  // timer dangling.
-  const brandMark = ui.theme.brand.icon
-  const { intervalMs, showVerb } = renderIndicator(style, 0, brandMark)
-
-  useEffect(() => {
-    const glyph = setInterval(() => setTick(n => n + 1), intervalMs)
-    const clock = setInterval(() => setNow(Date.now()), 1000)
-    // Verb timer is gated on `showVerb` — `unicode` style hides the verb
-    // entirely, so cycling `verbTick` would be an avoidable re-render.
-    const verb = showVerb ? setInterval(() => setVerbTick(n => n + 1), FACE_TICK_MS) : null
-
-    return () => {
-      clearInterval(glyph)
-      clearInterval(clock)
-
-      if (verb !== null) {
-        clearInterval(verb)
-      }
-    }
-  }, [brandMark, intervalMs, showVerb])
-
-  const { frame } = renderIndicator(style, tick, brandMark)
-  const verb = VERBS[verbTick % VERBS.length] ?? ''
-  const verbSegment = showVerb ? ` ${padVerb(verb)}` : ''
-  // Leading space keeps a gap between the frame and the duration when the
-  // verb segment is hidden (e.g. `unicode` spinner style).  When the verb
-  // IS shown, its trailing padding already provides the gap, so the extra
-  // space is harmless.
-  const durationSegment = startedAt ? ` · ${fmtDuration(now - startedAt)}` : ''
-
-  return (
-    <Text color={color}>
-      {frame}
-      {verbSegment}
-      {durationSegment}
-    </Text>
-  )
 }
 
 function ctxBarColor(pct: number | undefined, t: Theme) {
@@ -272,7 +230,7 @@ export function GoodVibesHeart({ tick, t }: { tick: number; t: Theme }) {
     const id = setTimeout(() => setActive(false), 650)
 
     return () => clearTimeout(id)
-  }, [t.color.accent, tick])
+  }, [t.color.accent, t.color.error, t.color.warn, tick])
 
   if (!active) {
     return null
@@ -284,7 +242,6 @@ export function GoodVibesHeart({ tick, t }: { tick: number; t: Theme }) {
 export function StatusRule({
   cwdLabel,
   cols,
-  busy,
   status,
   statusColor,
   model,
@@ -293,7 +250,6 @@ export function StatusRule({
   usage,
   sessionStartedAt,
   showCost,
-  turnStartedAt,
   updateAvailable,
   updateCommand,
   t
@@ -321,11 +277,7 @@ export function StatusRule({
       <Box flexShrink={1} width={leftWidth}>
         <Text color={t.color.border} wrap="truncate-end">
           {'─ '}
-          {busy ? (
-            <FaceTicker color={statusColor} startedAt={turnStartedAt} />
-          ) : (
-            <Text color={statusColor}>{`● ${status} `}</Text>
-          )}
+          <Text color={statusColor}>{`● ${status} `}</Text>
           <Text color={t.color.muted}> {modelLabel(model, modelReasoningEffort, modelFast)}</Text>
           {ctxLabel ? <Text color={t.color.muted}> {ctxLabel}</Text> : null}
           {bar ? (
@@ -464,7 +416,6 @@ export function TranscriptScrollbar({ scrollRef, t }: TranscriptScrollbarProps) 
 }
 
 interface StatusRuleProps {
-  busy: boolean
   cols: number
   cwdLabel: string
   model: string
@@ -475,7 +426,6 @@ interface StatusRuleProps {
   status: string
   statusColor: string
   t: Theme
-  turnStartedAt?: null | number
   updateAvailable?: boolean
   updateCommand?: string
   usage: Usage

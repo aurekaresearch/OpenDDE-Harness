@@ -161,7 +161,6 @@ function AppChromePage() {
     <Box flexDirection="column">
       <Demo title="StatusRule — idle">
         <StatusRule
-          busy={false}
           cols={cols}
           cwdLabel="~/opendde"
           model="anthropic/claude-opus-4-8"
@@ -171,13 +170,11 @@ function AppChromePage() {
           status="ready"
           statusColor={t.color.statusGood}
           t={t}
-          turnStartedAt={null}
           usage={usage}
         />
       </Demo>
-      <Demo title="StatusRule — busy (animated)">
+      <Demo title="StatusRule — busy">
         <StatusRule
-          busy
           cols={cols}
           cwdLabel="~/opendde"
           model="anthropic/claude-opus-4-8"
@@ -186,13 +183,11 @@ function AppChromePage() {
           status="working"
           statusColor={t.color.statusWarn}
           t={t}
-          turnStartedAt={now - 5_000}
           usage={usage}
         />
       </Demo>
       <Demo title="StatusRule — update available (right slot takes over)">
         <StatusRule
-          busy={false}
           cols={cols}
           cwdLabel="~/opendde"
           model="anthropic/claude-opus-4-8"
@@ -201,7 +196,6 @@ function AppChromePage() {
           status="ready"
           statusColor={t.color.statusGood}
           t={t}
-          turnStartedAt={null}
           updateAvailable
           updateCommand="ddeharness upgrade"
           usage={usage}

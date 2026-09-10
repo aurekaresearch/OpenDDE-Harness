@@ -74,32 +74,32 @@ def test_vendor_row_answers_when_the_provider_has_none(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "model",
+    ("model", "tokens"),
     [
-        "custom/gpt-5.6-terra",  # goes out as openai/..., but is whatever the relay serves
-        "custom/gpt-4o",
-        "custom/qwen3-32b",
-        "siliconflow/gpt-5.6-terra",
-        "minimax-global/claude-opus-5",
-        "ollama/qwen3-32b",
+        ("custom/gpt-5.6-terra", 1_050_000),  # the relay's prefix is where it is reached; the name is what it is
+        ("custom/deepseek-v4-flash", 1_000_000),
+        ("hosted_vllm/qwen3-32b", 131_072),
+        ("ollama/qwen3-32b", 131_072),
+        ("minimax-global/claude-opus-5", 1_000_000),
     ],
 )
-def test_the_wire_prefix_never_reads_another_vendors_window(model):
-    # The user this ladder was rebuilt for runs custom/gpt-5.6-terra through a
-    # relay capped at 262k; OpenAI's 1,050,000 would have refused every
-    # request past that. Unknown is safe: nothing is trimmed, and the overlay
-    # is where the relay's own cap belongs.
+def test_a_prefixed_id_is_recognised_by_its_model_name(model, tokens):
     resolved = resolve_context_window(model)
 
-    assert (resolved.tokens, resolved.source) == (None, SOURCE_UNKNOWN)
+    assert (resolved.tokens, resolved.source) == (tokens, SOURCE_NATIVE)
+
+
+def test_a_relay_cap_is_declared_in_the_overlay_and_wins():
+    resolved = resolve_context_window("custom/gpt-5.6-terra", overlay=ModelOverlay(contextWindowTokens=262_144))
+
+    assert (resolved.tokens, resolved.source) == (262_144, SOURCE_OVERLAY)
 
 
 @pytest.mark.parametrize(
     "model",
     [
-        "hosted_vllm/qwen3-32b",  # the deployment the exclusion protected: no cross-vendor read
-        "hostedVllm/qwen3-32b",
-        "aihubmix/some-model-it-does-not-list",  # the third openai-wire spec
+        "aihubmix/some-model-it-does-not-list",
+        "custom/Qwen3-32B",  # a name is matched exactly: no case folding
         "qwen3-32b",  # bare: names no provider
         "",
     ],
@@ -160,7 +160,7 @@ def test_output_ceiling_ladder():
         without_provider_row.setattr(catalog, "served_limit", lambda model: None)
         native = resolve_max_output_tokens("deepseek/deepseek-v4-flash")
     declared = resolve_max_output_tokens("deepseek/deepseek-v4-flash", overlay=ModelOverlay(maxOutputTokens=4_096))
-    unknown = resolve_max_output_tokens("hosted_vllm/qwen3-32b")
+    unknown = resolve_max_output_tokens("aihubmix/some-model-it-does-not-list")
     empty = resolve_max_output_tokens(None)
 
     assert (served.tokens, served.source) == (384_000, SOURCE_SERVED)

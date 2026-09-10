@@ -18,6 +18,7 @@ import type {
 import type { LaunchResult } from '../lib/externalCli.js'
 import type { Theme } from '../theme.js'
 
+import { matchingIndices } from '../domain/filterQuery.js'
 import { bareModelId, providerDisplayNames } from '../domain/providers.js'
 import { asRpcResult, rpcErrorMessage } from '../lib/rpc.js'
 import { OverlayHint, useOverlayKeys, windowItems } from './overlayControls.js'
@@ -39,6 +40,13 @@ type Stage =
 
 /** Where the sign-in handoff is: waiting to start, running, or back from it. */
 type LoginPhase = 'idle' | 'running' | 'done'
+
+/** A key that extends the filter query rather than acting on the list.
+
+    A whole pasted chunk arrives as one `ch`, so this asks the same of every
+    character in it rather than of a single key. */
+const isPrintable = (ch: string, key: { ctrl: boolean; meta: boolean }) =>
+  ch.length > 0 && !key.ctrl && !key.meta && ![...ch].some(c => c < ' ' || c === '\u007F')
 
 /** The row that opens the second level; not a provider. */
 const ADD_ROW = '__add_provider__'
@@ -82,6 +90,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
   const [providerIdx, setProviderIdx] = useState(0)
   const [modelIdx, setModelIdx] = useState(0)
   const [stage, setStage] = useState<Stage>('provider')
+  const [query, setQuery] = useState('')
   const [fromAddList, setFromAddList] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [baseInput, setBaseInput] = useState('')
@@ -167,6 +176,11 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
     })
   }, [loadOptions])
 
+  // The query belongs to the screen showing the list, not to the picker.
+  useEffect(() => {
+    setQuery('')
+  }, [stage])
+
   // Everything the picker needs is already in one response; the split is a view.
   // A provider the user has not set up is not a model they can switch to, and
   // listing all twenty-one of them buried the two or three that were.
@@ -179,7 +193,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
   const rowsForStage = fromAddList ? unconfigured : configured
   const onAddRow = stage === 'provider' && providerIdx === configured.length
   const provider = onAddRow ? undefined : rowsForStage[providerIdx]
-  const models = provider?.models ?? []
+  const models = useMemo(() => provider?.models ?? [], [provider])
   // The sign-in screen and the way back out both ask this, and both have to ask
   // it of the target rather than of the row under the cursor: a login that landed
   // moves its provider off the unconfigured list the cursor points into.
@@ -187,6 +201,74 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
     ? providers.find(p => p.slug === loginTarget.slug)?.authenticated === false
     : provider?.authenticated === false
   const names = useMemo(() => providerDisplayNames(rowsForStage), [rowsForStage])
+
+  // Typing filters the list on screen. The cursor keeps holding a real index
+  // into the unfiltered list, so selecting, deleting and describing a row are
+  // untouched by a filter; only the step from row to row walks what is shown.
+  // A stage reads the query only while it is the one showing, or the model
+  // stage's query would silently re-point the provider cursor behind it.
+  const providerRows = useMemo(() => {
+    const rows = rowsForStage.map((p, i) => {
+      const authMark = p.authenticated === false ? '○' : p.is_current ? '*' : '●'
+      const modelCount = p.total_models ?? p.models?.length ?? 0
+      const suffix = p.authenticated === false ? unconfiguredHint(p.auth_type) : `${modelCount} models`
+
+      return `${authMark} ${names[i]} · ${suffix}`
+    })
+
+    if (stage === 'provider' && unconfigured.length > 0) {
+      rows.push(`+ add a provider · ${unconfigured.length} not set up`)
+    }
+
+    return rows
+  }, [names, rowsForStage, stage, unconfigured.length])
+
+  const providerIdxs = useMemo(
+    () =>
+      matchingIndices(
+        providerRows.map((row, i) => `${row} ${rowsForStage[i]?.slug ?? ''}`),
+        stage === 'provider' || stage === 'addProvider' ? query : ''
+      ),
+    [providerRows, query, rowsForStage, stage]
+  )
+
+  const modelIdxs = useMemo(
+    () =>
+      matchingIndices(
+        models.map(m => `${provider?.model_labels?.[m]?.label ?? ''} ${bareModelId(provider, m)} ${m}`),
+        stage === 'model' ? query : ''
+      ),
+    [models, provider, query, stage]
+  )
+
+  const endpointIdxs = useMemo(
+    () =>
+      matchingIndices(
+        endpoints.map(ep => `${ep.label} ${ep.api_base ?? ''}`),
+        stage === 'endpoints' ? query : ''
+      ),
+    [endpoints, query, stage]
+  )
+
+  // A query that hides the row under the cursor moves the cursor onto the
+  // first row it kept, so Enter can never choose something off screen.
+  useEffect(() => {
+    if (providerIdxs.length > 0 && !providerIdxs.includes(providerIdx)) {
+      setProviderIdx(providerIdxs[0]!)
+    }
+  }, [providerIdx, providerIdxs])
+
+  useEffect(() => {
+    if (modelIdxs.length > 0 && !modelIdxs.includes(modelIdx)) {
+      setModelIdx(modelIdxs[0]!)
+    }
+  }, [modelIdx, modelIdxs])
+
+  useEffect(() => {
+    if (endpointIdxs.length > 0 && !endpointIdxs.includes(endpointIdx)) {
+      setEndpointIdx(endpointIdxs[0]!)
+    }
+  }, [endpointIdx, endpointIdxs])
 
   // Refetch only, same as ``loadOptions``: the endpoint list is not carried by
   // ``model.options``, so every screen that shows it asks for it.
@@ -333,12 +415,23 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
   }
 
   useOverlayKeys({
-    // Both stages type into a field, and the sign-in has handed the terminal to
-    // a child process -- leaving the screen from under either one loses input
-    // the user has already given.
-    closeOnQ: stage !== 'key' && stage !== 'addModel' && stage !== 'addEndpoint',
+    // Only the two confirmation screens are free of typing: every list stage
+    // filters on what is typed, the input stages fill a field, and the sign-in
+    // has handed the terminal to a child process -- leaving the screen from
+    // under any of them loses input the user has already given.
+    closeOnQ: stage === 'disconnect' || stage === 'oauthLogin',
     disabled: loginPhase === 'running',
-    onBack: back,
+    onBack: () => {
+      // Esc drops the filter first: the list it hides is the thing the user is
+      // looking at, so leaving the screen outright is a level too far.
+      if (query) {
+        setQuery('')
+
+        return
+      }
+
+      back()
+    },
     onClose: onCancel
   })
 
@@ -645,19 +738,25 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
         return
       }
 
-      if (key.upArrow && endpointIdx > 0) {
-        setEndpointIdx(v => v - 1)
+      const pos = endpointIdxs.indexOf(endpointIdx)
+
+      if (key.upArrow) {
+        if (pos > 0) {
+          setEndpointIdx(endpointIdxs[pos - 1]!)
+        }
 
         return
       }
 
-      if (key.downArrow && endpointIdx < endpoints.length - 1) {
-        setEndpointIdx(v => v + 1)
+      if (key.downArrow) {
+        if (pos >= 0 && pos < endpointIdxs.length - 1) {
+          setEndpointIdx(endpointIdxs[pos + 1]!)
+        }
 
         return
       }
 
-      if (ch.toLowerCase() === 'a') {
+      if (key.ctrl && ch.toLowerCase() === 'a') {
         clearEndpointInputs()
         setKeyError('')
         setStage('addEndpoint')
@@ -665,7 +764,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
         return
       }
 
-      if (ch.toLowerCase() === 'd' || ch.toLowerCase() === 'x') {
+      if (key.ctrl && (ch.toLowerCase() === 'd' || ch.toLowerCase() === 'x')) {
         const target = endpoints[endpointIdx]
 
         if (!provider || !target) {
@@ -695,6 +794,16 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
           })
 
         return
+      }
+
+      if (key.backspace || key.delete) {
+        setQuery(q => q.slice(0, -1))
+
+        return
+      }
+
+      if (isPrintable(ch, key)) {
+        setQuery(q => q + ch)
       }
 
       return
@@ -766,19 +875,23 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
     }
 
     const onProviderList = stage === 'provider' || stage === 'addProvider'
-    const addRowCount = stage === 'provider' && unconfigured.length > 0 ? 1 : 0
-    const count = onProviderList ? rowsForStage.length + addRowCount : models.length
+    const idxs = onProviderList ? providerIdxs : modelIdxs
     const sel = onProviderList ? providerIdx : modelIdx
     const setSel = onProviderList ? setProviderIdx : setModelIdx
+    const pos = idxs.indexOf(sel)
 
-    if (key.upArrow && sel > 0) {
-      setSel(v => v - 1)
+    if (key.upArrow) {
+      if (pos > 0) {
+        setSel(idxs[pos - 1]!)
+      }
 
       return
     }
 
-    if (key.downArrow && sel < count - 1) {
-      setSel(v => v + 1)
+    if (key.downArrow) {
+      if (pos >= 0 && pos < idxs.length - 1) {
+        setSel(idxs[pos + 1]!)
+      }
 
       return
     }
@@ -843,7 +956,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
     }
 
     // Model stage: add a model name to the provider's list.
-    if (ch.toLowerCase() === 'a' && stage === 'model' && provider && !keySaving) {
+    if (key.ctrl && ch.toLowerCase() === 'a' && stage === 'model' && provider && !keySaving) {
       setStage('addModel')
       setModelNameInput('')
       setKeyError('')
@@ -852,7 +965,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
     }
 
     // Model stage: manage the several accounts/regions behind this provider.
-    if (ch.toLowerCase() === 'e' && stage === 'model' && provider && !keySaving) {
+    if (key.ctrl && ch.toLowerCase() === 'e' && stage === 'model' && provider && !keySaving) {
       setEndpoints([])
       setEndpointIdx(0)
       setKeyError('')
@@ -863,7 +976,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
     }
 
     // Model stage: delete the highlighted model name from the provider's list.
-    if ((ch.toLowerCase() === 'd' || ch.toLowerCase() === 'x') && stage === 'model' && !keySaving) {
+    if (key.ctrl && (ch.toLowerCase() === 'd' || ch.toLowerCase() === 'x') && stage === 'model' && !keySaving) {
       const model = models[modelIdx]
 
       if (!provider || !model) {
@@ -896,10 +1009,20 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
     }
 
     // Disconnect: only in provider stage, only for authenticated providers
-    if (ch.toLowerCase() === 'd' && stage === 'provider' && provider && provider.authenticated !== false) {
+    if (key.ctrl && ch.toLowerCase() === 'd' && stage === 'provider' && provider && provider.authenticated !== false) {
       setStage('disconnect')
 
       return
+    }
+
+    if (key.backspace || key.delete) {
+      setQuery(q => q.slice(0, -1))
+
+      return
+    }
+
+    if (isPrintable(ch, key)) {
+      setQuery(q => q + ch)
     }
   })
 
@@ -1069,7 +1192,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
     const rows = endpoints.map(
       ep => `${ep.label} · ${ep.api_key || '(empty)'}${ep.api_base ? ` · ${ep.api_base}` : ''}`
     )
-    const { items, offset } = windowItems(rows, endpointIdx, VISIBLE)
+    const { items, offset } = windowItems(endpointIdxs, Math.max(0, endpointIdxs.indexOf(endpointIdx)), VISIBLE)
 
     return (
       <Box flexDirection="column" width={width}>
@@ -1085,18 +1208,22 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
           {keyError ? `error: ${keyError}` : ' '}
         </Text>
 
+        <Text color={query ? t.color.accent : t.color.muted} wrap="truncate-end">
+          {query ? `filter: ${query}▎` : 'type to filter'}
+        </Text>
+
         <Text color={t.color.muted} wrap="truncate-end">
           {offset > 0 ? ` ↑ ${offset} more` : ' '}
         </Text>
 
         {Array.from({ length: VISIBLE }, (_, i) => {
-          const row = items[i]
-          const idx = offset + i
+          const idx = items[i] ?? -1
+          const row = rows[idx]
 
           if (!row) {
-            return !rows.length && i === 0 ? (
+            return !endpointIdxs.length && i === 0 ? (
               <Text color={t.color.muted} key="empty" wrap="truncate-end">
-                no endpoints configured · a adds one
+                {rows.length ? `no endpoint matches "${query}"` : 'no endpoints configured · ^A adds one'}
               </Text>
             ) : (
               <Text color={t.color.muted} key={`pad-${i}`} wrap="truncate-end">
@@ -1120,7 +1247,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
         })}
 
         <Text color={t.color.muted} wrap="truncate-end">
-          {offset + VISIBLE < rows.length ? ` ↓ ${rows.length - offset - VISIBLE} more` : ' '}
+          {offset + VISIBLE < endpointIdxs.length ? ` ↓ ${endpointIdxs.length - offset - VISIBLE} more` : ' '}
         </Text>
 
         {keySaving ? (
@@ -1128,7 +1255,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
             saving…
           </Text>
         ) : (
-          <OverlayHint t={t}>↑/↓ select · a add · d/x delete · Esc back · q close</OverlayHint>
+          <OverlayHint t={t}>↑/↓ select · type to filter · ^A add · ^X delete · Esc back</OverlayHint>
         )}
       </Box>
     )
@@ -1310,20 +1437,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
   // ── Provider selection stages ────────────────────────────────────────
   if (stage === 'provider' || stage === 'addProvider') {
     const adding = stage === 'addProvider'
-    const rows = rowsForStage.map((p, i) => {
-      const authMark = p.authenticated === false ? '○' : p.is_current ? '*' : '●'
-      const modelCount = p.total_models ?? p.models?.length ?? 0
-
-      const suffix = p.authenticated === false ? unconfiguredHint(p.auth_type) : `${modelCount} models`
-
-      return `${authMark} ${names[i]} · ${suffix}`
-    })
-
-    if (!adding && unconfigured.length > 0) {
-      rows.push(`+ add a provider · ${unconfigured.length} not set up`)
-    }
-
-    const { items, offset } = windowItems(rows, providerIdx, VISIBLE)
+    const { items, offset } = windowItems(providerIdxs, Math.max(0, providerIdxs.indexOf(providerIdx)), VISIBLE)
 
     return (
       <Box flexDirection="column" width={width}>
@@ -1341,13 +1455,18 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
         <Text color={t.color.label} wrap="truncate-end">
           {provider?.warning ? `warning: ${provider.warning}` : ' '}
         </Text>
+
+        <Text color={query ? t.color.accent : t.color.muted} wrap="truncate-end">
+          {query ? `filter: ${query}▎` : 'type to filter'}
+        </Text>
+
         <Text color={t.color.muted} wrap="truncate-end">
           {offset > 0 ? ` ↑ ${offset} more` : ' '}
         </Text>
 
         {Array.from({ length: VISIBLE }, (_, i) => {
-          const row = items[i]
-          const idx = offset + i
+          const idx = items[i] ?? -1
+          const row = providerRows[idx]
           const p = rowsForStage[idx]
           const dimmed = p ? p.authenticated === false : false
 
@@ -1362,6 +1481,10 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
               {providerIdx === idx ? '▸ ' : '  '}
               {idx + 1}. {row}
             </Text>
+          ) : !providerIdxs.length && i === 0 ? (
+            <Text color={t.color.muted} key="empty" wrap="truncate-end">
+              no provider matches "{query}"
+            </Text>
           ) : (
             <Text color={t.color.muted} key={`pad-${i}`} wrap="truncate-end">
               {' '}
@@ -1370,16 +1493,16 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
         })}
 
         <Text color={t.color.muted} wrap="truncate-end">
-          {offset + VISIBLE < rows.length ? ` ↓ ${rows.length - offset - VISIBLE} more` : ' '}
+          {offset + VISIBLE < providerIdxs.length ? ` ↓ ${providerIdxs.length - offset - VISIBLE} more` : ' '}
         </Text>
 
-        <OverlayHint t={t}>↑/↓ select · Enter choose · d disconnect · Esc/q cancel</OverlayHint>
+        <OverlayHint t={t}>↑/↓ select · Enter choose · type to filter · ^D disconnect · Esc back</OverlayHint>
       </Box>
     )
   }
 
   // ── Model selection stage ────────────────────────────────────────────
-  const { items, offset } = windowItems(models, modelIdx, VISIBLE)
+  const { items, offset } = windowItems(modelIdxs, Math.max(0, modelIdxs.indexOf(modelIdx)), VISIBLE)
 
   return (
     <Box flexDirection="column" width={width}>
@@ -1393,18 +1516,23 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
       <Text color={t.color.label} wrap="truncate-end">
         {provider?.warning ? `warning: ${provider.warning}` : ' '}
       </Text>
+
+      <Text color={query ? t.color.accent : t.color.muted} wrap="truncate-end">
+        {query ? `filter: ${query}▎` : 'type to filter'}
+      </Text>
+
       <Text color={t.color.muted} wrap="truncate-end">
         {offset > 0 ? ` ↑ ${offset} more` : ' '}
       </Text>
 
       {Array.from({ length: VISIBLE }, (_, i) => {
-        const row = items[i]
-        const idx = offset + i
+        const idx = items[i] ?? -1
+        const row = models[idx]
 
         if (!row) {
-          return !models.length && i === 0 ? (
+          return !modelIdxs.length && i === 0 ? (
             <Text color={t.color.muted} key="empty" wrap="truncate-end">
-              no models listed for this provider
+              {models.length ? `no model matches "${query}"` : 'no models listed for this provider'}
             </Text>
           ) : (
             <Text color={t.color.muted} key={`pad-${i}`} wrap="truncate-end">
@@ -1436,7 +1564,7 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
       })}
 
       <Text color={t.color.muted} wrap="truncate-end">
-        {offset + VISIBLE < models.length ? ` ↓ ${models.length - offset - VISIBLE} more` : ' '}
+        {offset + VISIBLE < modelIdxs.length ? ` ↓ ${modelIdxs.length - offset - VISIBLE} more` : ' '}
       </Text>
 
       {/* One line about the highlighted model. Blank rather than absent, so the
@@ -1451,8 +1579,8 @@ export function ModelPicker({ gw, launcher, onCancel, onSelect, sessionId, suspe
       </Text>
       <OverlayHint t={t}>
         {models.length
-          ? '↑/↓ select · Enter switch · a add · d/x delete · e endpoints · Esc back'
-          : 'a add model · e endpoints · Enter/Esc back · q close'}
+          ? '↑/↓ · Enter switch · type to filter · ^A add · ^X delete · ^E endpoints · Esc back'
+          : '^A add model · ^E endpoints · Enter/Esc back'}
       </OverlayHint>
     </Box>
   )

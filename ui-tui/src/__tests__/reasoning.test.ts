@@ -63,6 +63,17 @@ describe('cleanThinkingText', () => {
       )
     ).toBe('**Resolving comments on GitHub**\nActual step\nnext step')
   })
+
+  it('takes the single-character ellipsis the ticker actually writes', () => {
+    expect(cleanThinkingText('(\u00AC_\u00AC) diffusing backbones\u2026 real thought')).toBe('real thought')
+  })
+
+  it('keeps a verb that is just a word in the sentence', () => {
+    const prose = 'We are benchmarking the two designs, then docking the winner.'
+
+    expect(cleanThinkingText(prose)).toBe(prose)
+    expect(cleanThinkingText('folding is the slow step here')).toBe('folding is the slow step here')
+  })
 })
 
 describe('hasMeaningfulReasoning', () => {

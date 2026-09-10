@@ -28,6 +28,13 @@ class Base(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
 
+#: pi's thinking-level vocabulary (``ModelThinkingLevel``). Each family is sent
+#: the nearest level it takes: OpenAI's effort ladder (``max`` on gpt-5.6 and
+#: gpt-6-astra, ``xhigh`` from gpt-5.2), DeepSeek's three steps, a token
+#: budget for DashScope, on/off for Z.ai. ``off`` switches thinking off.
+ReasoningEffort = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -66,7 +73,10 @@ class AgentDefaults(Base):
     post_tool_empty_max_nudges: int = 1
     thinking_prefill_max_retries: int = 2
     empty_content_max_retries: int = 3
-    reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    # How hard every model thinks unless its own overlay says otherwise.
+    # pi's DEFAULT_THINKING_LEVEL; None leaves each vendor's default in place.
+    # A model the catalogue marks as non-reasoning is sent nothing.
+    reasoning_effort: ReasoningEffort | None = "medium"
     # Per-model request-parameter overrides, keyed by a substring of the model
     # name: {"kimi-k2.5": {"temperature": 1.0}}. Some models reject the usual
     # defaults, and hard-coding those quirks in the registry left users unable to
@@ -117,6 +127,10 @@ class ModelOverlay(Base):
     context_window_tokens: int | None = Field(default=None, gt=0)
     max_output_tokens: int | None = Field(default=None, gt=0)
     wire: Literal["responses", "chat"] | None = None
+    # This model's thinking level, over ``agents.defaults.reasoningEffort``:
+    # a hybrid model one wants fast and a reasoning model one wants deep can
+    # share a session without the global default being wrong for one.
+    reasoning_effort: ReasoningEffort | None = None
 
 
 class ProviderEndpoint(Base):

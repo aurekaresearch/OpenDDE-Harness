@@ -7,7 +7,7 @@ import type { DOMElement, InputEvent, Key } from '@hermes/ink'
 
 import * as Ink from '@hermes/ink'
 import { useStore } from '@nanostores/react'
-import { type MutableRefObject, useEffect, useMemo, useRef, useState } from 'react'
+import { type MutableRefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 
 import { setInputSelection } from '../app/inputSelectionStore.js'
 import { $uiTheme } from '../app/uiStore.js'
@@ -717,13 +717,13 @@ export function TextInput({
     return now - last.at < MULTI_CLICK_MS && offset === last.offset
   }
 
-  if (mouseApiRef) {
-    mouseApiRef.current = {
-      dragAt: (row, col) => dragMouseSelection(offsetFromPosition(display, row, col, columns)),
-      end: endMouseSelection,
-      startAtBeginning: () => startMouseSelection(0)
-    }
-  }
+  // The parent hands this ref down to be filled in, and the handlers close
+  // over this render's text and width, so it is refreshed on every render.
+  useImperativeHandle(mouseApiRef, () => ({
+    dragAt: (row, col) => dragMouseSelection(offsetFromPosition(display, row, col, columns)),
+    end: endMouseSelection,
+    startAtBeginning: () => startMouseSelection(0)
+  }))
 
   useInput(
     (inp: string, k: Key, event: InputEvent) => {

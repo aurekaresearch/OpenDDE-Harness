@@ -142,6 +142,7 @@ describe('turnController retry', () => {
     expect(getTurnState().tools).toEqual([])
     expect(turnController.episodes[0]!.reasoning).toBe('second try')
     expect(getTurnState().activity.some(a => a.text.includes('retrying 2/4: network'))).toBe(true)
+    expect(getTurnState().retry).toBeNull()
 
     const { finalMessages } = turnController.recordMessageComplete({ text: 'whole answer' })
     const epMsg = finalMessages.find(m => m.kind === 'episodes')!
@@ -194,5 +195,42 @@ describe('turnController retry', () => {
     turnController.recordRetry({ attempt: 2, discard: false, reason: 'network', total: 4 })
 
     expect(turnController.bufRef).toBe('kept')
+  })
+
+  it('holds the retry for the activity line until the re-run delivers', () => {
+    turnController.reset()
+    turnController.recordRetry({ attempt: 2, discard: false, reason: 'network', total: 4 })
+
+    expect(getTurnState().retry).toEqual({ attempt: 2, reason: 'network', total: 4 })
+
+    turnController.recordRetry({ attempt: 3, discard: false, reason: 'timeout', total: 4 })
+
+    expect(getTurnState().retry).toEqual({ attempt: 3, reason: 'timeout', total: 4 })
+
+    turnController.recordToolStart('t1', 'read_file', 'reading')
+
+    expect(getTurnState().retry).toBeNull()
+
+    turnController.recordRetry({ attempt: 2, discard: false, reason: 'network', total: 4 })
+    turnController.reset()
+
+    expect(getTurnState().retry).toBeNull()
+  })
+})
+
+describe('turnController output tokens', () => {
+  it('estimates the call in flight and replaces it with the vendor count when the call ends', () => {
+    turnController.reset()
+    turnController.startMessage()
+
+    turnController.recordReasoningDelta('x'.repeat(400))
+    turnController.recordMessageDelta({ text: 'y'.repeat(400) })
+    expect(getTurnState().outputTokens).toBe(200)
+
+    turnController.recordUsage(950, 700)
+    expect(getTurnState().outputTokens).toBe(950)
+
+    turnController.recordMessageDelta({ text: 'z'.repeat(40) })
+    expect(getTurnState().outputTokens).toBe(960)
   })
 })

@@ -14,10 +14,13 @@ import asyncio
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 import httpx
 import json_repair
+
+if TYPE_CHECKING:
+    from opendde_harness.config.schema import ModelOverlay
 
 from opendde_harness.providers.base import (
     LLMProvider,
@@ -27,6 +30,7 @@ from opendde_harness.providers.base import (
     ToolCallRequest,
     format_llm_error,
 )
+from opendde_harness.providers.compat import openai_effort
 from opendde_harness.providers.responses_api import (
     PROVIDER_CODEX,
     message_text,
@@ -48,6 +52,8 @@ DEFAULT_ORIGINATOR = "opendde_harness"
 #: on a second delta, so a streaming path added here must emit the block once,
 #: at the end, or carry the items some other way.
 REASONING_BLOCK_PROVIDER = PROVIDER_CODEX
+#: pi's DEFAULT_THINKING_LEVEL for a Codex model with no effort configured.
+DEFAULT_REASONING_EFFORT = "medium"
 
 
 @dataclass
@@ -77,9 +83,10 @@ class _CodexResult:
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
-    def __init__(self, default_model: str):
+    def __init__(self, default_model: str, model_overlays: "dict[str, ModelOverlay] | None" = None):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
+        self.model_overlays = model_overlays or {}
 
     def wire_model_id(self, model: str) -> str:
         """See ``LLMProvider.wire_model_id``."""
@@ -115,12 +122,13 @@ class OpenAICodexProvider(LLMProvider):
             "tool_choice": responses_tool_choice(tool_choice) or "auto",
             "parallel_tool_calls": True,
         }
-        # The same shape pi sends, and only when pi sends it: an effort the
-        # user chose, with a summary so the reasoning text streams back. With
-        # no effort configured the key is omitted and the backend's own default
-        # applies, rather than a level or a half-formed block chosen here.
-        if reasoning_effort:
-            body["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
+        # The shape pi sends on every Codex request: an effort (pi's default
+        # is medium when the user chose none) and a summary, so the reasoning
+        # streams back while the model thinks. Without the key the backend
+        # reasons silently, and a three-minute silent stream is
+        # indistinguishable from a dead one to the person watching it.
+        level = reasoning_effort or self.effort_for(model) or DEFAULT_REASONING_EFFORT
+        body["reasoning"] = {"effort": openai_effort(model, level, codex=True), "summary": "auto"}
 
         # Nothing to group without instructions: every such request would share
         # one key while sharing no prefix.

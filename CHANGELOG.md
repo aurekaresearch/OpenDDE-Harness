@@ -6,6 +6,42 @@ User-facing changes to OpenDDE Harness are documented here.
 
 No changes yet.
 
+## [0.0.3] - 2026-09-10
+
+OpenDDE Harness 0.0.3 adds per-model thinking controls, searchable model lists,
+and clearer progress reporting in the terminal.
+
+### Added
+
+- Set per-model thinking levels with `/thinking <level>` (alias `/reasoning`) or
+  `ddeharness provider model set <provider> <model> --reasoning-effort <level>`.
+  Settings are saved in `modelOverlay` and adapted to the model's supported controls.
+- Set the current model's context window with `/context 128k`, or clear the override
+  with `/context default`.
+- The `/model` picker discovers models from compatible relay and local endpoints,
+  puts the current model first, and supports typing to filter providers, models, and endpoints.
+- `Ctrl+T` toggles thinking blocks; `Ctrl+O` expands or collapses tool output.
+  Both apply to live output and conversation history, and save the display preference.
+
+### Changed
+
+- The default thinking level is now `medium` unless overridden per model. Set
+  `agents.defaults.reasoningEffort` to `null` to leave it to the provider;
+  Codex subscriptions still default to `medium` and request reasoning summaries.
+- Relay and self-hosted models can inherit catalog limits and reasoning support when
+  their model name has a unique match. Use `modelOverlay` if the endpoint has lower limits.
+- The activity line shows elapsed time, output tokens, retry progress, and how to interrupt.
+- Model picker actions use `Ctrl+A` to add, `Ctrl+X` to delete, `Ctrl+E` for endpoints,
+  and `Ctrl+D` to disconnect. `q` now filters the list; `Esc` clears the filter before leaving.
+
+### Fixed
+
+- Improved reasoning parameter handling for OpenAI-compatible endpoints, DeepSeek,
+  Z.ai, DashScope, and OpenRouter.
+- Output token counts now combine usage reported for completed calls with an estimate
+  for the call still streaming, replacing that estimate when usage arrives.
+- Reduced accidental removal of ordinary reasoning text when filtering echoed status messages.
+
 ## [0.0.2] - 2026-09-09
 
 OpenDDE Harness 0.0.2 improves model configuration, context limits, streaming recovery,
@@ -80,6 +116,7 @@ This is an early preview, and you may encounter bugs. Please
 feedback, reproduction steps, and `ddeharness doctor --json` output when relevant.
 Thank you for trying OpenDDE Harness and helping us make it better!
 
-[Unreleased]: https://github.com/aurekaresearch/OpenDDE-Harness/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/aurekaresearch/OpenDDE-Harness/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/aurekaresearch/OpenDDE-Harness/releases/tag/v0.0.3
 [0.0.2]: https://github.com/aurekaresearch/OpenDDE-Harness/releases/tag/v0.0.2
 [0.0.1]: https://github.com/aurekaresearch/OpenDDE-Harness/releases/tag/v0.0.1
