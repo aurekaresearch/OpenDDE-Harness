@@ -417,3 +417,15 @@ Run `uv run pytest -q` from the source checkout. The tests cover REST contracts,
 job scheduling, structured-output handling, orchestration, memory hooks, and
 plugin discovery. Real model inference and external-service availability require
 validation on the intended compute deployment.
+
+### Live fold result visibility
+
+Initial scoring (cycle -1), every search cycle, and terminal post-refolding
+(cycle equal to the configured cycle count) publish scores and structure artifacts
+as soon as folding returns. Search-cycle checkpoints are updated under the same
+trace span after quality assessment, so normal completion does not duplicate a
+round. Early checkpoints do not claim population admission or final selection.
+Results remain visible if subsequent speculation, quality assessment, population
+persistence, reflection, or memory work blocks or fails. Terminal refold results
+are visible before pose analysis and final filtering. These changes require a
+new worker process; they do not backfill historical runs automatically.

@@ -71,3 +71,38 @@ test('shows initial structures and scores while the first design cycle is retryi
   assert.deepEqual(projected.run.populationCandidateIds, ['seed'])
   assert.equal(projected.run.series.iptm.cycleBest[0].value, 0.34)
 })
+
+test('fold checkpoints stay visible and completion replaces the same round', () => {
+  const artifacts = {
+    early: {
+      schema_version: 'protein_design.cycle.v1',
+      cycle: 1,
+      candidates: [
+        {
+          candidate_id: 'round1',
+          objective: 2,
+          metrics: { loss: 2 },
+          status: 'scored',
+          structure_artifact_path: '/round1.json'
+        }
+      ]
+    }
+  }
+  artifacts.complete = { ...artifacts.early, admitted_candidate_ids: ['round1'], population_candidate_ids: ['round1'] }
+  const checkpoint = path =>
+    span({
+      spanId: 'round1',
+      name: 'protein_design.cycle',
+      taskId: 'task',
+      attributes: { 'protein_design.cycle_index': 1, 'protein_design.cycle.artifact_path': path }
+    })
+  const root = runSpan('task', { cycle: 1, phase: 'quality' })
+  for (const records of [[checkpoint('early')], [checkpoint('early'), checkpoint('complete')]]) {
+    const { run } = projectProteinDesignRuns({ spans: [root, ...records], readArtifact: path => artifacts[path] })
+    assert.equal(run.candidateCount, 1)
+    assert.equal(run.cycles.length, 1)
+    assert.equal(run.structures.length, 1)
+    assert.equal(run.structures[0].artifactPath, '/round1.json')
+    assert.equal(run.structures[0].admitted, records.length === 2)
+  }
+})

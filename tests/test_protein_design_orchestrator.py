@@ -755,3 +755,142 @@ def test_initial_structure_is_published_before_first_design_failure(tmp_path, mo
     assert (snapshots[-1].best_candidate is not None) == gate_passed
     if gate_passed:
         assert any(s.status.value == "running" and s.best_candidate is not None for s in snapshots)
+
+
+@pytest.mark.parametrize("failure_phase", ["quality", "population", "memory", "initial_population"])
+def test_fold_results_visible_before_downstream_failure(tmp_path, monkeypatch, failure_phase):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from opendde_harness.tracing import spans
+    from opendde_harness.tracing.store import TraceStore
+
+    monkeypatch.setenv("OPENDDE_HARNESS_TRACING", "1")
+    monkeypatch.setattr(spans, "_store", TraceStore(tmp_path))
+    compute, phases = FakeCompute(), FakePhases()
+    memory = DesignMemory(None, agent_id="test")
+    expected_cycle = -1 if failure_phase == "initial_population" else 0
+
+    def visible():
+        records = [json.loads(line) for line in (tmp_path / "logs/audit-spans.log").read_text().splitlines()]
+        latest = {r["spanId"]: r for r in records if r["name"] == "protein_design.cycle"}
+        matches = [r for r in latest.values() if r["attributes"]["protein_design.cycle_index"] == expected_cycle]
+        assert len(matches) == 1
+        artifact = json.loads(Path(matches[0]["attributes"]["protein_design.cycle.artifact_path"]).read_text())
+        assert artifact["candidates"]
+        for item in artifact["candidates"]:
+            assert json.loads(Path(item["structure_artifact_path"]).read_text())["text"] == "data_fold\n"
+        if failure_phase == "quality":
+            assert "admitted_candidate_ids" not in artifact
+
+    async def read_structure(*args, **kwargs):
+        return SimpleNamespace(filename="fold.cif", format="cif", byte_count=10, text="data_fold\n")
+
+    async def fail(*args, **kwargs):
+        visible()  # Verify the live checkpoint, before the span exits on error.
+        raise RuntimeError("downstream unavailable")
+
+    original_update = compute.update_population
+
+    async def update(payload):
+        if payload["cycle"] == expected_cycle:
+            await fail()
+        return await original_update(payload)
+
+    monkeypatch.setattr(compute, "read_structure", read_structure)
+    if failure_phase == "quality":
+        monkeypatch.setattr(phases, "quality_cycle", fail)
+    elif failure_phase == "memory":
+        monkeypatch.setattr(memory, "record", fail)
+    else:
+        monkeypatch.setattr(compute, "update_population", update)
+    orchestrator = DesignOrchestrator(compute, memory, phases)
+    if failure_phase == "quality":
+        monkeypatch.setattr(orchestrator, "_needs_quality_check", lambda *args: True)
+    if failure_phase == "memory":
+        monkeypatch.setattr(orchestrator, "_case_triggers", lambda **kwargs: ["test"])
+    with pytest.raises(RuntimeError, match="downstream unavailable"):
+        asyncio.run(
+            orchestrator.run(
+                "early-fold",
+                make_config(cycle_retry_limit=0, skip_failed_cycles=False),
+                stop_event=asyncio.Event(),
+                adjustments={},
+            )
+        )
+    visible()
+
+
+def test_each_completed_cycle_updates_same_trace_without_recapturing_structures(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from opendde_harness.tracing import spans
+    from opendde_harness.tracing.store import TraceStore
+
+    monkeypatch.setenv("OPENDDE_HARNESS_TRACING", "1")
+    monkeypatch.setattr(spans, "_store", TraceStore(tmp_path))
+    compute = FakeCompute()
+    reads = []
+
+    async def read_structure(*args, **kwargs):
+        reads.append((args, kwargs))
+        return SimpleNamespace(filename="fold.cif", format="cif", byte_count=10, text="data_fold\n")
+
+    monkeypatch.setattr(compute, "read_structure", read_structure)
+    orchestrator = DesignOrchestrator(compute, DesignMemory(None, agent_id="test"), FakePhases())
+    asyncio.run(
+        orchestrator.run(
+            "all-cycles", make_config(post_filter_enabled=False), stop_event=asyncio.Event(), adjustments={}
+        )
+    )
+    records = [json.loads(line) for line in (tmp_path / "logs/audit-spans.log").read_text().splitlines()]
+    latest = {r["spanId"]: r for r in records if r["name"] == "protein_design.cycle"}
+    assert sorted(r["attributes"]["protein_design.cycle_index"] for r in latest.values()) == [-1, 0, 1]
+    assert len(reads) == 5  # one seed and two candidates in each of two rounds
+    for r in latest.values():
+        a = json.loads(Path(r["attributes"]["protein_design.cycle.artifact_path"]).read_text())
+        assert "admitted_candidate_ids" in a
+
+
+def test_post_refold_is_visible_before_pose_and_filter(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from opendde_harness.plugin.protein_design.core import orchestrator as module
+    from opendde_harness.tracing import spans
+    from opendde_harness.tracing.store import TraceStore
+
+    monkeypatch.setenv("OPENDDE_HARNESS_TRACING", "1")
+    monkeypatch.setattr(spans, "_store", TraceStore(tmp_path))
+    compute = FakeCompute()
+
+    async def prepare(compute, candidates, *args):
+        for item in candidates:
+            item.metadata["post_mpnn_selected"] = True
+        return candidates
+
+    async def read_structure(*args, **kwargs):
+        return SimpleNamespace(filename="fold.cif", format="cif", byte_count=10, text="data_refold\n")
+
+    checked = []
+
+    async def pose(*args):
+        records = [json.loads(line) for line in (tmp_path / "logs/audit-spans.log").read_text().splitlines()]
+        r = next(r for r in records if r["attributes"].get("protein_design.phase") == "post_refold")
+        a = json.loads(Path(r["attributes"]["protein_design.cycle.artifact_path"]).read_text())
+        assert a["cycle"] == 2
+        assert a["candidates"][0]["structure_artifact_path"]
+        assert "admitted_candidate_ids" not in a
+        checked.append(True)
+        raise RuntimeError("pose unavailable")
+
+    monkeypatch.setattr(module, "prepare_post_mpnn", prepare)
+    monkeypatch.setattr(compute, "read_structure", read_structure)
+    orchestrator = DesignOrchestrator(compute, DesignMemory(None, agent_id="test"), FakePhases())
+    monkeypatch.setattr(orchestrator, "_post_refold_pose_evidence", pose)
+    asyncio.run(orchestrator.run("refold", make_config(), stop_event=asyncio.Event(), adjustments={}))
+    assert checked == [True]
