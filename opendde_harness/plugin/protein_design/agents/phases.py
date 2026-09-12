@@ -11,10 +11,12 @@ from opendde_harness.plugin.protein_design.agents.profiles import AGENT_PROFILES
 from opendde_harness.plugin.protein_design.agents.proposals import ProposalContext, ProposalExecutor
 from opendde_harness.plugin.protein_design.agents.reflection import ReflectOutput
 from opendde_harness.plugin.protein_design.agents.router import (
+    DESIGN_SKILLS,
     FULL_REDESIGN_SKILL,
     POINT_MUTATION_SKILL,
     DesignRouteContext,
     route_design_skills,
+    sample_design_skill,
 )
 from opendde_harness.plugin.protein_design.agents.session import StructuredSession
 from opendde_harness.plugin.protein_design.agents.skills import ProteinDesignSkillCatalog
@@ -192,10 +194,16 @@ class ProteinDesignPhases:
                 population_size=int(config.metadata.get("population_size", len(parents))),
                 inverse_folding_available=(bool(parent.get("structure_path") or config.initial_structure_path)),
                 esm2_available=config.esm2_available,
-                skill_weights=config.skill_weights,
+                skill_weights=(
+                    {key: config.skill_weights.get(key, 0.0) for key in DESIGN_SKILLS}
+                    if config.router_selection_strategy == "weighted" and config.skill_weights is not None
+                    else config.skill_weights
+                ),
                 force_skill_id=_forced_design_skill(config, cycle),
             )
         )
+        if config.router_selection_strategy == "weighted":
+            route = sample_design_skill(route, seed=config.seed, cycle=cycle)
         prompt = DESIGN_PROMPT.format(
             target_name=config.target,
             target_sequence=config.target_chains,

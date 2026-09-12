@@ -1,4 +1,5 @@
-# OpenDDE Harness TUI protein-design quickstart using a validated CRLF2-VHH complex.
+# CRLF2-VHH example with exploration-to-refinement cycle intervals.
+# Cycles are zero-based and both interval endpoints are inclusive.
 #
 # After compute setup, ask the TUI to review and run this YAML by its absolute path.
 # Task state defaults to ~/.opendde_harness/protein_design/<task_id>/; compute outputs live on the compute host.
@@ -18,11 +19,34 @@ design:
   reflection_interval: 5
   num_mutations: 1-10
 
-  router_skill_probabilities:
-    cdr-point-mutation: 0.65
-    cdr-full-redesign: 0.10
-    antibody-inverse-folding: 0.15  # SolubleMPNN; prepare its checkpoint on the compute host.
-    esm2-guided-mutation: 0.10
+  # Weighted mode draws one legal strategy per cycle, not a fixed within-batch quota.
+  router_selection_strategy: weighted
+  population_size: 20
+  cycle_schedule:
+    - start_cycle: 0
+      end_cycle: 3
+      num_sequences: 8
+      population_size: 24
+      parent_fitness_temperature: 1.5
+      router_skill_probabilities:
+        cdr-full-redesign: 0.8
+        cdr-point-mutation: 0.2
+    - start_cycle: 4
+      end_cycle: 6
+      num_sequences: 4
+      population_size: 12
+      parent_fitness_temperature: 0.5
+      router_skill_probabilities:
+        cdr-full-redesign: 0.4
+        cdr-point-mutation: 0.6
+    - start_cycle: 7
+      end_cycle: 9
+      num_sequences: 2
+      population_size: 6
+      parent_fitness_temperature: 0.15
+      router_skill_probabilities:
+        cdr-full-redesign: 0.1
+        cdr-point-mutation: 0.9
 
   esm_device: cuda:0
 

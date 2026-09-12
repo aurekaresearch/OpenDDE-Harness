@@ -852,3 +852,22 @@ def test_missing_shared_weights_rejected_in_api_mode(settings):
     (Path(settings.weights_dir) / "soluble_mpnn/solublempnn_v_48_020.pt").unlink()
     with pytest.raises(ComputeSetupError, match="missing, empty or unreadable"):
         validate_assets(settings)
+
+
+@pytest.mark.parametrize("hook,expected", [("/usr/bin/nvidia-container-runtime-hook", "all"), (None, "none")])
+def test_onboard_gpu_default_with_runc(wizard_run, monkeypatch, hook, expected):
+    from opendde_harness.cli import onboard_compute as compute
+
+    monkeypatch.setattr(compute, "check_local_docker", lambda: {"Runtimes": {"runc": {}}})
+    monkeypatch.setattr(compute.shutil, "which", lambda name: hook if name == "nvidia-container-runtime-hook" else None)
+    _, outcome = wizard_run({})
+    assert outcome["saved"]["compute_docker"]["gpus"] == expected
+
+
+@pytest.mark.parametrize("saved", ["none", "2,3"])
+def test_onboard_preserves_explicit_gpu_selection(wizard_run, monkeypatch, saved):
+    from opendde_harness.cli import onboard_compute as compute
+
+    monkeypatch.setattr(compute, "gpu_inventory", lambda: ["GPU"] * 4)
+    _, outcome = wizard_run({"plugins": {"config": {"protein-design": {"compute_docker": {"gpus": saved}}}}})
+    assert outcome["saved"]["compute_docker"]["gpus"] == saved

@@ -43,7 +43,7 @@ check. Installed wheels include the examples. To identify a source checkout, pas
 `--repository-root /path/to/OpenDDE-Harness`.
 
 Review and adapt an [example YAML](examples/) for your target, binder, paths and
-folding mode. See the [YAML reference](../opendde_harness/plugin/protein_design/skills/protein-design/references/yaml-configuration.md)
+folding mode. See the [complete YAML parameter reference](protein-design-yaml.md)
 for fields and [API folding requirements](protein-design.md#use-the-hosted-opendde-folding-api)
 when using a remote folding backend.
 

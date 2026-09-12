@@ -354,6 +354,11 @@ class DockerSettings:
         return value
 
 
+def docker_gpu_available(info: dict) -> bool:
+    """Recognize both named NVIDIA runtimes and Docker GPU hook setups."""
+    return "nvidia" in (info.get("Runtimes") or {}) or bool(shutil.which("nvidia-container-runtime-hook"))
+
+
 def validate_settings(
     settings: DockerSettings,
     info: dict[str, Any],
@@ -376,8 +381,7 @@ def validate_settings(
     if not re.fullmatch(r"all|none|\d+(?:,\d+)*", settings.gpus):
         raise ComputeSetupError("GPU selection must be all, comma-separated device IDs, or none.")
     # Docker can serve --gpus through the NVIDIA hook while its runtime remains runc.
-    gpu_runtime = "nvidia" in (info.get("Runtimes") or {}) or shutil.which("nvidia-container-runtime-hook")
-    if settings.gpus != "none" and not gpu_runtime:
+    if settings.gpus != "none" and not docker_gpu_available(info):
         raise ComputeSetupError(
             "Docker's NVIDIA runtime is unavailable. Configure NVIDIA Container Toolkit before onboarding."
         )

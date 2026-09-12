@@ -120,7 +120,7 @@ def configure_protein_design() -> None:
             # only override, and it is read inside default_image().
             image = compute.default_image()
             wizard.console.print(f"{t('Compute image:', '计算镜像：')} {escape(image)}")
-            gpus = str(saved.get("gpus") or ("all" if "nvidia" in (info.get("Runtimes") or {}) else "none"))
+            gpus = str(saved.get("gpus") or ("all" if compute.docker_gpu_available(info) else "none"))
             names = compute.gpu_inventory() if gpus != "none" else []
             wizard.console.print(f"{t('Compute device:', '计算设备：')} {escape(device_summary(gpus, names, t))}")
             if saved.get("port"):

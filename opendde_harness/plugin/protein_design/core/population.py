@@ -252,16 +252,21 @@ class ParentSampler:
         """Roll back a speculative draw that could not be committed."""
         self._rng.setstate(state)
 
+    def temperature(self, cycle: int) -> float:
+        if self._config.parent_fitness_temperature is not None:
+            return self._config.parent_fitness_temperature
+        progress = min(1.0, max(0.0, cycle / max(1, self._config.cycles - 1)))
+        start = self._config.parent_fitness_temperature_start
+        end = self._config.parent_fitness_temperature_end
+        return start * (end / start) ** progress
+
     def _fitness(
         self,
         candidates: list[Candidate],
         cycle: int,
         rng: random.Random,
     ) -> Candidate:
-        progress = min(1.0, max(0.0, cycle / max(1, self._config.cycles - 1)))
-        start = self._config.parent_fitness_temperature_start
-        end = self._config.parent_fitness_temperature_end
-        temperature = start * (end / start) ** progress
+        temperature = self.temperature(cycle)
         scores = [
             float(candidate.objective) if candidate.objective is not None else math.inf for candidate in candidates
         ]

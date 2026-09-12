@@ -429,3 +429,12 @@ Results remain visible if subsequent speculation, quality assessment, population
 persistence, reflection, or memory work blocks or fails. Terminal refold results
 are visible before pose analysis and final filtering. These changes require a
 new worker process; they do not backfill historical runs automatically.
+
+## Configuring every YAML parameter
+
+See the [complete YAML parameter reference](protein-design-yaml.md) for defaults,
+constraints, effective behavior, compatibility fields, and safe removal of redundant
+settings. [The staged CRLF2 example](examples/crlf2_scheduled.yaml) configures
+exploration followed by refinement through `design.cycle_schedule`. The default
+router retains agent choice; choose `router_selection_strategy: weighted` when
+weights should control reproducible per-cycle strategy draws.

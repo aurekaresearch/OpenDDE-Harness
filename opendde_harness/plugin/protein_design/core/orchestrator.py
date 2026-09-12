@@ -39,6 +39,11 @@ from opendde_harness.plugin.protein_design.core.progress import (
     ProgressStatus,
     emit_progress,
 )
+from opendde_harness.plugin.protein_design.core.schedule import (
+    apply_cycle_schedule,
+    cycle_parameters,
+    stage_index,
+)
 from opendde_harness.plugin.protein_design.core.search_history import (
     build_search_trajectory_summary,
     normalize_search_candidate,
@@ -124,6 +129,7 @@ class _DesignSpeculation:
     baseline_best_id: str | None
     sampler_state_before: object
     task: asyncio.Task[Any]
+    parameters: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -134,6 +140,8 @@ class _RunState:
     snapshot: TaskSnapshot
     cycle: int = 0
     cycle_attempt: int = 0
+    cycle_defaults: dict[str, Any] = field(default_factory=dict)
+    cycle_overrides: dict[str, Any] = field(default_factory=dict)
     best: Candidate | None = None
     pending_speculation: _DesignSpeculation | None = None
     no_improvement_streak: int = 0
@@ -175,6 +183,7 @@ class DesignOrchestrator:
         config.metadata["task_id"] = task_id
         run_state = _RunState(
             parents=list(config.initial_candidates),
+            cycle_defaults=cycle_parameters(config),
             snapshot=TaskSnapshot(
                 task_id=task_id,
                 status=TaskState.RUNNING,
@@ -503,7 +512,27 @@ class DesignOrchestrator:
             run_span.set(run_span_attributes(snapshot=run_state.snapshot, config=config)).checkpoint()
             await self._notify(run_state.snapshot, on_progress)
             return False
+        if "num_sequences" in adjustments:
+            run_state.cycle_overrides["num_sequences"] = adjustments["num_sequences"]
+        previous_capacity = config.population_size
+        if config.cycle_schedule:
+            apply_cycle_schedule(config, run_state.cycle, run_state.cycle_defaults)
         self._apply_adjustments(config, adjustments)
+        if "num_sequences" in run_state.cycle_overrides:
+            config.candidates_per_cycle = int(run_state.cycle_overrides["num_sequences"])
+        if config.population_size != previous_capacity:
+            run_state.survivors = population.update([]).survivors
+        effective_parameters = {
+            **cycle_parameters(config),
+            "parent_fitness_temperature": parent_sampler.temperature(run_state.cycle),
+            "schedule_index": stage_index(config, run_state.cycle),
+        }
+        self._event("cycle_config")
+        self._flush_event(output_payload={"cycle": run_state.cycle, **effective_parameters})
+        run_span.artifact(
+            "protein_design.cycle_config", {"cycle": run_state.cycle, **effective_parameters}
+        ).checkpoint()
+        logger.info("cycle %s design parameters: %s", run_state.cycle, effective_parameters)
         quality = None
         reflection = None
         cycle_candidates: list[Candidate] = []
@@ -521,13 +550,17 @@ class DesignOrchestrator:
         try:
             speculation = run_state.pending_speculation
             run_state.pending_speculation = None
-            if speculation is not None and self._speculation_is_valid(
-                speculation,
-                cycle=run_state.cycle,
-                best=run_state.best,
-                population=population.candidates,
-                working_parent=working_parent.candidate,
-                initial_candidates=config.initial_candidates,
+            if (
+                speculation is not None
+                and speculation.parameters == cycle_parameters(config)
+                and self._speculation_is_valid(
+                    speculation,
+                    cycle=run_state.cycle,
+                    best=run_state.best,
+                    population=population.candidates,
+                    working_parent=working_parent.candidate,
+                    initial_candidates=config.initial_candidates,
+                )
             ):
                 run_state.parents = [speculation.parent]
                 selected_parent_payload = speculation.parent
@@ -601,7 +634,10 @@ class DesignOrchestrator:
                 cycle_span = cycle_trace_stack.enter_context(
                     trace.span(
                         "protein_design.cycle",
-                        {"protein_design.cycle_attempt": run_state.cycle_attempt},
+                        {
+                            "protein_design.cycle_attempt": run_state.cycle_attempt,
+                            "protein_design.design_parameters": effective_parameters,
+                        },
                         kind="protein_design",
                     )
                 )
@@ -1377,6 +1413,10 @@ class DesignOrchestrator:
         next_cycle = cycle + 1
         if next_cycle >= config.cycles:
             return None
+        # A different stage can change proposal count, router, capacity, and
+        # parent temperature. Select the parent after applying that stage.
+        if stage_index(config, cycle) != stage_index(config, next_cycle):
+            return None
         if (cycle + 1) % config.reflection_interval == 0:
             return None
         if config.parent_selection_strategy == "llm":
@@ -1412,6 +1452,7 @@ class DesignOrchestrator:
             cycle=next_cycle,
             parent=parent,
             baseline_best_id=best.candidate_id if best is not None else None,
+            parameters=cycle_parameters(config),
             sampler_state_before=sampler_state,
             task=task,
         )

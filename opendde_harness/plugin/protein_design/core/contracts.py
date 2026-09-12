@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Literal
@@ -178,6 +179,56 @@ class ParentSelectionOutput(ContractModel):
     parent_selection: ParentSelectionDecision
 
 
+class CycleDesignStage(ContractModel):
+    """Overrides for an inclusive, zero-based interval of design cycles."""
+
+    start_cycle: int = Field(ge=0, strict=True)
+    end_cycle: int = Field(ge=0, strict=True)
+    num_sequences: int | None = Field(default=None, ge=1, strict=True)
+    population_size: int | None = Field(default=None, ge=1, strict=True)
+    router_skill_probabilities: dict[str, float] | None = None
+    router_selection_strategy: Literal["agent", "weighted"] | None = None
+    parent_fitness_temperature: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_values(cls, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            if isinstance(value.get("parent_fitness_temperature"), bool):
+                raise ValueError("parent_fitness_temperature must be a positive finite number")
+            weights = value.get("router_skill_probabilities")
+            if isinstance(weights, Mapping) and any(isinstance(item, bool) for item in weights.values()):
+                raise ValueError("router_skill_probabilities must contain numeric weights, not booleans")
+        return value
+
+    @model_validator(mode="after")
+    def validate_stage(self) -> "CycleDesignStage":
+        if self.end_cycle < self.start_cycle:
+            raise ValueError("end_cycle must be greater than or equal to start_cycle")
+        if all(
+            getattr(self, key) is None
+            for key in (
+                "num_sequences",
+                "population_size",
+                "router_skill_probabilities",
+                "parent_fitness_temperature",
+                "router_selection_strategy",
+            )
+        ):
+            raise ValueError("a cycle_schedule stage must override at least one design parameter")
+        weights = self.router_skill_probabilities
+        if weights is not None:
+            supported = {"cdr-point-mutation", "cdr-full-redesign", "antibody-inverse-folding", "esm2-guided-mutation"}
+            unknown = sorted(set(weights) - supported)
+            if unknown:
+                raise ValueError("unknown design skill weight(s): " + ", ".join(unknown))
+            if not weights or any(not math.isfinite(v) or v < 0 for v in weights.values()) or not any(weights.values()):
+                raise ValueError(
+                    "router_skill_probabilities must contain finite non-negative weights with a positive total"
+                )
+        return self
+
+
 class WorkflowConfig(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -214,6 +265,8 @@ class WorkflowConfig(ContractModel):
     initial_structure_path: str | None = None
     seed: int = 42
     population_size: int = Field(default=20, ge=1)
+    cycle_schedule: list[CycleDesignStage] = Field(default_factory=list)
+    parent_fitness_temperature: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     constrained_min_cdr_distance: float = Field(default=0.05, ge=0.0, le=1.0)
     constrained_max_position_reuse_fraction: float = Field(default=0.75, gt=0.0, le=1.0)
     constrained_max_mutation_reuse_fraction: float = Field(default=0.30, gt=0.0, le=1.0)
@@ -229,10 +282,22 @@ class WorkflowConfig(ContractModel):
     bootstrap_full_redesign_cycles: int = Field(default=0, ge=0)
     stagnation_full_redesign_threshold: int = Field(default=0, ge=0)
     skill_weights: dict[str, float] | None = None
+    router_selection_strategy: Literal["agent", "weighted"] = "agent"
     esm2_available: bool = True
     mutation_count_instruction: str = "Use the configured bounded CDR mutation count."
     post_filter_enabled: bool = False
     post_filter_top_k: int = Field(default=20, ge=1)
+
+    @model_validator(mode="after")
+    def validate_cycle_schedule(self) -> "WorkflowConfig":
+        previous_end = -1
+        for stage in self.cycle_schedule:
+            if stage.start_cycle <= previous_end:
+                raise ValueError("design.cycle_schedule intervals must be ordered and must not overlap")
+            if stage.end_cycle >= self.cycles:
+                raise ValueError("design.cycle_schedule end_cycle must be less than design.n_cycles")
+            previous_end = stage.end_cycle
+        return self
 
 
 def normalize_workflow_adjustments(params: Mapping[str, Any]) -> dict[str, int]:

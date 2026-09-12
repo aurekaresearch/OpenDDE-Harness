@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import random
+from dataclasses import dataclass, field, replace
 from typing import Mapping
 
 POINT_MUTATION_SKILL = "cdr-point-mutation"
@@ -159,4 +160,21 @@ def route_design_skills(context: DesignRouteContext) -> DesignSkillRoute:
         weights=weights,
         reason=reason,
         backends={skill: _BACKENDS[skill] for skill in allowed},
+    )
+
+
+def sample_design_skill(route: DesignSkillRoute, *, seed: int, cycle: int) -> DesignSkillRoute:
+    """Choose one legal skill reproducibly; retries reuse the same cycle draw."""
+    selected = random.Random(f"protein-design-router:{seed}:{cycle}").choices(
+        route.allowed_skill_ids,
+        weights=[route.weights[key] for key in route.allowed_skill_ids],
+        k=1,
+    )[0]
+    return replace(
+        route,
+        allowed_skill_ids=(selected,),
+        selected_skill_id=selected,
+        weights={selected: 1.0},
+        backends={selected: route.backends[selected]},
+        reason=f"{route.reason}; weighted cycle draw selected {selected}",
     )
