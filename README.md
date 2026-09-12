@@ -141,6 +141,10 @@ Then describe your task:
 > Design a VHH against human CRLF2. Verify the target and epitope, keep the framework fixed, and design CDRs. Show the plan and start only after I confirm.
 
 CLI-based design workflows are also supported. See the [CLI usage guide](docs/cli.md).
+For YAML-based runs, see the [complete parameter reference](docs/protein-design-yaml.md)
+and the [CRLF2 staged example](docs/examples/crlf2_scheduled.yaml), which changes
+batch size, strategy weights, population capacity, and parent temperature by cycle interval.
+The parameter reference also explains stagnation-triggered redesign, defaults, and current limitations.
 
 ### 3. Inspect results
 

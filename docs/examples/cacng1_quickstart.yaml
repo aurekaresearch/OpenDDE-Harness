@@ -10,6 +10,8 @@
 # compute:
 #   url: http://127.0.0.1:8080
 
+# Full parameter reference: docs/protein-design-yaml.md.
+# Defaults: loss objective, standard contact gates, terminal refolding disabled.
 design:
   n_cycles: 10
   num_sequences: 1
@@ -19,12 +21,6 @@ design:
   # No separate enable flag is required. This seed has masked CDR residues.
   bootstrap_full_redesign_cycles: 3
 
-  optimization_metric: loss
-  # Omit loss_weights to use the built-in default coefficients.
-
-  cdr_contact_fraction_threshold: 0.5
-  hotspot_contact_cutoff_a: 5.0
-
   router_skill_probabilities:
     cdr-point-mutation: 0.55
     cdr-full-redesign: 0.20
@@ -32,14 +28,11 @@ design:
     esm2-guided-mutation: 0.10
 
   esm_device: cuda:0
-  post_refold_filter:
-    enabled: false
 
 fold:
   # These local-folding settings need adaptation for API mode; see docs/protein-design.md.
   model: opendde
   gpus: "0,1,2,3,4,5,6,7"
-  enable_batch_inference: true
   seeds: [973520]
   use_msa: false
   enable_msa_search: false
@@ -73,6 +66,6 @@ initial_binders:
       D:
         sequence: EVQLVESGGGLVQPGGSLRLSCAASXXXXXXXXXXWFRQAPGQEREFVAXXXXXXXXXXYADSVRGRFTNSRDNSKNTLYLQMNSLRAEDTAVYYCAAXXXXXXXXXXXXXXXXXWGQGTLVTVSS
         # Position ranges are zero-based and inclusive at both ends.
-        cdr_regions: 25:34,49:58,98:114
-        fixed_residues: 0:24,35:48,59:97,115:125
+        # Framework positions outside these CDRs are fixed automatically.
+        cdr_regions: "25:34,49:58,98:114"
         chain_type: VHH

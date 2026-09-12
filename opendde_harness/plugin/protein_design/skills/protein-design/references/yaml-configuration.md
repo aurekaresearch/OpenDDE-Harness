@@ -51,6 +51,16 @@ This schema is antibody-only. Every binder chain must declare `chain_type` and p
 
 Once choices are resolved, prepare and validate the YAML using `--json`, then present its absolute path and final summary including inherited folding/MSA policy and loss weights. Ask explicitly whether the user approves this exact configuration and authorizes launch. Validation is not service readiness or launch approval. Revalidate only after changed input/configuration or an error; renew approval if the plan changes.
 
+## Detailed field reference and staged design
+
+The complete defaults, constraints, cycle scheduling rules, and redundancy guidance
+are in [`docs/protein-design-yaml.md`](../../../../../../docs/protein-design-yaml.md).
+Use `design.cycle_schedule` for ordered, inclusive, zero-based intervals overriding
+`num_sequences`, `population_size`, `router_skill_probabilities`,
+`router_selection_strategy`, and `parent_fitness_temperature`. Omitted fields inherit
+the original baseline. Use `weighted` routing for probability-based cycle selection;
+the default `agent` mode treats weights as priors. A stage map replaces all skill weights.
+
 ## Schema template (not directly executable)
 
 The following placeholders illustrate the schema; replace them with verified sequences and real paths before validation. Runnable examples are `docs/examples/crlf2_quickstart.yaml` and `docs/examples/cacng1_quickstart.yaml`; obtain their absolute paths from the context tool without requiring an example README. To inherit configured placement and folding mode, omit `compute` and `fold.execution_mode`/`fold.api_url` overrides. Explicit YAML settings override defaults. Omit `design.loss_weights` to use the built-in weights; never copy redacted display URLs into YAML.
@@ -207,7 +217,7 @@ ten supported keys and set every unused term explicitly to `0.0`.
 | `cdr_contact_fraction_threshold` | Hard population gate for CDR/antibody contacts. | Default `0.5`. |
 | `hotspot_contact_cutoff_a` | Contact cutoff in angstroms for hotspot evidence. | Default `5.0`. |
 | `enable_quality_check` | Enable the Quality Agent. | Default `true`. |
-| `quality_check_threshold` | Minimum Quality Agent acceptance score. | Default `0.7`; range `[0,1]`. |
+| `quality_check_threshold` | ipTM threshold that triggers a Quality Agent check for eligible non-full-redesign candidates. | Default `0.7`; range `[0,1]`. |
 | `population_size` | Maximum retained constrained-elite population. | Default `20`. |
 | `constrained_min_cdr_distance` | Minimum normalized CDR edit distance from every retained candidate. | Default `0.05`; range `[0,1]`. |
 | `constrained_max_position_reuse_fraction` | Maximum retained-candidate reuse fraction for a mutation position. | Default `0.75`. |
@@ -221,34 +231,12 @@ ten supported keys and set every unused term explicitly to `0.0`.
 | `post_refold_filter.enabled` | Generate SolubleMPNN variants from trajectory structures, refold selected sequences, and let the PostFilter Agent rank usable results. | Default `false`. |
 | `post_refold_filter.top_k` | Maximum number selected from the Agent's final order. | Default `20`; positive. |
 
-When enabled, all trajectory candidates are considered, including candidates not
-retained in the final population. Candidate IDs are deduplicated without an
-objective-based preselection or pool-size cap. Each usable parent structure generates
-40 SolubleMPNN sequences within the configured mutable residues. The four distinct
-valid sequences with the lowest MPNN negative log probability are refolded. For
-multiple binder chains, scores are averaged by the number of designed residues.
-Child IDs use `<parent_id>__mpnn_<sample_index>` and retain parent structure,
-sampling index, MPNN score and within-parent rank. Parent scores and quality
-judgments are not reused for the new sequences. Groups with fewer than four valid
-distinct sequences are recorded as failed, without falling back to the parent.
-Failed or missing refolds remain recorded but cannot be selected. Rankable results
-need successful refolding, a finite objective, and an available structure.
-
-The Agent ranks every usable result holistically using confidence, target-aligned
-binder RMSD, interface/CDR evidence, developability, and diversity. Geometry gates
-are evidence rather than an automatic post-filter veto. Python validates complete
-candidate coverage and unique contiguous ranks, then takes the first `top_k`
-without rescoring. Missing measurements remain unknown, never zero or a penalty.
-
-Only `enabled` and `top_k` are supported. Remove legacy `ranking_mode`,
-`metric_weights`, `quality_pool_multiplier`, and `diversity_weight` fields;
-these are rejected rather than silently ignored. Refolding the entire trajectory
-can cost substantially more compute than refolding the final population.
-If the Agent fails or returns invalid rankings, final selection is marked failed,
-with no objective-based fallback. Completed search artifacts and error details
-remain available in `final_selection.json`.
-To enable this optional stage, copy a quickstart from `docs/examples/`
-to the task configuration directory and set `design.post_refold_filter` there.
+When enabled, terminal refolding uses a bounded set of unique, gate-passing,
+finitely scored trajectory parents (at most `4 * top_k`), ordered by the objective.
+SolubleMPNN produces variants for refolding; inspect final selection errors and
+mode because invalid agent ranking can fall back to objective ordering. See the
+complete reference for the current selection policy. Only `enabled` and `top_k`
+are accepted in this block.
 
 Supported router keys are exactly:
 
@@ -268,7 +256,7 @@ Supported router keys are exactly:
 | `fold.use_msa` | Local mode uses supplied MSA features. API mode requires this to be true because the remote service owns MSA/template preparation. |
 | `fold.enable_msa_search` | Backend-side fallback search during Fold. Keep `false` for reviewed configurations; use `protein_design_search_target_msa` before launch so paths and provenance are explicit. |
 | `fold.execution_mode` | `local` (default), `docker`, or `api`. API mode submits an asynchronous remote OpenDDE job and downloads its result archive. |
-| `fold.image` | Omit this field. OpenDDE uses the configured persistent compute image. |
+| `fold.image` | Optional Docker-mode image override; managed compute normally provides the image. Unused for local/API prediction. |
 | `fold.api_url` | External gateway origin; defaults to `https://api.aurekabio.cloud`. Explicit YAML overrides `OPENDDE_HARNESS_OPENDDE_API_URL`, which overrides the default. |
 | `fold.api_poll_interval_seconds` | Remote job polling interval; default `5`. |
 | `fold.api_timeout_seconds` | Overall remote job timeout including queue and warm-up; default `7200`. |
@@ -331,7 +319,6 @@ If only a target name is provided, search the Web to resolve species and isoform
 | `cdr_regions` | CDR permission regions. Quoted string ranges are zero-based and inclusive, for example `"25:34,49:58,98:114"`. |
 | `designable_residues` | Optional narrower explicit mutation permission. When present, it takes precedence over `cdr_regions`. |
 | `fixed_residues` | Immutable residues. This always overrides both `cdr_regions` and `designable_residues`; quote range strings. |
-| `hotspots` | Optional binder-side annotations. |
 | `chain_type` | Required antibody-chain type: `VHH`, `scFv`, `VH`, or `VL`. `VK`, `VL-kappa`, and `VL-lambda` normalize to `VL`. Other values are rejected. |
 
 For VH/VL designs, provide exactly one chain of each type and keep their IDs consistent with every supplied structure. Single-chain designs must be explicitly typed as VHH or scFv. Never concatenate separate VH/VL chains into one sequence for configuration purposes.

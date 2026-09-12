@@ -44,6 +44,7 @@ class WorkflowConfigLoader:
             "constrained_max_position_reuse_fraction",
             "constrained_min_cdr_distance",
             "cycle_retry_limit",
+            "cycle_schedule",
             "enable_quality_check",
             "esm_device",
             "hotspot_contact_cutoff_a",
@@ -53,6 +54,7 @@ class WorkflowConfigLoader:
             "num_mutations",
             "num_sequences",
             "optimization_metric",
+            "parent_fitness_temperature",
             "parent_fitness_temperature_end",
             "parent_fitness_temperature_start",
             "parent_fitness_uniform_fraction",
@@ -62,6 +64,7 @@ class WorkflowConfigLoader:
             "quality_check_threshold",
             "reflection_interval",
             "router_skill_probabilities",
+            "router_selection_strategy",
             "skip_failed_cycles",
             "stagnation_full_redesign_threshold",
         }
@@ -187,6 +190,10 @@ class WorkflowConfigLoader:
             for chain_id, sequence in binder_chains.items()
         }
         skill_weights, post = WorkflowConfigLoader._parse_design_policy(design)
+        if design.get("parent_fitness_temperature") is not None and any(
+            key in design for key in ("parent_fitness_temperature_start", "parent_fitness_temperature_end")
+        ):
+            raise ValueError("use either parent_fitness_temperature or its start/end annealing parameters, not both")
         cycles = design.get("n_cycles", 3)
         fold_backend, fold_options, loss_weights = WorkflowConfigLoader._parse_fold(
             fold,
@@ -234,6 +241,8 @@ class WorkflowConfigLoader:
             initial_structure_path=design.get("initial_structure_path"),
             seed=int(data.get("seed", 42)),
             population_size=int(design.get("population_size", 20)),
+            cycle_schedule=design.get("cycle_schedule", []),
+            parent_fitness_temperature=design.get("parent_fitness_temperature"),
             constrained_min_cdr_distance=float(design.get("constrained_min_cdr_distance", 0.05)),
             constrained_max_position_reuse_fraction=float(design.get("constrained_max_position_reuse_fraction", 0.75)),
             constrained_max_mutation_reuse_fraction=float(design.get("constrained_max_mutation_reuse_fraction", 0.30)),
@@ -249,6 +258,7 @@ class WorkflowConfigLoader:
             bootstrap_full_redesign_cycles=int(design.get("bootstrap_full_redesign_cycles", 0)),
             stagnation_full_redesign_threshold=int(design.get("stagnation_full_redesign_threshold", 0)),
             skill_weights=skill_weights,
+            router_selection_strategy=design.get("router_selection_strategy", "agent"),
             esm2_available=bool((skill_weights or {}).get("esm2-guided-mutation", 0.0) > 0.0),
             mutation_count_instruction=f"Use {design.get('num_mutations', 'the configured number of')} CDR mutations.",
             post_filter_enabled=bool(post.get("enabled", False)),
