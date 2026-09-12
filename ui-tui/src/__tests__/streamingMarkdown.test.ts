@@ -212,6 +212,7 @@ describe('StreamingMd streaming cost', () => {
     expect(streaming.lastFrame()).toBe(oneShot.lastFrame())
   })
 
+  // CI render time varies; the assertions below bound parsing work independently of wall time.
   it('re-parses only the tail while the live text is trimmed past the live cap', () => {
     const text = Array.from({ length: 320 }, (_, i) => PARA(i)).join('\n\n')
     const deltas = stream(text, 250)
@@ -232,7 +233,7 @@ describe('StreamingMd streaming cost', () => {
     // deltas * LIVE_RENDER_MAX_CHARS characters (~40x the text length here).
     expect(parseWork()).toBeLessThan(text.length * 4)
     expect(vi.mocked(ensureEmojiPresentation).mock.calls.length).toBeLessThan(deltas.length * 6)
-  })
+  }, 20_000)
 
   it('highlights each streamed code line a bounded number of times', () => {
     const lines = Array.from({ length: 120 }, (_, i) => `const value${i} = compute(${i}) + "s"`)
