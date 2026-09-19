@@ -717,7 +717,13 @@ def wait_for_service(url: str, token: str, mode: str, api_url: str = "", *, time
             time.sleep(1)
 
 
-def _reclaim_name(container: dict[str, Any], token: str) -> int | None:
+def container_image_matches(container: Mapping[str, Any], image: str) -> bool:
+    """Compare immutable IDs, including when a local image tag has been replaced."""
+    expected_id = docker("image", "inspect", image, "--format", "{{.Id}}")
+    return bool(expected_id) and container.get("Image") == expected_id
+
+
+def _reclaim_name(container: dict[str, Any], token: str, image: str) -> int | None:
     """Host port of a running container that already holds the name with this token; stopped leftovers are removed."""
     name = str(container.get("Name") or "").lstrip("/")
     config = container.get("Config") or {}
@@ -734,6 +740,11 @@ def _reclaim_name(container: dict[str, Any], token: str) -> int | None:
     if env.get(AUTH_ENV) != token or not port.isdigit():
         raise ComputeSetupError(
             f"Container {name} is running with another token or port binding. Run ddeharness compute stop --force, then retry."
+        )
+    if not container_image_matches(container, image):
+        raise ComputeSetupError(
+            f"Container {name} uses a different image from the configured {image}. "
+            "It was not adopted or stopped; let active tasks finish before replacing it."
         )
     return int(port)
 
@@ -772,7 +783,7 @@ def start_service(
     validate_settings(settings, info)
     name = local_service.container_name(code_id)
     existing = inspect_container(name)
-    port = _reclaim_name(existing, token) if existing else None
+    port = _reclaim_name(existing, token, settings.image) if existing else None
     if port is None:
         Path(settings.state_dir).expanduser().resolve().mkdir(parents=True, exist_ok=True)
         port = settings.port or free_port(DEFAULT_COMPUTE_PORT)

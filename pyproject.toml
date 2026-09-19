@@ -90,6 +90,7 @@ packages = ["opendde_harness"]
 # locating a source checkout, which a pip install does not have.
 "docs/examples/crlf2_quickstart.yaml" = "opendde_harness/plugin/protein_design/examples/crlf2_quickstart.yaml"
 "docs/examples/cacng1_quickstart.yaml" = "opendde_harness/plugin/protein_design/examples/cacng1_quickstart.yaml"
+"docs/pyrosetta.md" = "opendde_harness/docs/pyrosetta.md"
 "docker/versions.env" = "opendde_harness/cli/source_versions.env"
 "docker/environment.json" = "opendde_harness/cli/compute_environment.json"
 "docker/model-checksums.sha256" = "opendde_harness/cli/model-checksums.sha256"
@@ -111,6 +112,7 @@ packages = ["opendde_harness"]
 path = "hatch_build.py"
 
 [tool.hatch.build]
+exclude = ["**/._*", "**/node_modules/**"]
 include = [
     "opendde_harness/**/*.py",
     "opendde_harness/plugin/**/opendde-harness-plugin.toml",
@@ -129,6 +131,7 @@ include = [
 [tool.hatch.build.targets.sdist]
 include = [
     "docs/examples/*.yaml",
+    "docs/pyrosetta.md",
     "docker/versions.env",
     "docker/environment.json",
     "docker/model-checksums.sha256",

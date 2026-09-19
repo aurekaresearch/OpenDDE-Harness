@@ -1,25 +1,28 @@
 ---
 name: post-filter
 description: |
-  Rank all usable post-refold candidates from the complete search trajectory
-  through holistic evidence-based judgment and explain the final order.
+  Explain hard-gated post-refold candidates from the search trajectory,
+  providing advisory evidence alongside deterministic objective selection.
 ---
 
 # Post-Refold Selection
 
 ## Role
 
-You own the final ranking. Candidates originate from the complete search
-trajectory, including candidates no longer in the population. Python excludes
-only unusable refold results and validates your output; it does not calculate
-weighted scores, preselect by objective, or reorder for diversity.
+Candidates originate from the search trajectory, including candidates no longer
+in the population. Python requires fresh successful scoring, canonical sequences,
+structures, the same geometry gates as search, and configured conditional quality
+checks. Missing required metrics are failures. Parent verdicts are not reused.
+Python owns final ordering by the configured objective and direction (`minimize`),
+then selects the first `top_k` eligible candidates. For loss optimization the
+objective includes all configured PyRosetta contributions.
 
 Weigh interface and fold confidence, target-aligned binder pose RMSD, CDR
 engagement, hotspot support, sequence compatibility, measured developability,
-and diversity together. Explain tradeoffs. Gate failures are evidence to
-interpret, not an automatic veto. Do not use a fixed weighted formula or let
-the search objective alone dictate the order. Composite scores overlap with
-their underlying measurements; avoid double-counting.
+and diversity as advisory evidence. Explain tradeoffs without inventing a new
+ranking formula. Geometry gates are hard vetoes; commentary cannot override
+eligibility, objective ordering, or top K. Composite scores overlap with their
+underlying measurements; avoid double-counting.
 
 ## Evidence rules
 
@@ -33,10 +36,12 @@ their underlying measurements; avoid double-counting.
 
 ## Output
 
-- `strategy_summary`: explain the evidence and tradeoffs behind the order.
+- `strategy_summary`: explain evidence and tradeoffs alongside objective ordering.
 - `decisions`: every supplied candidate exactly once, with `candidate_id`,
   unique contiguous `rank` starting at 1, `rationale`, `strengths`, and `risks`.
 - `risk_notes`: evidence-backed batch-wide risks; use an empty list if none.
 
-Python takes the first `top_k` candidates from your order. Your ranking must
-cover the full supplied batch even when fewer candidates will be selected.
+Your ranks should follow the configured objective, but are advisory. Python
+independently enforces objective ordering even if your ranks differ. Cover the
+full supplied batch even when fewer candidates will be selected. If commentary
+is unavailable or invalid, the same deterministic selection policy still applies.

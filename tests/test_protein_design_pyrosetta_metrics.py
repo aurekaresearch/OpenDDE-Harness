@@ -149,7 +149,52 @@ def test_disabled_analysis_removes_stale_parent_provenance(harness):
     assert not any(key.startswith("rosetta_") for key in first["metrics"])
 
 
-def test_required_metric_failure_cannot_continue_into_loss_ranking(harness, monkeypatch):
+@pytest.mark.parametrize("post_refold", [False, True])
+def test_raw_min_ipae_is_fresh_and_reaches_candidate_and_cycle(harness, monkeypatch, post_refold):
+    from opendde_harness.plugin.protein_design.servers.backends import interchain_pae
+
+    def measure(**kwargs):
+        assert kwargs["binder_chains"] == ["B"]
+        assert kwargs["target_chains"] == ["A"]
+        assert kwargs["sequences"] == {"A": "AAA", "B": "AAA"}
+        assert str(kwargs["confidence_path"]).endswith("confidence.json")
+        return {"status": "success", "value": 2.75, "units": "angstrom"}
+
+    monkeypatch.setattr(interchain_pae, "measure_min_interchain_pae", measure)
+    request = payload(pyrosetta={"enabled": False}, post_refold=post_refold)
+    request["candidates"][0].update(metrics={"min_ipae": -999}, metadata={"min_ipae": {"value": -999}})
+    candidate = Candidate.model_validate(harness._fold(request)["candidates"][0])
+    assert candidate.metrics["min_ipae"] == 2.75
+    assert candidate.metadata["min_ipae"] == {"status": "success", "value": 2.75, "units": "angstrom"}
+    artifact = build_cycle_artifact(
+        task_id="test",
+        target="target",
+        cycle=0,
+        objective_key="iptm",
+        minimize=False,
+        candidates=[candidate],
+        cycle_best_id=candidate.candidate_id,
+        global_best_id=candidate.candidate_id,
+        known_candidate_ids={candidate.candidate_id},
+        structure_artifacts={},
+    )
+    assert artifact["candidates"][0]["metrics"]["min_ipae"] == 2.75
+
+
+def test_missing_raw_pae_omits_metric_and_clears_stale_parent_value(harness):
+    request = payload(pyrosetta={"enabled": False})
+    request["candidates"][0].update(
+        metrics={"min_ipae": 0.1}, metadata={"min_ipae": {"status": "success", "value": 0.1}}
+    )
+    candidate = harness._fold(request)["candidates"][0]
+    assert "min_ipae" not in candidate["metrics"]
+    assert candidate["metadata"]["min_ipae"]["status"] == "unavailable"
+    assert "FileNotFoundError" in candidate["metadata"]["min_ipae"]["reason"]
+    assert candidate["metadata"]["success"] is True
+
+
+@pytest.mark.parametrize("bounded,post_refold", [(False, False), (True, False), (True, True)])
+def test_required_metric_failure_cannot_continue_into_loss_ranking(harness, monkeypatch, bounded, post_refold):
     from opendde_harness.plugin.protein_design.servers.backends import loss_confidence_scorer
     from opendde_harness.plugin.protein_design.servers.backends.loss_objective import (
         DEFAULT_LOSS_WEIGHTS,
@@ -169,22 +214,48 @@ def test_required_metric_failure_cannot_continue_into_loss_ranking(harness, monk
             -2,
             metric_values=kwargs["metric_values"],
             metric_terms=kwargs["metric_terms"],
+            loss_combination=kwargs["loss_combination"],
         )
 
     monkeypatch.setattr(loss_confidence_scorer, "score_confidence_loss", score)
-    first, second = harness._fold(
-        payload(
-            objective_key="loss",
-            pyrosetta={"enabled": True, "on_failure": "continue"},
-            metric_loss_terms={"rosetta_interface_dg": {"direction": "minimize", "scale": 10.0}},
-        )
-    )["candidates"]
+    combination = None
+    if bounded:
+        names = list(DEFAULT_LOSS_WEIGHTS) + ["rosetta_interface_dg"]
+        combination = {
+            "mode": "bounded_grouped",
+            "calibration_id": "pipeline-test-fixture-only",
+            "groups": {"all": {"budget": 1.0, "terms": names}},
+            "anchors": {name: {"good": 0.0, "bad": 1.0} for name in names},
+        }
+        combination["anchors"].update(esm2={"good": 0.0, "bad": -5.0}, rosetta_interface_dg={"good": -50.0, "bad": 0.0})
+    request = payload(
+        objective_key="loss",
+        pyrosetta={"enabled": True, "on_failure": "continue"},
+        metric_loss_terms={"rosetta_interface_dg": {"direction": "minimize", "scale": 10.0}},
+        loss_combination=combination,
+        post_refold=post_refold,
+    )
+    for item in request["candidates"]:
+        item.update(objective=-999, metrics={"loss": -999, "rosetta_interface_dg": -999})
+        item["metadata"] = {"loss": {"formula_version": "stale", "loss": -999}}
+    first, second = harness._fold(request)["candidates"]
     assert first["objective"] is None
     assert first["metadata"]["success"] is False
     assert "Missing required loss metric" in first["metadata"]["error"]
     assert "loss" not in first["metrics"]
     assert second["metrics"]["loss"] == second["objective"]
-    assert second["metadata"]["loss"]["components"]["rosetta_interface_dg"]["contribution"] == -2
+    assert second["metrics"]["rosetta_interface_dg"] == -20
+    assert second["objective"] != -999
+    assert second["metadata"]["loss"]["formula_version"] != "stale"
+    if bounded:
+        assert second["metadata"]["loss"]["formula_version"] == "bounded-fixed-grouped-v1"
+        assert 0 <= second["objective"] <= 1
+        assert (
+            second["metadata"]["loss"]["legacy_loss_breakdown"]["components"]["rosetta_interface_dg"]["contribution"]
+            == -2
+        )
+    else:
+        assert second["metadata"]["loss"]["components"]["rosetta_interface_dg"]["contribution"] == -2
 
 
 def test_post_refold_reruns_analysis_and_replaces_old_scores(harness, monkeypatch):

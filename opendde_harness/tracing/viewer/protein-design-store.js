@@ -272,6 +272,7 @@ function projectPostFilter(summary, readArtifact) {
         metadata: {
           gate_evidence: candidate.metadata?.gate_evidence || null,
           loss: candidate.metadata?.loss || null,
+          min_ipae: candidate.metadata?.min_ipae || null,
           pyrosetta: candidate.metadata?.pyrosetta || null
         },
         passFilter: decision?.pass_filter === true,

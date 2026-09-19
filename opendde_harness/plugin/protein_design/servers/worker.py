@@ -63,7 +63,7 @@ def design_model(workflow: WorkflowConfig, default_model: str) -> str:
     return str(workflow.llm_model or default_model)
 
 
-async def run_task(task_id: str, task_root: Path) -> TaskSnapshot:
+async def run_task(task_id: str, task_root: Path, config_path: Path | None = None) -> TaskSnapshot:
     from opendde_harness.cli._helpers import load_runtime_config, make_provider
     from opendde_harness.cli._plugin_stack import build_plugin_registry, maybe_build_memory_backend
     from opendde_harness.config.opendde_harness import load_opendde_harness_config
@@ -71,8 +71,8 @@ async def run_task(task_id: str, task_root: Path) -> TaskSnapshot:
     store = TaskFileStore(task_root)
     workflow = store.read_workflow(task_id)
     snapshot = store.read_snapshot(task_id, reconcile=False)
-    runtime_config = load_runtime_config(None, None)
-    opendde_harness_config = load_opendde_harness_config()
+    runtime_config = load_runtime_config(str(config_path) if config_path else None, None)
+    opendde_harness_config = load_opendde_harness_config(config_path)
     plugin_config = dict(opendde_harness_config.plugins.config.get("protein-design") or {})
     pool = ComputePool.from_config(plugin_config)
     selection = await pool.select(workflow)
@@ -172,12 +172,15 @@ async def run_task(task_id: str, task_root: Path) -> TaskSnapshot:
 
 
 def main() -> None:
+    from opendde_harness.providers.pi_service import run_then_shutdown
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--task-root", type=Path, required=True)
+    parser.add_argument("--opendde-config", type=Path)
     args = parser.parse_args()
     try:
-        asyncio.run(run_task(args.task_id, args.task_root))
+        run_then_shutdown(run_task(args.task_id, args.task_root, args.opendde_config))
     except Exception as exc:
         logger.exception("protein-design worker {} failed during startup", args.task_id)
         store = TaskFileStore(args.task_root)

@@ -124,18 +124,32 @@ def wait_until_stopped(name: str, *, timeout: float = 60.0) -> bool:
 
 
 def retire_previous_release(token: str | None, code_id: str) -> None:
-    """Ask an earlier release's container to exit once idle, without waiting.
+    """Retire an earlier release before starting a replacement.
 
-    A new release starts its own container; left alone, the old one holds
-    its GPU memory until its idle timeout. Busy, it answers 409 and stays.
+    A busy release must keep both its task and the recorded state. Starting a
+    second GPU container here can exhaust device memory even when the new task
+    is otherwise unrelated to the active one.
     """
+    from opendde_harness.cli.onboard_compute import ComputeSetupError
+
     state = running_instance()
     if state is None or state.get("code_id") == code_id:
         return
     try:
-        request_shutdown(str(state["url"]), token, if_idle=True, timeout=2.0)
-    except httpx.HTTPError:
-        pass
+        response = request_shutdown(str(state["url"]), token, if_idle=True)
+        if response.status_code == 409:
+            raise ComputeSetupError(
+                f"Compute container {state['container']} belongs to an earlier code release and is busy. "
+                "Active tasks were preserved; retry after they finish."
+            )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ComputeSetupError(
+            "The earlier compute release could not confirm an idle shutdown. It was not replaced."
+        ) from exc
+    if not wait_until_stopped(str(state["container"])):
+        raise ComputeSetupError("The earlier compute release is still shutting down; retry after it exits.")
+    clear_state()
 
 
 def stop_if_idle(token: str | None, *, timeout: float = 60.0) -> bool:
@@ -213,7 +227,14 @@ def ensure_compute_service(config: Mapping[str, Any]) -> ComputeEndpoint:
     import portalocker
 
     from opendde_harness.cli.compute_code import runtime_code_identity
-    from opendde_harness.cli.onboard_compute import ComputeSetupError, DockerSettings, start_service
+    from opendde_harness.cli.onboard_compute import (
+        ComputeSetupError,
+        DockerSettings,
+        container_image_matches,
+        default_image,
+        inspect_container,
+        start_service,
+    )
 
     if not token:
         raise ComputeSetupError("The local compute service has no saved token; run ddeharness onboard.")
@@ -223,6 +244,33 @@ def ensure_compute_service(config: Mapping[str, Any]) -> ComputeEndpoint:
     # One starter at a time: concurrent task starts must not race for the container name.
     with portalocker.Lock(str(lock), timeout=900):
         state = running_instance(code_id)
+        desired_image = str((config.get("compute_docker") or {}).get("image") or default_image())
+        if state is not None:
+            container = inspect_container(str(state["container"]))
+            if container is None:
+                # A port may already belong to another service after the recorded
+                # container exits. Its health is not proof of the expected image.
+                state = None
+            elif not container_image_matches(container, desired_image):
+                # Changing the saved image must not silently reuse the old environment.
+                # The service owns the task leases, so only it can safely declare itself idle.
+                try:
+                    response = request_shutdown(str(state["url"]), token, if_idle=True)
+                    if response.status_code == 409:
+                        raise ComputeSetupError(
+                            f"Compute container {state['container']} uses a different image from {desired_image} "
+                            "and is busy. Active tasks were preserved; retry after they finish."
+                        )
+                    response.raise_for_status()
+                except httpx.HTTPError as exc:
+                    raise ComputeSetupError(
+                        "The compute image changed, but the current worker could not confirm an idle shutdown. "
+                        "It was not replaced."
+                    ) from exc
+                if not wait_until_stopped(str(state["container"])):
+                    raise ComputeSetupError("The old compute image is still shutting down; retry after it exits.")
+                clear_state()
+                state = None
         if state is not None and service_health(str(state["url"]), token) is not None:
             return ComputeEndpoint(str(state["url"]), token)
         retire_previous_release(token, code_id)

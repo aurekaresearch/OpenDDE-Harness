@@ -224,7 +224,10 @@ class DetachedDesignTaskController:
         python_executable: str | None = None,
         worker_module: str = "opendde_harness.plugin.protein_design.servers.worker",
     ) -> None:
+        from opendde_harness.config.loader import get_config_path
+
         self._plugin_config = dict(plugin_config)
+        self._config_path = get_config_path().expanduser().resolve()
         self._store = store or TaskFileStore()
         self._python = python_executable or sys.executable
         self._worker_module = worker_module
@@ -250,6 +253,8 @@ class DetachedDesignTaskController:
             task_id,
             "--task-root",
             str(self._store.root),
+            "--opendde-config",
+            str(self._config_path),
         ]
 
     async def start(self, workflow: WorkflowConfig) -> TaskSnapshot:

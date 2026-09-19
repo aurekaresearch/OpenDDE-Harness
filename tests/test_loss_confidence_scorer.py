@@ -43,6 +43,27 @@ def test_real_confidence_calculation_combines_candidate_interface_metrics(tmp_pa
     assert composite["loss"] == pytest.approx(original["loss"] - 1.5)
     assert composite["loss_components"] == original["loss_components"]
     assert composite["loss_objective"]["components"]["rosetta_interface_dg"]["raw"] == -15
+    from opendde_harness.plugin.protein_design.servers.backends.loss_objective import DEFAULT_LOSS_WEIGHTS
+
+    names = list(DEFAULT_LOSS_WEIGHTS) + ["rosetta_interface_dg"]
+    combination = {
+        "mode": "bounded_grouped",
+        "calibration_id": "confidence-test-fixture-only",
+        "groups": {"all": {"budget": 1.0, "terms": names}},
+        "anchors": {name: {"good": 0.0, "bad": 1.0} for name in names},
+    }
+    combination["anchors"].update(esm2={"good": 0.0, "bad": -5.0}, rosetta_interface_dg={"good": -50.0, "bad": 0.0})
+    bounded = scorer.score_confidence_loss(
+        **arguments,
+        metric_values={"rosetta_interface_dg": -15},
+        metric_terms={"rosetta_interface_dg": {"direction": "minimize", "scale": 10.0}},
+        loss_combination=combination,
+    )
+    assert bounded["formula_version"] == "bounded-fixed-grouped-v1"
+    assert bounded["loss_objective"]["loss_combination"] == combination
+    assert bounded["legacy_loss"] == composite["loss"]
+    assert bounded["loss_components"] == original["loss_components"]
+    assert 0 <= bounded["loss"] <= 1
 
 
 def test_mmcif_conversion_preserves_chains_and_source(tmp_path):

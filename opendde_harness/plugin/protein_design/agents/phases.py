@@ -362,6 +362,103 @@ class ProteinDesignPhases:
         allowed = set(available)
         return tuple(name for name in dict.fromkeys(requested) if name in allowed)[:3]
 
+    @staticmethod
+    def _quality_candidate_evidence(candidate: Candidate, config: WorkflowConfig) -> dict[str, Any]:
+        chains = candidate.metadata.get("chains")
+        if not isinstance(chains, Mapping) or not chains:
+            if len(config.binder_chains) != 1:
+                raise ValueError(f"Quality evidence requires binder chains for {candidate.candidate_id}")
+            chains = {next(iter(config.binder_chains)): candidate.sequence}
+        if (
+            set(chains) != set(config.binder_chains)
+            or "".join(chains[chain] for chain in config.binder_chains) != candidate.sequence
+        ):
+            raise ValueError(f"Quality evidence chain sequences disagree for {candidate.candidate_id}")
+        fold_sequences = (candidate.metadata.get("fold") or {}).get("sequences") or {}
+        source_binders = (config.metadata.get("source_config") or {}).get("initial_binders") or []
+        chain_roles = {
+            chain: item.get("chain_type")
+            for binder in source_binders
+            for chain, item in (binder.get("chains") or {}).items()
+            if isinstance(item, Mapping) and chain in config.binder_chains
+        }
+        chain_evidence = {}
+        for chain, sequence in chains.items():
+            if len(sequence) != len(config.binder_chains[chain]):
+                raise ValueError(f"Quality evidence chain length changed for {candidate.candidate_id}:{chain}")
+            if chain in fold_sequences and fold_sequences[chain] != sequence:
+                raise ValueError(f"Quality evidence differs from folded sequence for {candidate.candidate_id}:{chain}")
+            cdr = set(config.cdr_regions.get(chain, []))
+            fixed = set(config.fixed_residues.get(chain, []))
+            mutable = set(config.mutable_positions.get(chain, [])) - fixed
+            groups = config.cdr_region_groups.get(chain) or ([sorted(cdr)] if cdr else [])
+
+            def position_evidence(position: int) -> dict[str, Any]:
+                return {
+                    "position": position,
+                    "residue": sequence[position],
+                    "in_configured_cdr": position in cdr,
+                    "fixed": position in fixed,
+                    "mutable": position in mutable,
+                }
+
+            chain_evidence[chain] = {
+                "sequence": sequence,
+                "configured_chain_type": chain_roles.get(chain)
+                or (config.metadata.get("binder_type") if len(chains) == 1 else None),
+                "length": len(sequence),
+                "cdr_groups": [
+                    {
+                        "group": index,
+                        "positions": list(positions),
+                        "sequence": "".join(sequence[position] for position in positions),
+                    }
+                    for index, positions in enumerate(groups, start=1)
+                ],
+                "configured_cdr_positions": sorted(cdr),
+                "fixed_positions": sorted(fixed),
+                "mutable_positions": sorted(mutable),
+                "cysteines": [
+                    position_evidence(position) for position, residue in enumerate(sequence) if residue == "C"
+                ],
+                "methionines": [
+                    position_evidence(position) for position, residue in enumerate(sequence) if residue == "M"
+                ],
+                "tryptophans": [
+                    position_evidence(position) for position, residue in enumerate(sequence) if residue == "W"
+                ],
+                "potential_n_glycosylation_sequons": [
+                    {**position_evidence(position), "motif": sequence[position : position + 3]}
+                    for position in range(len(sequence) - 2)
+                    if sequence[position] == "N" and sequence[position + 1] != "P" and sequence[position + 2] in "ST"
+                ],
+                "cysteine_bond_state": "Not established by sequence alone; fixed or CDR cysteine is not proof of a free thiol.",
+            }
+        sequence_evidence = {
+            "index_base": 0,
+            "source": "current_candidate_sequences_and_configured_masks",
+            "chains": chain_evidence,
+        }
+        candidate.metadata["quality_sequence_evidence"] = sequence_evidence
+        pyrosetta = candidate.metadata.get("pyrosetta") or {}
+        gate = candidate.metadata.get("gate_evidence") or {}
+        return {
+            "candidate_id": candidate.candidate_id,
+            "sequence": candidate.sequence,
+            "sequence_evidence": sequence_evidence,
+            "objective": candidate.objective,
+            "metrics": dict(candidate.metrics),
+            "structure_path": candidate.structure_path,
+            "gate_passed": candidate.metadata.get("gate_passed"),
+            "gate_evidence": {key: value for key, value in gate.items() if not isinstance(value, (dict, list))},
+            "binder_rmsd_evidence": candidate.metadata.get("binder_rmsd_evidence"),
+            "pyrosetta": {
+                key: pyrosetta[key]
+                for key in ("status", "error", "metrics", "relaxed_structure_path")
+                if key in pyrosetta
+            },
+        }
+
     async def quality_cycle(
         self,
         config: WorkflowConfig,
@@ -369,6 +466,7 @@ class ProteinDesignPhases:
         candidates: list[Candidate],
         analysis: AnalyzeAgentOutput,
     ) -> QualityBatchOutput:
+        evidence = [self._quality_candidate_evidence(candidate, config) for candidate in candidates]
         payload = {
             "task_id": config.metadata.get("task_id"),
             "candidates": [item.model_dump(mode="json") for item in candidates],
@@ -380,9 +478,17 @@ class ProteinDesignPhases:
         except Exception as exc:
             objective = {"available": False, "error": str(exc), "results": []}
         prompt = QUALITY_CHECK_BATCH_PROMPT.format(
-            phase_analyze_summary=analysis.downstream_header,
+            binder_context=json.dumps(
+                {
+                    "binder_type": config.metadata.get("binder_type"),
+                    "index_base": 0,
+                    "configured_hotspots": config.fold_options.get("target_hotspots") or {},
+                    "sequence_source": "Current candidate chains, not initial scaffold summaries",
+                },
+                ensure_ascii=False,
+            ),
             objective_tool_results=json.dumps(objective, ensure_ascii=False, default=str),
-            candidates=json.dumps(payload["candidates"], ensure_ascii=False, default=str),
+            candidates=json.dumps(evidence, ensure_ascii=False, default=str),
         )
         profile = AGENT_PROFILES[AgentRole.QUALITY]
         output = await self._session.run(
@@ -491,7 +597,7 @@ class ProteinDesignPhases:
                     "cdr_contact_fraction": "CDR share of binder contacts; interpret with interface and hotspot evidence.",
                     "framework_contact_fraction": "Framework share of binder contacts; lower is generally preferred.",
                     "loglikelihood": "Sequence-model compatibility; higher is generally better for comparable sequences.",
-                    "objective": "Search objective only; direction is given by minimize. Do not let it dictate final order.",
+                    "objective": "Authoritative selection objective; direction is given by minimize. Loss includes configured PyRosetta contributions. Python enforces this order; your commentary cannot override it.",
                 },
                 "candidate_evidence": [self._post_filter_evidence(item, recurring_offenders) for item in candidates],
             },

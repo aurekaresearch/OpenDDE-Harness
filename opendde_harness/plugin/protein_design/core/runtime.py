@@ -12,6 +12,7 @@ import yaml
 
 from opendde_harness.plugin.protein_design.core.contracts import Placement, WorkflowConfig
 from opendde_harness.plugin.protein_design.servers.backends.loss_objective import (
+    normalize_loss_combination,
     normalize_loss_weights,
     normalize_metric_loss_terms,
 )
@@ -54,6 +55,7 @@ class WorkflowConfigLoader:
             "hotspot_contact_cutoff_a",
             "initial_structure_path",
             "loss_weights",
+            "loss_combination",
             "metric_loss_terms",
             "n_cycles",
             "num_mutations",
@@ -135,7 +137,7 @@ class WorkflowConfigLoader:
             "unpairedMsaPath",
         }
     )
-    _POST_FILTER_FIELDS = frozenset({"enabled", "top_k"})
+    _POST_FILTER_FIELDS = frozenset({"enabled", "top_k", "max_parents", "samples_per_parent", "survivors_per_parent"})
     _ANTIBODY_CHAIN_TYPE_ALIASES = {
         "VHH": "VHH",
         "VH": "VH",
@@ -271,6 +273,9 @@ class WorkflowConfigLoader:
             mutation_count_instruction=f"Use {design.get('num_mutations', 'the configured number of')} CDR mutations.",
             post_filter_enabled=bool(post.get("enabled", False)),
             post_filter_top_k=int(post.get("top_k", 20)),
+            post_refold_max_parents=post.get("max_parents"),
+            post_refold_samples_per_parent=post.get("samples_per_parent", 40),
+            post_refold_survivors_per_parent=post.get("survivors_per_parent", 4),
         )
 
     @staticmethod
@@ -591,6 +596,12 @@ class WorkflowConfigLoader:
                 if not fold_options.get("pyrosetta", {}).get("enabled"):
                     raise ValueError("design.metric_loss_terms requires fold.pyrosetta.enabled: true")
             fold_options["metric_loss_terms"] = terms
+        if "loss_combination" in design:
+            if str(design.get("optimization_metric", "loss")).lower() != "loss":
+                raise ValueError("design.loss_combination requires optimization_metric: loss")
+            fold_options["loss_combination"] = normalize_loss_combination(
+                design["loss_combination"], weights=loss_weights, metric_terms=fold_options.get("metric_loss_terms")
+            )
         target_hotspots = {
             str(chain_id): list(value.get("hotspots", []))
             for chain_id, value in target_chains.items()

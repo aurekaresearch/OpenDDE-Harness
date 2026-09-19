@@ -486,7 +486,10 @@ class PythonProteinDesignHarness:
             StructurePredictor,
             normalize_execution_mode,
         )
-        from opendde_harness.plugin.protein_design.servers.backends.loss_objective import normalize_metric_loss_terms
+        from opendde_harness.plugin.protein_design.servers.backends.loss_objective import (
+            normalize_loss_combination,
+            normalize_metric_loss_terms,
+        )
         from opendde_harness.plugin.protein_design.servers.backends.pyrosetta_analysis import (
             PyRosettaConfig,
             analyze_batch,
@@ -505,6 +508,11 @@ class PythonProteinDesignHarness:
         objective_key = str(options.get("objective_key", "iptm")).lower()
         analysis_config = PyRosettaConfig.model_validate(options.get("pyrosetta", {}))
         metric_terms = normalize_metric_loss_terms(options.get("metric_loss_terms"))
+        loss_combination = normalize_loss_combination(
+            options.get("loss_combination"), weights=options.get("loss_weights"), metric_terms=metric_terms
+        )
+        if loss_combination is not None and objective_key != "loss":
+            raise ValueError("loss_combination requires objective_key: loss")
         if any(term["weight"] > 0 for term in metric_terms.values()):
             if objective_key != "loss" or not analysis_config.enabled:
                 raise ValueError("metric_loss_terms requires objective_key: loss and pyrosetta.enabled: true")
@@ -600,6 +608,19 @@ class PythonProteinDesignHarness:
                     scoring_error = f"PyRosetta analysis {analysis.status}: {analysis.error}"
             loss_score = None
             structure_path = self._first_path(result_data.get("structure_path"))
+            from opendde_harness.plugin.protein_design.servers.backends.interchain_pae import (
+                measure_min_interchain_pae,
+            )
+
+            source_metadata["min_ipae"] = measure_min_interchain_pae(
+                confidence_path=result_data.get("all_atom_confidence_path"),
+                structure_path=structure_path,
+                sequences={chain: self._chain_sequence(value) for chain, value in fold_chains.items()},
+                binder_chains=binder_chain_ids,
+                target_chains=[str(chain) for chain in options.get("target_chain_ids") or []],
+            )
+            if source_metadata["min_ipae"]["status"] == "success":
+                metrics["min_ipae"] = source_metadata["min_ipae"]["value"]
             gate_passed, gate_evidence = self._evaluate_gate(
                 result_data,
                 sequences[index],
@@ -643,6 +664,7 @@ class PythonProteinDesignHarness:
                         target_hotspots=options.get("target_hotspots") or None,
                         metric_values=metrics,
                         metric_terms=metric_terms,
+                        loss_combination=loss_combination,
                     )
                     metrics["loss"] = float(loss_score["loss"])
                     metrics["loglikelihood"] = float(esm_scores[index])

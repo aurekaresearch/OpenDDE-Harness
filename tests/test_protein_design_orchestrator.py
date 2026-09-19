@@ -75,6 +75,7 @@ def make_candidate(candidate_id: str, objective: float, *, gate: bool = True) ->
             "success": True,
             "gate_passed": gate,
             "post_refold_success": True,
+            "post_refold_quality_passed": True,
         },
     )
 
@@ -322,10 +323,10 @@ def test_objective_fallback_selects_instead_of_returning_empty() -> None:
 
 def test_objective_fallback_ranks_rejected_candidates_last() -> None:
     eligible = [make_candidate("ok", 1.0)]
-    rejected = [make_candidate("bad", 9.0, gate=False)]
+    rejected = [make_candidate("bad", 9.0, gate=False), make_candidate("also_bad", 0.0, gate=False)]
     payload = objective_fallback(eligible, rejected)
     ranks = {item["candidate_id"]: item["rank"] for item in payload["decisions"]}
-    assert ranks["ok"] < ranks["bad"]
+    assert ranks == {"ok": 1, "bad": 2, "also_bad": 3}
     assert payload["selected_candidate_ids"] == ["ok"]
 
 
@@ -355,6 +356,281 @@ def test_run_falls_back_to_objective_ordering_when_ranking_is_invalid() -> None:
     )
     assert snapshot.final_selection is not None
     assert snapshot.final_selection["selected_candidate_ids"]
+
+
+def run_terminal_case(monkeypatch, candidates, *, output=None, quality=None, **config_overrides):
+    from opendde_harness.plugin.protein_design.core import orchestrator as module
+
+    class TerminalCompute(FakeCompute):
+        async def submit_fold(self, request):
+            submission = await super().submit_fold(request)
+            if request.options.get("post_refold"):
+                self.jobs[submission.job_id] = {"candidates": [item.model_dump(mode="json") for item in candidates]}
+            return submission
+
+    class TerminalPhases(FakePhases):
+        def __init__(self):
+            super().__init__()
+            self.quality_calls = []
+
+        async def quality_cycle(self, config, cycle, candidates, analysis):
+            self.quality_calls.append((cycle, list(candidates)))
+            if cycle == config.cycles and quality is not None:
+                if isinstance(quality, Exception):
+                    raise quality
+                return quality
+            return QualityBatchOutput(results={})
+
+    async def prepare(compute, parents, *args):
+        result = [item.model_copy(deep=True) for item in candidates]
+        for candidate in result:
+            candidate.metadata["post_mpnn_selected"] = True
+        return result
+
+    monkeypatch.setattr(module, "prepare_post_mpnn", prepare)
+    compute = TerminalCompute()
+    phases = TerminalPhases()
+    phases.post_filter_output = output
+    orchestrator = DesignOrchestrator(compute, DesignMemory(None, agent_id="test"), phases)
+    snapshot = asyncio.run(
+        orchestrator.run("terminal-policy", make_config(**config_overrides), stop_event=asyncio.Event(), adjustments={})
+    )
+    return snapshot, compute, phases
+
+
+@pytest.mark.parametrize("gate_reason", ["cdr_contact_fraction_below_threshold", "cdr3_hotspot_contact_missing"])
+def test_terminal_hard_gate_cannot_be_overridden_by_agent_praise(monkeypatch, gate_reason):
+    bad = make_candidate("bad", -10.0, gate=False)
+    bad.metadata["gate_evidence"] = {"reason": gate_reason}
+    good = make_candidate("good", 1.0)
+    praise = PostFilterAgentOutput(
+        strategy_summary="Prefer failed gate",
+        decisions=[
+            {"candidate_id": "bad", "rank": 1, "rationale": "Excellent despite gate failure"},
+            {"candidate_id": "good", "rank": 2, "rationale": "Second choice"},
+        ],
+    )
+    snapshot, compute, phases = run_terminal_case(monkeypatch, [bad, good], output=praise)
+    assert snapshot.status.value == "completed"
+    assert [item.candidate_id for item in phases.post_filter_calls[0]] == ["good"]
+    selection = snapshot.final_selection
+    assert selection["selected_candidate_ids"] == ["good"]
+    assert selection["mode"] == "deterministic"
+    assert selection["post_filter_error"]
+    rejected = next(item for item in selection["decisions"] if item["candidate_id"] == "bad")
+    assert rejected["hard_eligible"] is False
+    assert rejected["pass_filter"] is False
+    assert gate_reason in rejected["rationale"]
+    assert compute.population_updates[-1]["final_selection"] == selection
+
+
+@pytest.mark.parametrize("minimize", [True, False])
+@pytest.mark.parametrize("top_k", [1, 2])
+def test_terminal_advisory_order_never_changes_objective_top_k(monkeypatch, minimize, top_k):
+    candidates = [make_candidate("middle", 0.0), make_candidate("low", -2.0), make_candidate("high", 3.0)]
+    ordered = sorted(candidates, key=lambda item: item.objective, reverse=not minimize)
+    advice = PostFilterAgentOutput(
+        strategy_summary="Reverse objective for diversity",
+        decisions=[
+            {"candidate_id": item.candidate_id, "rank": rank, "rationale": "Advisory tradeoff"}
+            for rank, item in enumerate(reversed(ordered), start=1)
+        ],
+    )
+    snapshot, _, _ = run_terminal_case(
+        monkeypatch, candidates, output=advice, minimize=minimize, post_filter_top_k=top_k
+    )
+    selection = snapshot.final_selection
+    expected = [item.candidate_id for item in ordered]
+    assert selection["mode"] == "deterministic"
+    assert selection["selected_candidate_ids"] == expected[:top_k]
+    assert [item["candidate_id"] for item in selection["decisions"]] == expected
+    assert [item["rank"] for item in selection["decisions"]] == [1, 2, 3]
+    assert [item["advisory_rank"] for item in selection["decisions"]] == [3, 2, 1]
+    assert selection["advisory_strategy_summary"] == advice.strategy_summary
+    fallback = DesignOrchestrator._objective_final_selection(
+        eligible=candidates,
+        rejected=[],
+        terminal=candidates,
+        config=make_config(minimize=minimize, post_filter_top_k=top_k),
+        strategy_summary="fallback",
+    )
+    assert fallback["selected_candidate_ids"] == selection["selected_candidate_ids"]
+
+
+@pytest.mark.parametrize("metric", [None, float("nan"), float("inf")])
+def test_terminal_missing_required_metric_cannot_be_selected(monkeypatch, metric):
+    candidate = make_candidate("unscored", -20.0)
+    if metric is not None:
+        candidate.metrics["rosetta_interface_dg"] = metric
+    snapshot, _, phases = run_terminal_case(
+        monkeypatch,
+        [candidate],
+        fold_options={"metric_loss_terms": {"rosetta_interface_dg": {"weight": 0.05, "direction": "minimize"}}},
+    )
+    assert snapshot.status.value == "failed"
+    assert snapshot.final_selection["mode"] == "failed"
+    assert snapshot.final_selection["selected_candidate_ids"] == []
+    assert snapshot.final_selection["decisions"][0]["hard_eligible"] is False
+    assert "required loss metrics" in snapshot.final_candidates[0].metadata["post_refold_error"]
+    assert phases.post_filter_calls == []
+
+
+def test_terminal_quality_is_fresh_and_missing_or_failed_verdict_rejects(monkeypatch):
+    candidates = [make_candidate(name, float(index)) for index, name in enumerate(("failed", "missing", "passed"))]
+    for candidate in candidates:
+        candidate.metrics["iptm"] = 0.9
+        candidate.metadata["post_refold_quality_passed"] = True  # A stale verdict must not carry over.
+    quality = QualityBatchOutput(
+        results={
+            name: {"reasoning": "Fresh assessment", "overall_risk_level": "low", "pass_check": passed}
+            for name, passed in (("failed", False), ("passed", True))
+        }
+    )
+    snapshot, _, phases = run_terminal_case(monkeypatch, candidates, quality=quality, quality_check_enabled=True)
+    assert snapshot.status.value == "completed"
+    assert snapshot.final_selection["selected_candidate_ids"] == ["passed"]
+    assert [(cycle, [item.candidate_id for item in items]) for cycle, items in phases.quality_calls] == [
+        (2, ["failed", "missing", "passed"])
+    ]
+    assert [item.metadata["post_refold_quality_passed"] for item in snapshot.final_candidates] == [False, False, True]
+
+
+def test_terminal_quality_transport_failure_is_not_success(monkeypatch):
+    candidate = make_candidate("quality-unavailable", 1.0)
+    candidate.metrics["iptm"] = 0.9
+    snapshot, _, phases = run_terminal_case(
+        monkeypatch, [candidate], quality=RuntimeError("quality unavailable"), quality_check_enabled=True
+    )
+    assert snapshot.status.value == "failed"
+    assert snapshot.error == "quality unavailable"
+    assert snapshot.final_selection["selected_candidate_ids"] == []
+    assert phases.post_filter_calls == []
+
+
+@pytest.mark.parametrize("failure", ["gate", "scoring", "structure", "masked"])
+def test_all_terminal_candidates_ineligible_marks_run_failed(monkeypatch, failure):
+    candidate = make_candidate("failed", 1.0)
+    if failure == "gate":
+        candidate.metadata["gate_passed"] = False
+    elif failure == "scoring":
+        candidate.metadata["success"] = False
+        candidate.objective = None
+    elif failure == "structure":
+        candidate.structure_path = None
+    else:
+        candidate.sequence = "XXXXXXXXXX"
+        candidate.metadata["chains"] = {"D": candidate.sequence}
+    snapshot, _, phases = run_terminal_case(monkeypatch, [candidate])
+    assert snapshot.status.value == "failed"
+    assert snapshot.error
+    assert snapshot.final_selection["mode"] == "failed"
+    assert snapshot.final_selection["selected_candidate_ids"] == []
+    assert snapshot.final_selection["decisions"][0]["hard_eligible"] is False
+    assert phases.post_filter_calls == []
+
+
+def test_refold_never_inherits_parent_gate_or_quality_verdict():
+    previous = make_candidate("candidate", 1.0)
+    fresh = make_candidate("candidate", 2.0)
+    fresh.metadata.pop("gate_passed")
+    fresh.metrics.pop("gate_passed")
+    merged = DesignOrchestrator._merge_post_refold_candidates([fresh], [previous])[0]
+    assert merged.metadata["gate_passed"] is None
+    assert merged.metadata["post_refold_quality_passed"] is False
+    assert DesignOrchestrator._post_filter_eligible(merged) is False
+
+
+def test_quality_rejection_reason_does_not_report_a_successful_geometry_gate():
+    candidate = make_candidate("quality-rejected", 0.3)
+    candidate.metadata.update(
+        gate_evidence={"reason": "cdr_contact_fraction_passed"},
+        post_refold_quality_passed=False,
+        post_refold_quality={"pass_check": False, "reasoning": "Current candidate liability is High Risk"},
+    )
+    decision = DesignOrchestrator._hard_rejection_decision(candidate, 1)
+    assert "quality_check_failed" in decision["rationale"]
+    assert "Current candidate liability" in decision["rationale"]
+    assert "cdr_contact_fraction_passed" not in decision["rationale"]
+
+
+def test_terminal_metric_guard_never_inherits_parent_metrics():
+    previous = make_candidate("candidate", -1.0)
+    previous.metrics["rosetta_interface_dg"] = -40.0
+    fresh = make_candidate("candidate", -2.0)
+    merged = DesignOrchestrator._merge_post_refold_candidates([fresh], [previous])[0]
+    config = make_config(
+        fold_options={"metric_loss_terms": {"rosetta_interface_dg": {"weight": 0.05, "direction": "minimize"}}}
+    )
+    DesignOrchestrator._validate_terminal_metrics([merged], config)
+    assert "rosetta_interface_dg" not in merged.metrics
+    assert merged.metadata["post_refold_success"] is False
+    assert "required loss metrics" in merged.metadata["post_refold_error"]
+
+
+@pytest.mark.parametrize("weight,metric", [(0.05, -40.0), (0.0, None)])
+def test_terminal_metric_guard_accepts_finite_required_or_disabled_metric(monkeypatch, weight, metric):
+    candidate = make_candidate("valid", -2.0)
+    if metric is not None:
+        candidate.metrics["rosetta_interface_dg"] = metric
+    snapshot, _, _ = run_terminal_case(
+        monkeypatch,
+        [candidate],
+        fold_options={"metric_loss_terms": {"rosetta_interface_dg": {"weight": weight, "direction": "minimize"}}},
+    )
+    assert snapshot.status.value == "completed"
+    assert snapshot.final_selection["selected_candidate_ids"] == ["valid"]
+
+
+def test_terminal_quality_uses_same_threshold_and_skill_exemption_as_search(monkeypatch):
+    low_confidence = make_candidate("below_trigger", -2.0)
+    low_confidence.metrics["iptm"] = 0.6
+    redesign = make_candidate("full_redesign", -1.0)
+    redesign.metrics["iptm"] = 0.9
+    redesign.metadata["skill_id"] = "cdr-full-redesign"
+    snapshot, _, phases = run_terminal_case(
+        monkeypatch, [low_confidence, redesign], quality_check_enabled=True, post_filter_top_k=2
+    )
+    assert phases.quality_calls == []
+    assert snapshot.final_selection["selected_candidate_ids"] == ["below_trigger", "full_redesign"]
+
+
+def test_disabled_terminal_selection_uses_actual_last_cycle_quality_admission(monkeypatch):
+    orchestrator, compute, phases = make_orchestrator()
+    submit = compute.submit_fold
+
+    async def high_confidence(request):
+        result = await submit(request)
+        for item in compute.jobs[result.job_id]["candidates"]:
+            item["metrics"]["iptm"] = 0.9
+            item["metadata"]["post_refold_quality_passed"] = True  # Stale unrelated evidence cannot admit it.
+        return result
+
+    async def quality(config, cycle, candidates, analysis):
+        return QualityBatchOutput(
+            results={
+                item.candidate_id: {
+                    "reasoning": "Reject the lower objective for quality",
+                    "overall_risk_level": "low",
+                    "pass_check": item.candidate_id.endswith("_1"),
+                }
+                for item in candidates
+            }
+        )
+
+    monkeypatch.setattr(compute, "submit_fold", high_confidence)
+    monkeypatch.setattr(phases, "quality_cycle", quality)
+    snapshot = asyncio.run(
+        orchestrator.run(
+            "quality-gated-without-refold",
+            make_config(post_filter_enabled=False, quality_check_enabled=True),
+            stop_event=asyncio.Event(),
+            adjustments={},
+        )
+    )
+    assert snapshot.final_selection["selected_candidate_ids"] == ["c1_1"]
+    rejected = next(item for item in snapshot.final_selection["decisions"] if item["candidate_id"] == "c1_0")
+    assert rejected["hard_eligible"] is False
+    assert rejected["objective"] < snapshot.final_candidates[1].objective
 
 
 # --- end-to-end run -------------------------------------------------------------------

@@ -74,3 +74,20 @@ def test_importing_it_costs_nothing_from_the_cli():
 
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "clean"
+
+
+def test_find_node_discovers_nvm_runtime_without_interactive_shell_path(tmp_path, monkeypatch):
+    node = tmp_path / "nvm" / "versions" / "node" / "v22.23.2" / "bin" / "node"
+    node.parent.mkdir(parents=True)
+    node.write_text("#!/bin/sh\necho v22.23.2\n")
+    node.chmod(0o755)
+    monkeypatch.setenv("NVM_DIR", str(tmp_path / "nvm"))
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    monkeypatch.delenv("OPENDDE_HARNESS_NODE", raising=False)
+    monkeypatch.setenv("OPENDDE_HARNESS_HOME", str(tmp_path / "no-managed-runtime"))
+
+    path, version = node_runtime.find_node()
+
+    assert path == str(node)
+    assert version == (22, 23, 2)

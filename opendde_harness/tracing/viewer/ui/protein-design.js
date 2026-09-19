@@ -220,8 +220,10 @@
     return runs?.[0]?.taskId || null
   }
 
-  function chartGeometry(series, width = 640, height = 190) {
-    const points = [...(series?.cycleBest || []), ...(series?.globalBest || [])]
+  function chartGeometry(series, width = 640, height = 190, domain = null) {
+    const points = [...(series?.cycleBest || []), ...(series?.globalBest || [])].filter(
+      point => Number.isFinite(point.cycle) && Number.isFinite(point.value)
+    )
     if (!points.length) return null
     const cycles = points.map(point => point.cycle)
     const values = points.map(point => point.value)
@@ -229,6 +231,11 @@
     const maxCycle = Math.max(...cycles)
     let minValue = Math.min(...values)
     let maxValue = Math.max(...values)
+    if (domain) {
+      // Keep unexpected out-of-range values visible instead of clipping the evidence.
+      minValue = Math.min(domain.min, minValue)
+      maxValue = Math.max(domain.max, maxValue)
+    }
     if (minValue === maxValue) {
       const pad = Math.abs(minValue || 1) * 0.05
       minValue -= pad
@@ -245,11 +252,12 @@
   }
 
   function renderSeries(points, geometry, className) {
-    if (!points?.length) return ''
+    points = (points || []).filter(point => Number.isFinite(point.cycle) && Number.isFinite(point.value))
+    if (!points.length) return ''
     const line = points.map(point => `${geometry.x(point.cycle)},${geometry.y(point.value)}`).join(' ')
     const circles = points
       .map(point => {
-        const label = `Cycle ${point.cycle} · ${point.candidateId} · ${formatNumber(point.value)}`
+        const label = `Cycle ${point.cycle} · ${point.candidateId} · ${point.value}`
         return `<circle class="${className}-point" cx="${geometry.x(point.cycle)}" cy="${geometry.y(point.value)}" r="2" data-cycle="${point.cycle}" data-candidate-id="${escapeHtml(point.candidateId)}" data-value="${point.value}" tabindex="0"><title>${escapeHtml(label)}</title></circle>`
       })
       .join('')
@@ -257,7 +265,7 @@
   }
 
   function renderMetricPlot(metric, series, options = {}) {
-    const geometry = chartGeometry(series, options.width, options.height)
+    const geometry = chartGeometry(series, options.width, options.height, options.domain)
     if (!geometry) return ''
     return `<div class="protein-chart-wrap${options.focus ? ' protein-chart-focus-wrap' : ''}">
           <svg class="protein-metric-svg" viewBox="0 0 ${geometry.width} ${geometry.height}" role="img" aria-label="${escapeHtml(humanizeFieldName(metric))} by cycle">
@@ -275,12 +283,23 @@
         </div>`
   }
 
-  function renderMetricChart(metric, series, active = false) {
-    const plot = renderMetricPlot(metric, series, { width: 560, height: 220 })
+  function renderMetricChart(metric, series, run) {
+    const boundedLoss =
+      metric === 'loss' &&
+      (run.cycles || []).some(cycle =>
+        (cycle.candidates || []).some(
+          candidate => candidate.metadata?.loss?.formula_version === 'bounded-fixed-grouped-v1'
+        )
+      )
+    const plot = renderMetricPlot(metric, series, {
+      width: 560,
+      height: 220,
+      domain: boundedLoss ? { min: 0, max: 1 } : null
+    })
     if (!plot) return ''
     return `
       <article class="protein-metric-card" data-metric="${escapeHtml(metric)}">
-        <header><h3>${escapeHtml(humanizeFieldName(metric))}</h3><div class="protein-chart-legend protein-chart-legend-compact"><span class="cycle-best">Current cycle best</span><span class="global-best">Global best</span></div></header>
+        <header><h3 title="${escapeHtml(candidatesDashboard.metricDescription(metric, run))}">${escapeHtml(humanizeFieldName(metric))}</h3><div class="protein-chart-legend protein-chart-legend-compact"><span class="cycle-best">Current cycle best</span><span class="global-best">Global best</span></div></header>
         ${plot}
       </article>`
   }
@@ -478,12 +497,10 @@
     if (!run) {
       return `<div class="protein-dashboard"><header class="protein-runbar">${runPicker}</header><div class="protein-loading">Loading selected run…</div></div>`
     }
-    const availableMetrics = orderMetricNames(run.metricNames, run.objectiveKey)
-      .filter(metric => !/(^|[._])ptm$/i.test(metric) && chartGeometry(run.series?.[metric]))
-      .slice(0, 8)
-    const metricCharts = availableMetrics
-      .map((metric, index) => renderMetricChart(metric, run.series?.[metric], index === 0))
-      .join('')
+    const availableMetrics = orderMetricNames(run.metricNames, run.objectiveKey).filter(metric =>
+      chartGeometry(run.series?.[metric])
+    )
+    const metricCharts = availableMetrics.map(metric => renderMetricChart(metric, run.series?.[metric], run)).join('')
     const traceUnavailable = !run.traceId || run.traceAvailable === false
     return `<div id="proteinCandidateWorkspace">${candidatesDashboard.renderProteinDesignDashboard(payload).replace('<!--post-filter-results-->', renderPostFilter(run.postFilter))}</div>
       <div class="protein-design-details">
@@ -1232,6 +1249,7 @@
   return {
     captureDashboardViewState,
     buildTreeLayout,
+    chartGeometry,
     load3Dmol,
     mount,
     orderMetricNames,

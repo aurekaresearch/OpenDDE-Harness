@@ -10,6 +10,7 @@ import time
 from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Any, Protocol
 
 from opendde_harness.plugin.protein_design.core.constants import (
@@ -149,6 +150,7 @@ class _RunState:
     total_scored_candidates: int = 0
     search_history: list[dict[str, Any]] = field(default_factory=list)
     last_candidates: list[Candidate] = field(default_factory=list)
+    last_admitted_ids: set[str] = field(default_factory=set)
     survivors: list[Candidate] = field(default_factory=list)
 
 
@@ -256,10 +258,21 @@ class DesignOrchestrator:
                     stop_event=stop_event,
                     run_span=run_span,
                 )
-                self._flush_event()
+                terminal_failed = config.post_filter_enabled and final_selection.get("mode") == "failed"
+                terminal_error = (
+                    (
+                        final_selection.get("post_refold_error")
+                        or final_selection.get("post_filter_error")
+                        or "Terminal refolding produced no eligible candidates"
+                    )
+                    if terminal_failed
+                    else None
+                )
+                self._flush_event(failed=terminal_failed, error=terminal_error)
                 run_state.snapshot = run_state.snapshot.model_copy(
                     update={
-                        "status": TaskState.COMPLETED,
+                        "status": TaskState.FAILED if terminal_failed else TaskState.COMPLETED,
+                        "error": terminal_error,
                         "final_candidates": terminal,
                         "final_selection": final_selection,
                         "selected_skill": None,
@@ -777,6 +790,7 @@ class DesignOrchestrator:
                 }
             )
             run_state.last_candidates = cycle_candidates
+            run_state.last_admitted_ids = {candidate.candidate_id for candidate in admitted}
         except Exception as exc:
             await self._discard_speculation(
                 run_state.pending_speculation,
@@ -837,6 +851,7 @@ class DesignOrchestrator:
             run_state.cycle += 1
             run_state.cycle_attempt = 0
             run_state.last_candidates = []
+            run_state.last_admitted_ids = set()
             return True
 
         should_reflect = (run_state.cycle + 1) % config.reflection_interval == 0
@@ -1030,6 +1045,7 @@ class DesignOrchestrator:
                     )
                     refolded = self._read_candidates(folded.result or {}, config)
                     terminal = self._merge_post_refold_candidates(refolded, terminal)
+                    self._validate_terminal_metrics(terminal, config)
                     with trace.span("protein_design.cycle", kind="protein_design") as refold_span:
                         await self._publish_fold_result(
                             refold_span,
@@ -1042,6 +1058,7 @@ class DesignOrchestrator:
                             phase="post_refold",
                         )
                     await self._post_refold_pose_evidence(terminal, config, task_id)
+                    await self._post_refold_quality(terminal, config, analysis)
                     if not any(self._post_filter_eligible(item) for item in terminal):
                         post_refold_error = folded.error or "post-refold returned no usable candidates"
                 else:
@@ -1062,7 +1079,9 @@ class DesignOrchestrator:
             eligible = [
                 candidate
                 for candidate in terminal
-                if self._is_scored_candidate(candidate) and self._passes_gate(candidate)
+                if self._is_scored_candidate(candidate)
+                and self._passes_gate(candidate)
+                and candidate.candidate_id in run_state.last_admitted_ids
             ]
         eligible_ids = {candidate.candidate_id for candidate in eligible}
         rejected = [candidate for candidate in terminal if candidate.candidate_id not in eligible_ids]
@@ -1159,7 +1178,8 @@ class DesignOrchestrator:
         ]
         retained.sort(key=lambda record: float(record["objective"]), reverse=not config.minimize)
         pool = []
-        for record in retained[: POST_REFOLD_POOL_MULTIPLIER * max(int(config.post_filter_top_k), 1)]:
+        limit = config.post_refold_max_parents or POST_REFOLD_POOL_MULTIPLIER * max(int(config.post_filter_top_k), 1)
+        for record in retained[:limit]:
             metadata = {**(record.get("metadata") or {}), "post_refold_success": False}
             for key in ("parent_id", "skill_id", "cycle", "population_action", "chains"):
                 if key in record:
@@ -1199,15 +1219,65 @@ class DesignOrchestrator:
                 )
             else:
                 fresh_success = candidate.metadata.get("success", candidate.objective is not None)
+                fresh_gate = candidate.metadata.get("gate_passed", candidate.metrics.get("gate_passed"))
                 candidate.metadata = {
                     **previous.metadata,
                     **candidate.metadata,
                     "success": fresh_success,
                     "post_refold_success": bool(fresh_success),
+                    "gate_passed": fresh_gate,
+                    "gate_evidence": candidate.metadata.get("gate_evidence", {}),
                     "pre_refold_structure_path": previous.structure_path,
                 }
+            candidate.metadata["post_refold_quality_passed"] = False
             merged.append(candidate)
         return merged
+
+    @staticmethod
+    def _validate_terminal_metrics(candidates: list[Candidate], config: WorkflowConfig) -> None:
+        from opendde_harness.plugin.protein_design.servers.backends.loss_objective import normalize_metric_loss_terms
+
+        terms = normalize_metric_loss_terms(config.fold_options.get("metric_loss_terms"))
+        required = [name for name, term in terms.items() if term["weight"] > 0]
+        for candidate in candidates:
+            invalid = [
+                name
+                for name in required
+                if isinstance(candidate.metrics.get(name), bool)
+                or not isinstance(candidate.metrics.get(name), Real)
+                or not math.isfinite(float(candidate.metrics[name]))
+            ]
+            if invalid:
+                candidate.metadata.update(
+                    success=False,
+                    post_refold_success=False,
+                    post_refold_error=f"Missing or non-finite required loss metrics: {', '.join(invalid)}",
+                )
+
+    async def _post_refold_quality(self, candidates: list[Candidate], config: WorkflowConfig, analysis: Any) -> None:
+        eligible = [
+            candidate
+            for candidate in candidates
+            if candidate.metadata.get("post_refold_success")
+            and self._is_scored_candidate(candidate)
+            and is_materialized(candidate)
+            and self._passes_gate(candidate)
+            and candidate.structure_path
+        ]
+        targets = []
+        for candidate in eligible:
+            if self._needs_quality_check(candidate, config):
+                targets.append(candidate)
+            else:
+                candidate.metadata["post_refold_quality_passed"] = True
+        if targets:
+            quality = await self._phases.quality_cycle(config, config.cycles, targets, analysis)
+            for candidate in targets:
+                result = quality.results.get(candidate.candidate_id)
+                candidate.metadata["post_refold_quality_passed"] = bool(result and result.pass_check)
+                candidate.metadata["post_refold_quality"] = (
+                    result.model_dump(mode="json") if result else {"error": "No quality result returned"}
+                )
 
     async def _post_refold_pose_evidence(
         self,
@@ -1240,13 +1310,14 @@ class DesignOrchestrator:
             except Exception as exc:
                 candidate.metadata["binder_rmsd_evidence"] = {"available": False, "error": str(exc)}
 
-    @staticmethod
-    def _post_filter_eligible(candidate: Candidate) -> bool:
+    @classmethod
+    def _post_filter_eligible(cls, candidate: Candidate) -> bool:
         return (
-            candidate.metadata.get("success") is not False
-            and candidate.objective is not None
-            and math.isfinite(float(candidate.objective))
+            cls._is_scored_candidate(candidate)
+            and is_materialized(candidate)
+            and cls._passes_gate(candidate)
             and bool(candidate.structure_path)
+            and candidate.metadata.get("post_refold_quality_passed") is True
         )
 
     @classmethod
@@ -1259,7 +1330,9 @@ class DesignOrchestrator:
     ) -> dict[str, Any]:
         return cls._final_selection_payload(
             strategy_summary="Final selection failed; search candidates are preserved without fallback ranking.",
-            decisions=[],
+            decisions=[
+                cls._hard_rejection_decision(candidate, rank) for rank, candidate in enumerate(terminal, start=1)
+            ],
             terminal=terminal,
             eligible=eligible,
             post_refold_error=post_refold_error,
@@ -1270,11 +1343,22 @@ class DesignOrchestrator:
     @staticmethod
     def _hard_rejection_decision(candidate: Candidate, rank: int) -> dict[str, Any]:
         reason = candidate.metadata.get("post_refold_error") or candidate.metadata.get("error")
+        if not reason and not DesignOrchestrator._passes_gate(candidate):
+            reason = (candidate.metadata.get("gate_evidence") or {}).get("reason") or "geometry_gate_failed"
+        if not reason and candidate.metadata.get("post_refold_quality_passed") is False:
+            quality = candidate.metadata.get("post_refold_quality") or {}
+            reason = "quality_check_failed: " + str(
+                quality.get("reasoning") or quality.get("error") or "no passing fresh quality verdict"
+            )
+        if not reason and (candidate.metadata.get("quality_check") or {}).get("pass_check") is False:
+            reason = "quality_check_failed: " + str(
+                candidate.metadata["quality_check"].get("reasoning") or "quality rejection"
+            )
         return {
             "candidate_id": candidate.candidate_id,
             "rank": rank,
             "pass_filter": False,
-            "rationale": f"Hard eligibility rejection: {reason or 'refold failed, objective is non-finite, or structure is missing'}.",
+            "rationale": f"Hard eligibility rejection: {reason or 'refold, scoring, sequence, geometry gate, structure, or quality check failed'}.",
             "strengths": [],
             "risks": [reason or "not_post_filter_eligible"],
             "objective": candidate.objective,
@@ -1311,8 +1395,9 @@ class DesignOrchestrator:
             }
             for rank, candidate in enumerate(ordered, start=1)
         ]
+        eligible_count = len(decisions)
         decisions.extend(
-            cls._hard_rejection_decision(candidate, len(decisions) + index)
+            cls._hard_rejection_decision(candidate, eligible_count + index)
             for index, candidate in enumerate(rejected, start=1)
         )
         return cls._final_selection_payload(
@@ -1338,31 +1423,26 @@ class DesignOrchestrator:
     ) -> dict[str, Any]:
         output = PostFilterAgentOutput.model_validate(value)
         by_id = {candidate.candidate_id: candidate for candidate in eligible}
-        decisions = output.decisions
         output.validate_ranking(set(by_id))
-        ranked = sorted(decisions, key=lambda item: item.rank)
-        result = [
-            {
-                **item.model_dump(),
-                "pass_filter": item.rank <= config.post_filter_top_k,
-                "objective": by_id[item.candidate_id].objective,
-                "hard_eligible": True,
-            }
-            for item in ranked
-        ]
-        result.extend(
-            cls._hard_rejection_decision(candidate, len(ranked) + index)
-            for index, candidate in enumerate(rejected, start=1)
-        )
-        payload = cls._final_selection_payload(
-            strategy_summary=output.strategy_summary,
-            decisions=result,
-            terminal=terminal,
+        payload = cls._objective_final_selection(
             eligible=eligible,
+            rejected=rejected,
+            terminal=terminal,
+            config=config,
+            strategy_summary="Deterministic objective ordering with advisory PostFilter commentary.",
             post_refold_error=post_refold_error,
-            post_filter_error=None,
-            mode="agent",
         )
+        advisory = {item.candidate_id: item for item in output.decisions}
+        for decision in payload["decisions"]:
+            if decision["hard_eligible"]:
+                item = advisory[decision["candidate_id"]]
+                decision.update(
+                    advisory_rank=item.rank,
+                    advisory_rationale=item.rationale,
+                    strengths=item.strengths,
+                    risks=item.risks,
+                )
+        payload["advisory_strategy_summary"] = output.strategy_summary
         payload["risk_notes"] = output.risk_notes
         return payload
 

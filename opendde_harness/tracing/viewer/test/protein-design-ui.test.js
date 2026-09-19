@@ -52,6 +52,7 @@ test('tracing board is English-only without language controls or saved language 
 })
 const {
   buildTreeLayout,
+  chartGeometry,
   captureDashboardViewState,
   orderMetricNames,
   renderActivity,
@@ -164,7 +165,7 @@ const run = {
   }
 }
 
-test('interface scores remain visible in the bounded trend chart selection', () => {
+test('interface scores appear early in the complete trend chart ordering', () => {
   const metrics = [
     'loss',
     'iptm',
@@ -181,6 +182,71 @@ test('interface scores remain visible in the bounded trend chart selection', () 
   for (const name of ['rosetta_interface_dg', 'rosetta_interface_sasa', 'rosetta_interface_sc']) {
     assert.ok(selected.includes(name))
   }
+})
+
+test('every stored Rosetta metric, composite loss and pTM gets a trend without truncation', () => {
+  const values = {
+    loss: -1.25,
+    iptm: 0.42,
+    ptm: 0.5,
+    plddt: 0.72,
+    ipsae: 0.4,
+    rosetta_total_score: -1000,
+    rosetta_interface_dg: -60,
+    rosetta_interface_dg_per_sasa: -2.4,
+    rosetta_interface_sasa: 2500,
+    rosetta_interface_sc: 0.6,
+    rosetta_interface_hbonds: 24,
+    rosetta_interface_unsat_hbonds: 22,
+    rosetta_interface_residues: 101
+  }
+  const full = {
+    ...run,
+    metricNames: Object.keys(values),
+    series: Object.fromEntries(
+      Object.entries(values).map(([key, value]) => [key, { cycleBest: [{ cycle: 0, candidateId: 'scored', value }] }])
+    )
+  }
+  const html = renderProteinDesignDashboard({ runs: [full], run: full })
+  for (const [key, value] of Object.entries(values)) {
+    assert.ok(html.includes(`data-metric="${key}"`), key)
+    assert.ok(html.includes(`data-value="${value}"`), key)
+  }
+  assert.equal((html.match(/class="protein-metric-card"/g) || []).length, Object.keys(values).length)
+})
+
+test('trend geometry preserves signed and constant numeric values and ignores invalid points', () => {
+  for (const values of [
+    [-60, -12],
+    [-3, 2],
+    [-42, -42],
+    [0, 0],
+    [22, 24],
+    [0.6, 0.8]
+  ]) {
+    const geometry = chartGeometry({
+      cycleBest: values.map((value, cycle) => ({ cycle, value })).concat([{ cycle: 2, value: NaN }])
+    })
+    assert.ok(geometry.maxValue > geometry.minValue)
+    for (const value of values)
+      assert.ok(geometry.y(value) >= geometry.top && geometry.y(value) <= geometry.height - geometry.bottom)
+  }
+  assert.equal(chartGeometry({ cycleBest: [{ cycle: 1, value: Infinity }] }), null)
+})
+
+test('bounded objective trends use the fixed unit interval without clipping invalid outliers', () => {
+  const series = {
+    cycleBest: [
+      { cycle: 1, value: 0.45 },
+      { cycle: 2, value: 0.55 }
+    ]
+  }
+  const geometry = chartGeometry(series, 640, 190, { min: 0, max: 1 })
+  assert.equal(geometry.minValue, 0)
+  assert.equal(geometry.maxValue, 1)
+  const invalid = chartGeometry({ cycleBest: [{ cycle: 1, value: 1.2 }] }, 640, 190, { min: 0, max: 1 })
+  assert.equal(invalid.minValue, 0)
+  assert.equal(invalid.maxValue, 1.2)
 })
 
 test('shell exposes API Calls, Traces, and Protein design workspaces', () => {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -170,6 +171,24 @@ def main() -> None:
         result = relax_and_analyze(request)
     except Exception as exc:
         result = PyRosettaResult(status="failed", error=f"{type(exc).__name__}: {exc}")
+    result.provenance.update(
+        {
+            "python_executable": sys.executable,
+            "python_version": sys.version,
+            "worker_module_path": __file__,
+            "pid": os.getpid(),
+            "runtime_environment": {
+                name: os.environ.get(name)
+                for name in (
+                    "PYTHONPATH",
+                    "OMP_NUM_THREADS",
+                    "OPENBLAS_NUM_THREADS",
+                    "MKL_NUM_THREADS",
+                    "NUMEXPR_NUM_THREADS",
+                )
+            },
+        }
+    )
     (Path(request["output_dir"]) / "analysis.json").write_text(result.model_dump_json(), encoding="utf-8")
 
 

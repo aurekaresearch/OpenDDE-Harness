@@ -163,6 +163,11 @@ not placeholders when analysis is disabled or unavailable.
 These are modeling scores, not measured binding free energies. Packstat is not
 computed. Metric definitions follow [Rosetta InterfaceAnalyzer](https://docs.rosettacommons.org/docs/latest/application_documentation/analysis/interface-analyzer)
 and relaxation follows [FastRelax](https://docs.rosettacommons.org/docs/latest/scripting_documentation/RosettaScripts/Movers/movers_pages/FastRelaxMover).
+REU is an arbitrary, protocol-dependent energy scale, not kcal/mol or kJ/mol;
+experimental conversion requires a suitable benchmark rather than a universal
+factor. See [Rosetta's units documentation](https://docs.rosettacommons.org/docs/latest/rosetta_basics/Units-in-Rosetta).
+The factor of 100 in `rosetta_interface_dg_per_sasa` is part of that metric's
+definition, not a conversion to physical energy or a normalized confidence score.
 
 ### Per-contact-residue REU evidence
 
@@ -194,13 +199,18 @@ finite and positive, and reference finite. Every nonzero term contributes:
 ```text
 sign * weight * (raw_metric - reference) / scale
 sign = +1 for minimize, -1 for maximize
-total_loss = existing_confidence_and_ESM2_loss + sum(metric_contributions)
+base_loss = structure_loss + esm2_contribution
+metric_loss = sum(metric_contributions)
+loss = base_loss + metric_loss
 ```
 
 Raw metrics are never overwritten with normalized values. The existing loss
 breakdown records raw value, normalized value, direction, scale, reference, weight,
-and contribution for each enabled term, plus `metric_loss` and the composite formula
-version. Positive terms require enabled analysis and loss optimization. At least
+and contribution for each enabled term, plus the original `base_loss`, `metric_loss`
+and composite `loss`. Selection minimizes `loss`, not `base_loss`. Older artifacts
+without `base_loss` can reconstruct it as `structure_loss + esm2_contribution`.
+The formula version is unchanged because exposing the subtotal does not change
+the arithmetic. Positive terms require enabled analysis and loss optimization. At least
 one legacy loss coefficient must remain positive; standalone interface-only ranking
 is not supported. A zero-weight metric need not exist. Missing, null, nonnumeric,
 non-finite, or overflowing enabled terms fail scoring; no candidate-specific
@@ -214,6 +224,165 @@ With `on_failure: fail`, failed candidates have no objective and cannot enter th
 population. With `continue`, confidence-only ranking can proceed and the analysis
 error remains visible. Missing loss-required metrics still reject the candidate.
 If every candidate fails, the existing batch failure/retry policy applies.
+
+### Interpreting linear-objective magnitude and choosing scales
+
+The objective is a signed ranking score, not a probability or nonnegative error.
+A favorable negative interface-energy contribution can cancel positive confidence
+and unsatisfied-H-bond contributions. Small or negative totals are therefore valid;
+do not take the absolute value, clip the total to zero, or rescale accepted runs
+merely to make the displayed number larger. Compare raw metrics, the original loss,
+each contribution, and the hard-gate evidence together.
+
+For example, a real three-candidate workflow with unchanged five-repeat relaxation
+produced the following decomposition. Values are rounded for this table; persisted
+artifacts retain full precision. Coefficients were `0.5 / 10` for interface dG,
+`-1 / 1` for shape complementarity relative to `0.5`, and `0.25 / 5` for unsatisfied
+H-bonds. These observations exercise the formula; they are not calibrated defaults.
+
+| Candidate | Original loss | dG contribution | Shape contribution | Unsatisfied-H-bond contribution | Composite loss |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Framework | 2.37834928 | -3.41108258 | -0.04806668 | 1.10000000 | 0.01920002 |
+| Mutation 001 | 2.02137372 | -2.49241568 | -0.11578742 | 0.65000000 | 0.06317062 |
+| Mutation 002 | 2.04921697 | -2.94838087 | -0.10244870 | 0.95000000 | -0.05161259 |
+
+Mutation 001 has the lower original loss, but mutation 002 has the lower composite
+and was ranked first. Across these three candidates, contribution ranges were
+`0.35698` for the original loss, `0.91867` for dG, `0.06772` for shape complementarity
+and `0.45` for unsatisfied H-bonds. Thus dG had the largest observed range after
+scaling. This small, related sample does not establish whether that influence is
+scientifically desirable.
+
+The current linear objective has sensitivity `sign * weight / scale` to each raw
+metric. A shared reference changes every candidate by the same constant, so it
+changes the displayed zero point but not ranking. Increasing scale reduces a term's
+influence; multiplying weight and scale by the same factor changes nothing.
+Weight normalization alone cannot correct unequal raw units, and an unbounded
+linear term can still dominate outside the range used to choose its scale.
+
+### Opt-in bounded objective with fixed group budgets
+
+`design.loss_combination` opts into `bounded-fixed-grouped-v1`; omitting it preserves
+the existing linear formula and version. No universal ranges or group budgets are
+provided. Supply a nonempty `calibration_id`, explicit fixed anchors for **every**
+enabled structural, ESM2 and metric term, and a complete, nonoverlapping grouping.
+This separates numerical range from deliberate scientific priorities:
+
+1. Transform each enabled loss component into a dimensionless penalty using fixed,
+   documented good/bad anchors: `p = clip((raw - good) / (bad - good), 0, 1)`.
+   For a quantity to minimize, `good < bad`; for one to maximize, `good > bad`.
+   Anchors are scoring preferences, not replacements for hard eligibility gates.
+2. Group related evidence, for example confidence/geometry, ESM2 sequence plausibility,
+   interface energy, and interface geometry/H-bonds. Normalize positive weights within
+   each group, and assign explicit positive group budgets whose sum is one.
+3. Minimize `sum(group_budget * sum(normalized_term_weight * penalty))`.
+   The total lies in `[0, 1]`; a group's maximum possible contribution is its budget.
+   Adding correlated energy descriptors cannot implicitly expand that group's budget.
+   This bounds influence caused by numerical range, while making remaining tradeoffs explicit.
+
+Mapping individual responses to a common `[0, 1]` preference scale has precedent in
+the [NIST desirability approach](https://www.itl.nist.gov/div898/handbook/pri/section5/pri5322.htm).
+The weighted group-budget sum above is this application's design, not NIST's
+geometric-mean aggregation or an experimentally validated binding model.
+
+The following is a complete illustrative loss-policy section, **not calibrated
+scientific defaults**. Retain the complete target/binder/fold configuration and
+enable `fold.pyrosetta.enabled`. All ten default confidence/ESM2 coefficients remain
+enabled here; their positive values become relative weights within their groups.
+
+```yaml
+design:
+  optimization_metric: loss
+  metric_loss_terms:
+    rosetta_interface_dg: {direction: minimize, weight: 1.0}
+    rosetta_interface_sc: {direction: maximize, weight: 1.0}
+    rosetta_interface_unsat_hbonds: {direction: minimize, weight: 1.0}
+  loss_combination:
+    mode: bounded_grouped
+    calibration_id: example-only-not-scientifically-calibrated
+    groups:
+      confidence:
+        budget: 0.25
+        terms: [plddt, i_plddt, pae, i_pae, i_ptm, con, i_con, rg, dgram_cce]
+      sequence:
+        budget: 0.25
+        terms: [esm2]
+      interface_energy:
+        budget: 0.25
+        terms: [rosetta_interface_dg]
+      interface_geometry:
+        budget: 0.25
+        terms: [rosetta_interface_sc, rosetta_interface_unsat_hbonds]
+    anchors:
+      plddt: {good: 0.0, bad: 1.0}
+      i_plddt: {good: 0.0, bad: 1.0}
+      pae: {good: 0.0, bad: 1.0}
+      i_pae: {good: 0.0, bad: 1.0}
+      i_ptm: {good: 0.0, bad: 1.0}
+      con: {good: 0.0, bad: 10.0}
+      i_con: {good: 0.0, bad: 10.0}
+      rg: {good: -1.0, bad: 1.0}
+      dgram_cce: {good: 0.0, bad: 2.0}
+      esm2: {good: 0.0, bad: -5.0}
+      rosetta_interface_dg: {good: -100.0, bad: 0.0}
+      rosetta_interface_sc: {good: 1.0, bad: 0.0}
+      rosetta_interface_unsat_hbonds: {good: 0.0, bad: 30.0}
+```
+
+Structural anchors apply to the scorer's **loss components**, not raw pLDDT or PAE
+measurements: all structural components are minimized. `esm2` anchors apply to raw
+mean PLL and are maximized. Metric directions come from `metric_loss_terms`.
+Good/bad orientation must match the direction; finite anchors must have distinct,
+finite spans. Disabled zero-weight terms must not have anchors or group assignments.
+Every enabled term must appear exactly once. Unknown fields, incomplete coverage,
+invalid budgets and nonfinite values fail validation before folding.
+
+For component `i` in group `g`, the recorded contribution is
+`budget_g * weight_i / sum(group_weights) * penalty_i`. In bounded mode metric
+`reference` and `scale` no longer normalize the selection score: fixed anchors
+explicitly supersede them. Their original meaning is retained only in the linear
+audit breakdown. Changing a raw measurement's units together with its anchors
+leaves its bounded contribution unchanged.
+
+The persisted top-level `structure_loss`, `esm2_contribution`, `base_loss`,
+`metric_loss` and `loss` are now **dimensionless bounded contributions**. Selection
+uses this top-level `loss`. `original_base_loss`, `legacy_loss`, and the complete
+`legacy_loss_breakdown` retain the original signed linear calculation for audit,
+never for selection. Each bounded component records raw value, good/bad anchors,
+penalty, group, original and normalized weights, budget, effective weight and
+contribution; ESM2 has the same fields under `esm2_component`. Group totals and the
+resolved calibration configuration are persisted too. Missing required metrics
+still fail; weights are never renormalized around absent measurements.
+
+Both the bounded score and its preserved linear audit must remain finite. An
+astronomically large but finite input whose legacy arithmetic overflows is rejected
+with a `legacy ... must be finite` error, not published with an incomplete audit.
+Hard scientific gates and quality checks remain separate from the objective and
+cannot be bypassed by favorable bounded scores. Workload stages and runtime
+adjustments do not permit changing anchors or budgets during a run.
+
+| Approach | Benefit | Limitation |
+| --- | --- | --- |
+| Existing fixed reference/scale, linear sum | Transparent raw sensitivity; no saturation | Unbounded contributions; requires justified scales |
+| Fixed bounded penalties and group budgets | Explicit maximum influence; interpretable good/bad anchors | Clipping loses distinctions beyond anchors and may create ties |
+| Smooth bounded sigmoid with fixed anchors | Retains graded changes beyond anchors | Saturates in the tails; less direct threshold interpretation |
+| Geometric desirability or worst-component objective | Penalizes an especially weak component strongly | Introduces a veto/bottleneck preference, potentially duplicating hard gates |
+
+Do not estimate scales or good/bad anchors from each current batch, cycle or
+surviving population: the same candidate would acquire different scores as its
+neighbors changed. Freeze and version calibration metadata before a run, together
+with the fold backend, Rosetta protocol, model versions and target/scaffold scope.
+Keep every enabled component required; missing or nonfinite values must fail
+scoring rather than trigger candidate-specific weight renormalization.
+
+Before proposing defaults, use an independent representative calibration set with
+multiple targets, scaffolds and repeated seeds, then evaluate held-out rankings,
+gate pass rates, correlations between metrics, clipping frequency and sensitivity
+to weights/anchors. Where biological claims are intended, validate against relevant
+experimental outcomes. Apply this procedure to the existing structural and ESM2
+components as well as the added interface metrics. Three related candidates can
+demonstrate cancellation, sensitivity and ranking behavior, but cannot justify
+universal anchors, group budgets, or conversion of REU into experimental affinity.
 
 ## Dashboard and validation
 
@@ -229,7 +398,7 @@ shows the original fold; the relaxed artifact resides on compute.
 Run the offline unit tests and the real-process smoke tests:
 
 ```bash
-uv run --extra pyrosetta pytest tests/test_pyrosetta_analysis.py tests/test_loss_objective.py tests/test_loss_confidence_scorer.py tests/test_protein_design_pyrosetta_metrics.py -q
+uv run --extra pyrosetta pytest tests/test_pyrosetta_analysis.py tests/test_loss_objective.py tests/test_bounded_loss.py tests/test_loss_confidence_scorer.py tests/test_protein_design_pyrosetta_metrics.py -q
 uv run --extra pyrosetta pytest tests/integration/test_pyrosetta_process_smoke.py -m integration -q
 node --test opendde_harness/tracing/viewer/test/*.test.js
 ```

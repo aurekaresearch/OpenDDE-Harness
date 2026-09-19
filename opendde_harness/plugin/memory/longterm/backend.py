@@ -27,6 +27,7 @@ Three architectural invariants worth re-stating:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -996,7 +997,15 @@ class LongTermMemoryBackend:
             # An assistant message may carry tool calls with empty text — keep
             # it (the tool result downstream references its id).
             tool_calls = [
-                {"id": call.get("id"), "type": "function", "name": call.get("name")} for call in msg.tool_calls_of(m)
+                {
+                    "id": call.get("id"),
+                    "type": "function",
+                    "function": {
+                        "name": call.get("name"),
+                        "arguments": json.dumps(call.get("arguments") or {}, ensure_ascii=False),
+                    },
+                }
+                for call in msg.tool_calls_of(m)
             ]
             if not content and not tool_calls:
                 continue

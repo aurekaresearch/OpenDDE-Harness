@@ -14,6 +14,7 @@ _MAX_IDENTIFIER_LENGTH = 256
 _MAX_SEQUENCE_LENGTH = 4096
 _MAX_METADATA_ITEMS = 64
 _MAX_METADATA_DEPTH = 4
+_MAX_LOSS_METADATA_DEPTH = 6
 _SENSITIVE_KEY_PARTS = ("api_key", "authorization", "password", "prompt", "secret", "token")
 
 
@@ -162,7 +163,11 @@ def _safe_metadata(metadata: Mapping[str, Any]) -> dict[str, object]:
         normalized_key = str(key)
         if normalized_key in excluded or _is_sensitive_key(normalized_key):
             continue
-        safe_value = _safe_metadata_value(value, depth=1)
+        # Fixed loss calibration nests groups, term lists and anchors more deeply
+        # than generic metadata. Preserve this audit trail with the same limits
+        # and recursive redaction, without expanding arbitrary metadata.
+        max_depth = _MAX_LOSS_METADATA_DEPTH if normalized_key == "loss" else _MAX_METADATA_DEPTH
+        safe_value = _safe_metadata_value(value, depth=1, max_depth=max_depth)
         if safe_value is not None:
             result[_bounded_text(normalized_key, _MAX_IDENTIFIER_LENGTH)] = safe_value
         if len(result) >= _MAX_METADATA_ITEMS:
@@ -170,7 +175,7 @@ def _safe_metadata(metadata: Mapping[str, Any]) -> dict[str, object]:
     return result
 
 
-def _safe_metadata_value(value: Any, *, depth: int) -> object | None:
+def _safe_metadata_value(value: Any, *, depth: int, max_depth: int = _MAX_METADATA_DEPTH) -> object | None:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -178,22 +183,22 @@ def _safe_metadata_value(value: Any, *, depth: int) -> object | None:
     if isinstance(value, str):
         return _bounded_text(value, 512)
     if isinstance(value, (list, tuple)):
-        if depth >= _MAX_METADATA_DEPTH:
+        if depth >= max_depth:
             return None
         result = [
             safe
             for item in value[:_MAX_METADATA_ITEMS]
-            if (safe := _safe_metadata_value(item, depth=depth + 1)) is not None
+            if (safe := _safe_metadata_value(item, depth=depth + 1, max_depth=max_depth)) is not None
         ]
         return result
-    if not isinstance(value, Mapping) or depth >= _MAX_METADATA_DEPTH:
+    if not isinstance(value, Mapping) or depth >= max_depth:
         return None
     result: dict[str, object] = {}
     for key, item in value.items():
         normalized_key = str(key)
         if _is_sensitive_key(normalized_key):
             continue
-        safe_item = _safe_metadata_value(item, depth=depth + 1)
+        safe_item = _safe_metadata_value(item, depth=depth + 1, max_depth=max_depth)
         if safe_item is not None:
             result[_bounded_text(normalized_key, _MAX_IDENTIFIER_LENGTH)] = safe_item
         if len(result) >= _MAX_METADATA_ITEMS:

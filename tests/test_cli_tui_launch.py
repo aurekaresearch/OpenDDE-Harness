@@ -242,6 +242,7 @@ def test_two_builds_of_one_checkout_install_once_and_never_overlap(tmp_path, mon
 # byte of placeholder JavaScript for the bundle so the build stays fast.
 _BUILD = """
 import json, sys, tarfile, tempfile, zipfile
+from email.parser import Parser
 from pathlib import Path
 from hatchling.builders.sdist import SdistBuilder
 from hatchling.builders.wheel import WheelBuilder
@@ -253,7 +254,9 @@ with tarfile.open(sdist) as archive:
     unpacked = Path(tempfile.mkdtemp())
     archive.extractall(unpacked, filter="data")
 with zipfile.ZipFile(next(WheelBuilder(str(next(unpacked.iterdir()))).build(directory=str(out)))) as wheel:
-    print(json.dumps({"sdist": sdist_names, "wheel": wheel.namelist()}))
+    metadata = Parser().parsestr(wheel.read(next(n for n in wheel.namelist() if n.endswith(".dist-info/METADATA"))).decode())
+    print(json.dumps({"sdist": sdist_names, "wheel": wheel.namelist(),
+        "extras": metadata.get_all("Provides-Extra"), "dependencies": metadata.get_all("Requires-Dist")}))
 """
 
 
@@ -273,7 +276,13 @@ def _stage_release_tree(root, uis=("ui-tui",)):
     (root / "LICENSES" / "MIT-stub.txt").write_text("stub\n")
     (root / "opendde_harness").mkdir()
     (root / "opendde_harness" / "__init__.py").write_text("")
+    (root / "opendde_harness" / "._unwanted.py").write_bytes(b"AppleDouble metadata")
+    backends = root / "opendde_harness" / "plugin" / "protein_design" / "servers" / "backends"
+    backends.mkdir(parents=True)
+    for name in ("pyrosetta_worker.py", "pyrosetta_analysis.py"):
+        (backends / name).write_text("# backend\n")
     (root / "docs" / "examples").mkdir(parents=True)
+    (root / "docs" / "pyrosetta.md").write_text("# PyRosetta setup\n")
     for name in ("crlf2_quickstart.yaml", "cacng1_quickstart.yaml"):
         (root / "docs" / "examples" / name).write_text("stub: true\n")
     (root / "docker").mkdir()
@@ -283,6 +292,10 @@ def _stage_release_tree(root, uis=("ui-tui",)):
         (root / name / "dist").mkdir(parents=True)
         for bundle in BUNDLES:
             (root / name / "dist" / bundle).write_text(f'console.log("{name}/{bundle}")\n')
+        dependency = root / name / "node_modules" / "unwanted-dependency"
+        dependency.mkdir(parents=True)
+        for filename in ("README.md", "LICENSE"):
+            (dependency / filename).write_text("Unwanted dependency metadata\n")
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv supplies the Hatchling build environment")
@@ -309,7 +322,13 @@ def test_the_tui_bundle_reaches_the_sdist_and_the_wheel_built_from_it(tmp_path):
     # Every bundle, and nothing else of the package: no second copy, no sources.
     shipped = sorted(n for n in names["wheel"] if "ui-tui" in n)
     assert shipped == sorted(f"opendde_harness/ui-tui/dist/{b}" for b in BUNDLES), shipped
-    assert not any("node_modules" in n for n in names["wheel"])
+    for archive in ("sdist", "wheel"):
+        assert not any("node_modules" in n or any(p.startswith("._") for p in n.split("/")) for n in names[archive])
+        assert any(n.endswith("/docs/pyrosetta.md") for n in names[archive])
+        for module in ("pyrosetta_worker.py", "pyrosetta_analysis.py"):
+            assert any(n.endswith(f"/plugin/protein_design/servers/backends/{module}") for n in names[archive])
+    assert "pyrosetta" in names["extras"]
+    assert "pyrosetta==2026.29+releasequarterly.80a0635615; extra == 'pyrosetta'" in names["dependencies"]
 
 
 # The three tests that used to sit here held LiteLLM's loggers at WARNING, so

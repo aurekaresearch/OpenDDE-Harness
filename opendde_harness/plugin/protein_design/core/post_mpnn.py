@@ -8,9 +8,6 @@ import math
 from opendde_harness.plugin.protein_design.core.constants import CANONICAL_AMINO_ACIDS
 from opendde_harness.plugin.protein_design.core.contracts import Candidate, SolubleMPNNRequest, WorkflowConfig
 
-MPNN_SAMPLE_COUNT = 40
-MPNN_SURVIVORS_PER_PARENT = 4
-
 
 async def prepare_post_mpnn(
     compute, parents: list[Candidate], config: WorkflowConfig, task_id: str, stop_event: asyncio.Event
@@ -40,15 +37,17 @@ async def prepare_post_mpnn(
                     structure_path=parent.structure_path,
                     parent_chains=chains,
                     mutable_positions=[f"{c}:{p}" for c, ps in positions.items() for p in ps],
-                    num_sequences=MPNN_SAMPLE_COUNT,
+                    num_sequences=config.post_refold_samples_per_parent,
                     placement=config.placement,
                 )
             )
             if stop_event.is_set():
                 raise RuntimeError("Task stopped during post-MPNN")
             samples = response.get("candidates") or []
-            if len(samples) != MPNN_SAMPLE_COUNT:
-                raise ValueError(f"Expected {MPNN_SAMPLE_COUNT} SolubleMPNN samples, received {len(samples)}")
+            if len(samples) != config.post_refold_samples_per_parent:
+                raise ValueError(
+                    f"Expected {config.post_refold_samples_per_parent} SolubleMPNN samples, received {len(samples)}"
+                )
             ranked = []
             for index, sample in enumerate(samples, start=1):
                 proposed = sample.get("chains") or {}
@@ -94,12 +93,15 @@ async def prepare_post_mpnn(
                         },
                     )
                 )
-                if len(selected) == MPNN_SURVIVORS_PER_PARENT:
+                if len(selected) == config.post_refold_survivors_per_parent:
                     break
             if not selected:
                 raise ValueError("No distinct valid SolubleMPNN sequences for this parent")
-            if len(selected) < MPNN_SURVIVORS_PER_PARENT:
-                shortfall = f"only {len(selected)} of {MPNN_SURVIVORS_PER_PARENT} distinct valid SolubleMPNN sequences"
+            if len(selected) < config.post_refold_survivors_per_parent:
+                shortfall = (
+                    f"only {len(selected)} of {config.post_refold_survivors_per_parent} "
+                    "distinct valid SolubleMPNN sequences"
+                )
                 for child in selected:
                     child.metadata["post_mpnn_shortfall"] = shortfall
             children.extend(selected)

@@ -230,15 +230,24 @@ ten supported keys and set every unused term explicitly to `0.0`.
 | `parent_fitness_uniform_fraction` | Uniform exploration mixed into fitness sampling. | Default `0.10`; range `[0,1]`. |
 | `router_skill_probabilities` | Availability weights for built-in proposal Skills. | Non-negative mapping; zero disables a Skill. |
 | `esm_device` | ESM-2 device hint. | Example: `cuda:0`. |
-| `post_refold_filter.enabled` | Generate SolubleMPNN variants from trajectory structures, refold selected sequences, and let the PostFilter Agent rank usable results. | Default `false`. |
-| `post_refold_filter.top_k` | Maximum number selected from the Agent's final order. | Default `20`; positive. |
+| `post_refold_filter.enabled` | Generate SolubleMPNN variants, refold, enforce search gates and select by the configured objective with advisory PostFilter commentary. | Default `false`. |
+| `post_refold_filter.top_k` | Maximum number selected from the eligible objective-ordered refolds. | Default `20`; positive. |
+| `post_refold_filter.max_parents` | Maximum eligible trajectory parents sent to SolubleMPNN. | Default `4 * top_k`; positive integer. |
+| `post_refold_filter.samples_per_parent` | SolubleMPNN sequence samples per parent. | Default `40`; positive integer. |
+| `post_refold_filter.survivors_per_parent` | Distinct valid sequences refolded per parent. | Default `4`; positive integer, at most samples per parent. |
+| `loss_combination` | Opt-in `bounded_grouped` objective with required `calibration_id`, explicit `anchors` for every enabled component and complete `groups` with positive budgets summing to one. | Omit to preserve linear scoring; no universal ranges or budgets. |
 
 When enabled, terminal refolding uses a bounded set of unique, gate-passing,
-finitely scored trajectory parents (at most `4 * top_k`), ordered by the objective.
-SolubleMPNN produces variants for refolding; inspect final selection errors and
-mode because invalid agent ranking can fall back to objective ordering. See the
-complete reference for the current selection policy. Only `enabled` and `top_k`
-are accepted in this block.
+finitely scored trajectory parents (at most `max_parents`, default `4 * top_k`), ordered by the objective.
+SolubleMPNN produces variants for refolding. Fresh results must pass the same
+scoring, canonical-sequence, geometry and conditional quality checks as search,
+with a valid structure and all required finite loss metrics. Final ranking always
+uses the configured objective/direction; agent commentary cannot override gates,
+ordering, or top K. An enabled terminal stage with no eligible result makes the
+task and final selection failed while preserving evidence. Inspect final selection
+errors for unavailable advisory commentary. Workload limits do not weaken scientific
+gates, sequence constraints, or relaxation settings. Bounded loss anchors are fixed
+for the whole run, never estimated from a batch or changed by a workload stage.
 
 Supported router keys are exactly:
 

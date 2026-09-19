@@ -287,6 +287,15 @@ class WorkflowConfig(ContractModel):
     mutation_count_instruction: str = "Use the configured bounded CDR mutation count."
     post_filter_enabled: bool = False
     post_filter_top_k: int = Field(default=20, ge=1)
+    post_refold_max_parents: int | None = Field(default=None, ge=1, strict=True)
+    post_refold_samples_per_parent: int = Field(default=40, ge=1, strict=True)
+    post_refold_survivors_per_parent: int = Field(default=4, ge=1, strict=True)
+
+    @model_validator(mode="after")
+    def validate_post_refold_workload(self) -> "WorkflowConfig":
+        if self.post_refold_survivors_per_parent > self.post_refold_samples_per_parent:
+            raise ValueError("post-refold survivors_per_parent must not exceed samples_per_parent")
+        return self
 
     @model_validator(mode="after")
     def validate_cycle_schedule(self) -> "WorkflowConfig":
@@ -386,6 +395,28 @@ class QualityCandidateResult(ContractModel):
     reasoning: str
     overall_risk_level: str
     pass_check: bool
+
+    @model_validator(mode="after")
+    def _reject_high_risk_pass(self) -> "QualityCandidateResult":
+        high_risk_fields = [
+            name
+            for name in (
+                "expressivity",
+                "immunogenicity",
+                "aggregation",
+                "solubility",
+                "specificity",
+                "liability",
+                "overall_risk_level",
+            )
+            if "".join(getattr(self, name).casefold().replace("-", " ").split()) in {"high", "highrisk"}
+        ]
+        if self.pass_check and high_risk_fields:
+            raise ValueError(
+                "A High Risk quality assessment cannot pass_check=true; "
+                f"High Risk fields: {', '.join(high_risk_fields)}. Return a consistent assessment."
+            )
+        return self
 
 
 class QualityBatchOutput(ContractModel):

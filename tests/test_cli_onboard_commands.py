@@ -220,7 +220,7 @@ def test_state_file_round_trip(harness_home):
 
 
 def _running(name):
-    return {"Id": name, "Name": "/" + name, "State": {"Running": True}}
+    return {"Id": name, "Name": "/" + name, "Image": "sha256:original", "State": {"Running": True}}
 
 
 def test_resolver_reuses_running_healthy_container(harness_home, monkeypatch):
@@ -228,6 +228,7 @@ def test_resolver_reuses_running_healthy_container(harness_home, monkeypatch):
 
     monkeypatch.setattr(compute_code, "runtime_code_identity", lambda: {"id": CODE_ID})
     monkeypatch.setattr(onboard_compute, "inspect_container", _running)
+    monkeypatch.setattr(onboard_compute, "docker", lambda *a, **k: "sha256:original")
     monkeypatch.setattr(
         onboard_compute, "start_service", lambda *a, **k: pytest.fail("a healthy container must be reused")
     )
@@ -241,7 +242,72 @@ def test_resolver_reuses_running_healthy_container(harness_home, monkeypatch):
     assert endpoint == local_service.ComputeEndpoint("http://127.0.0.1:18091", "tok")
 
 
-def test_resolver_starts_new_release_and_asks_the_old_container_to_exit_when_idle(harness_home, monkeypatch):
+def test_resolver_does_not_adopt_a_reused_port_after_container_disappears(harness_home, monkeypatch):
+    from opendde_harness.cli import compute_code, onboard_compute
+
+    monkeypatch.setattr(compute_code, "runtime_code_identity", lambda: {"id": CODE_ID})
+    state = local_service.new_state(container="old", image="img", code_id=CODE_ID, port=18091)
+    monkeypatch.setattr(local_service, "running_instance", lambda code_id=None: state if code_id else None)
+    monkeypatch.setattr(onboard_compute, "inspect_container", lambda name: None)
+    monkeypatch.setattr(
+        local_service, "service_health", lambda *args, **kwargs: pytest.fail("unverified endpoint must not be reused")
+    )
+    monkeypatch.setattr(onboard_compute, "start_service", lambda *args, **kwargs: {"url": "http://127.0.0.1:18094"})
+
+    endpoint = local_service.ensure_compute_service(
+        {
+            "compute_docker": {"image": "img", "mode": "api", "gpus": "all", "package_root": "", "state_dir": "/tmp/s"},
+            "compute_token": "tok",
+        }
+    )
+
+    assert endpoint.url == "http://127.0.0.1:18094"
+
+
+@pytest.mark.parametrize("busy", [False, True])
+def test_resolver_changed_image_replaces_only_an_idle_worker(harness_home, monkeypatch, busy):
+    import httpx
+
+    from opendde_harness.cli import compute_code, onboard_compute
+
+    monkeypatch.setattr(compute_code, "runtime_code_identity", lambda: {"id": CODE_ID})
+    monkeypatch.setattr(onboard_compute, "inspect_container", _running)
+    # Same image tag and same code release, but the tag now identifies a different environment.
+    monkeypatch.setattr(onboard_compute, "docker", lambda *a, **k: "sha256:replacement")
+    local_service.write_state(
+        local_service.new_state(container="opendde-compute-" + "a" * 12, image="img", code_id=CODE_ID, port=18091)
+    )
+    stopped = []
+    started = []
+
+    def shutdown(url, token, *, if_idle, **kwargs):
+        assert if_idle is True
+        stopped.append(url)
+        return httpx.Response(409 if busy else 202, request=httpx.Request("POST", url + "/shutdown"))
+
+    monkeypatch.setattr(local_service, "request_shutdown", shutdown)
+    monkeypatch.setattr(local_service, "wait_until_stopped", lambda name: not busy)
+    monkeypatch.setattr(
+        onboard_compute, "start_service", lambda *a, **k: started.append(a) or {"url": "http://127.0.0.1:18094"}
+    )
+    config = {
+        "compute_docker": {"image": "img", "mode": "api", "gpus": "all", "package_root": "", "state_dir": "/tmp/s"},
+        "compute_token": "tok",
+    }
+    if busy:
+        with pytest.raises(ComputeSetupError, match="busy.*Active tasks were preserved"):
+            local_service.ensure_compute_service(config)
+        assert started == []
+        assert local_service.read_state()["port"] == 18091
+    else:
+        assert local_service.ensure_compute_service(config).url == "http://127.0.0.1:18094"
+        assert len(started) == 1
+    assert stopped == ["http://127.0.0.1:18091"]
+
+
+def test_resolver_stops_old_release_before_starting_new_one(harness_home, monkeypatch):
+    import httpx
+
     from opendde_harness.cli import compute_code, onboard_compute
 
     monkeypatch.setattr(compute_code, "runtime_code_identity", lambda: {"id": CODE_ID})
@@ -250,15 +316,26 @@ def test_resolver_starts_new_release_and_asks_the_old_container_to_exit_when_idl
     monkeypatch.setattr(
         local_service, "service_health", lambda url, token, **k: pytest.fail("old release must not be probed")
     )
-    retired = []
+    events = []
     monkeypatch.setattr(
-        local_service, "request_shutdown", lambda url, token, *, if_idle, timeout=5.0: retired.append((url, if_idle))
+        local_service,
+        "request_shutdown",
+        lambda url, token, *, if_idle, timeout=5.0: (
+            events.append(("shutdown", url, if_idle)),
+            httpx.Response(202, request=httpx.Request("POST", url + "/shutdown")),
+        )[1],
+    )
+    monkeypatch.setattr(
+        local_service,
+        "wait_until_stopped",
+        lambda name, *, timeout=60.0: events.append(("stopped", name)) or True,
     )
     old = local_service.new_state(container="opendde-compute-old", image="img", code_id="old-code", port=18092)
     local_service.write_state(old)
     started = []
 
     def start(settings, token, api_url, *, code_id, quiet):
+        events.append(("start", code_id))
         started.append((settings, token, api_url, code_id, quiet))
         state = local_service.new_state(
             container=local_service.container_name(code_id), image=settings.image, code_id=code_id, port=18093
@@ -284,8 +361,11 @@ def test_resolver_starts_new_release_and_asks_the_old_container_to_exit_when_idl
     assert len(started) == 1 and started[0][1:] == ("tok", "http://fold.test", CODE_ID, True)
     assert started[0][0].image == "img" and started[0][0].port == 0
     assert local_service.read_state()["container"] == "opendde-compute-" + "a" * 12
-    # Asked, not killed: a busy old release answers 409 and finishes its work.
-    assert retired == [("http://127.0.0.1:18092", True)]
+    assert events == [
+        ("shutdown", "http://127.0.0.1:18092", True),
+        ("stopped", "opendde-compute-old"),
+        ("start", CODE_ID),
+    ]
 
 
 def test_resolver_restarts_dead_or_unhealthy_container(harness_home, monkeypatch):
@@ -334,8 +414,11 @@ def test_running_container_with_our_token_is_adopted(settings, harness_home, mon
         "HostConfig": {"PortBindings": {"8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "18095"}]}},
     }
     monkeypatch.setattr(onboard_compute, "inspect_container", lambda name: container)
-    monkeypatch.setattr(onboard_compute, "docker", lambda *a, **k: pytest.fail(f"unexpected docker {a}"))
+    monkeypatch.setattr(onboard_compute, "docker", lambda *a, **k: "sha256:original")
     assert start_service(settings, "token", code_id=CODE_ID)["port"] == 18095
+    container["Image"] = "sha256:another-image"
+    with pytest.raises(ComputeSetupError, match="different image.*not adopted or stopped"):
+        start_service(settings, "token", code_id=CODE_ID)
     container["Config"]["Env"] = [f"{onboard_compute.AUTH_ENV}=other"]
     with pytest.raises(ComputeSetupError, match="compute stop --force"):
         start_service(settings, "token", code_id=CODE_ID)

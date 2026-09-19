@@ -9,14 +9,7 @@
     {
       key: 'min_ipa',
       label: 'Min ipAE',
-      paths: [
-        'metrics.min_ipa',
-        'metrics.min_ipae',
-        'metrics.min_ipsae',
-        'metadata.loss.loss_components.i_pae',
-        'metadata.loss.components.i_pae.raw',
-        'metrics.ipsae'
-      ]
+      paths: ['metrics.min_ipa', 'metrics.min_ipae']
     },
     {
       key: 'loss',
@@ -283,7 +276,11 @@
 
   function propertyValue(candidate, definition) {
     for (const path of definition.paths) {
-      const value = finiteValue(readPath(candidate, path))
+      const value = finiteValue(
+        path.startsWith('metrics.') && Object.hasOwn(candidate.metrics || {}, path.slice(8))
+          ? candidate.metrics[path.slice(8)]
+          : readPath(candidate, path)
+      )
       if (value !== null) return value
     }
     return null
@@ -326,21 +323,21 @@
     const values = allCandidates(run)
       .map(candidate => candidateTableValue(candidate, run, definition.key))
       .filter(value => typeof value === 'number' && Number.isFinite(value))
-    if (!values.length) return { min: 0, max: 1, step: definition.integer ? 1 : 0.01 }
+    if (!values.length) return { min: 0, max: 1, ticks: definition.integer ? 1 : 1000 }
     const min = Math.min(...values)
     const max = Math.max(...values)
     const span = max - min
     return {
       min,
       max,
-      step: definition.integer ? 1 : Math.max(0.0001, Number((span / 100 || 0.01).toPrecision(2)))
+      ticks: definition.integer ? Math.max(1, span) : 1000
     }
   }
 
   function renderCandidateFilters(run) {
     const filters = TABLE_FILTER_DEFINITIONS.map(definition => {
       const domain = tableFilterDomain(run, definition)
-      return `<label class="protein-filter-range" data-filter-row="${escapeHtml(definition.key)}"><span><strong>${escapeHtml(definition.label)}</strong><output>${escapeHtml(formatNumber(domain.min))} – ${escapeHtml(formatNumber(domain.max))}</output></span><div><input type="range" min="${domain.min}" max="${domain.max}" step="${domain.step}" value="${domain.min}" data-candidate-filter="${escapeHtml(definition.key)}" data-filter-bound="min" data-domain-min="${domain.min}" data-domain-max="${domain.max}"><input type="range" min="${domain.min}" max="${domain.max}" step="${domain.step}" value="${domain.max}" data-candidate-filter="${escapeHtml(definition.key)}" data-filter-bound="max" data-domain-min="${domain.min}" data-domain-max="${domain.max}"></div><small><span>${escapeHtml(formatNumber(domain.min))}</span><span>${escapeHtml(formatNumber(domain.max))}</span></small></label>`
+      return `<label class="protein-filter-range" data-filter-row="${escapeHtml(definition.key)}"><span><strong>${escapeHtml(definition.label)}</strong><output>${escapeHtml(formatNumber(domain.min))} – ${escapeHtml(formatNumber(domain.max))}</output></span><div><input type="range" min="0" max="${domain.ticks}" step="1" value="0" data-candidate-filter="${escapeHtml(definition.key)}" data-filter-bound="min" data-domain-min="${domain.min}" data-domain-max="${domain.max}"><input type="range" min="0" max="${domain.ticks}" step="1" value="${domain.ticks}" data-candidate-filter="${escapeHtml(definition.key)}" data-filter-bound="max" data-domain-min="${domain.min}" data-domain-max="${domain.max}"></div><small><span>${escapeHtml(formatNumber(domain.min))}</span><span>${escapeHtml(formatNumber(domain.max))}</span></small></label>`
     }).join('')
     return `<details class="protein-candidate-filters"><summary><span aria-hidden="true">≡</span> Filters <b hidden>0</b></summary><div class="protein-filter-menu"><header><strong>Filter candidates</strong><button type="button" data-filter-reset>Reset</button></header><input type="search" data-candidate-search placeholder="Search sequence, ID, or target"><p><span data-filter-result-count>${escapeHtml(allCandidates(run).length)}</span> / ${escapeHtml(allCandidates(run).length)} candidates</p>${filters}</div></details>`
   }
@@ -368,6 +365,14 @@
   }
 
   function compareCandidates(left, right, run) {
+    const leftObjective = finiteValue(left.objective)
+    const rightObjective = finiteValue(right.objective)
+    if (leftObjective !== null || rightObjective !== null) {
+      if (leftObjective === null) return 1
+      if (rightObjective === null) return -1
+      if (leftObjective !== rightObjective)
+        return run.minimize === false ? rightObjective - leftObjective : leftObjective - rightObjective
+    }
     const leftRanking = rankingValue(left)
     const rightRanking = rankingValue(right)
     if (leftRanking !== null || rightRanking !== null) {
@@ -375,11 +380,7 @@
       if (rightRanking === null) return -1
       if (rightRanking !== leftRanking) return rightRanking - leftRanking
     }
-    const leftObjective = finiteValue(left.objective)
-    const rightObjective = finiteValue(right.objective)
-    if (leftObjective === null) return 1
-    if (rightObjective === null) return -1
-    return run.minimize === false ? rightObjective - leftObjective : leftObjective - rightObjective
+    return 0
   }
 
   function candidateGroups(run) {
@@ -391,7 +392,13 @@
     return (run.cycles || [])
       .map(cycle => ({
         cycle: cycle.cycle,
-        candidates: (cycle.candidates || []).slice().sort((left, right) => compareCandidates(left, right, run))
+        candidates: (cycle.candidates || []).slice().sort((left, right) => {
+          if (cycle.cycleBestCandidateId) {
+            if (left.candidateId === cycle.cycleBestCandidateId) return -1
+            if (right.candidateId === cycle.cycleBestCandidateId) return 1
+          }
+          return compareCandidates(left, right, run)
+        })
       }))
       .filter(group => group.candidates.length)
       .sort((left, right) => right.cycle - left.cycle)
@@ -470,12 +477,78 @@
     </details>`
   }
 
+  function renderNumericValue(value) {
+    const number = finiteValue(value)
+    return number === null
+      ? '-'
+      : `<span data-value="${number}" title="${number}">${escapeHtml(formatNumber(number))}</span>`
+  }
+
+  function renderLossDetails(candidate) {
+    const loss = candidate.metadata?.loss
+    if (!loss?.components || typeof loss.components !== 'object') return ''
+    if (loss.formula_version === 'bounded-fixed-grouped-v1') return renderBoundedLossDetails(loss)
+    const structure = finiteValue(loss.structure_loss)
+    const esm = finiteValue(loss.esm2_contribution)
+    const base = finiteValue(loss.base_loss) ?? (structure !== null && esm !== null ? structure + esm : null)
+    const totals = [
+      ['Original / base loss', base],
+      ['Metric subtotal', loss.metric_loss],
+      ['Composite loss', loss.loss]
+    ]
+      .map(([label, value]) => `<span><strong>${label}</strong> ${renderNumericValue(value)}</span>`)
+      .join(' · ')
+    const terms = [
+      ...Object.entries(loss.components),
+      ...(esm !== null
+        ? [['esm2', { raw: loss.esm2_pll, weight: loss.esm2_weight, direction: 'maximize', contribution: esm }]]
+        : [])
+    ]
+    const rows = terms
+      .filter(([, term]) => term && typeof term === 'object')
+      .map(([name, term]) => {
+        const label = name.startsWith('rosetta_') ? metricLabel(name) : `${metricLabel(name)} loss term`
+        return `<tr data-loss-term="${escapeHtml(name)}"><th scope="row">${escapeHtml(label)}</th><td>${renderNumericValue(term.raw)}</td><td>${escapeHtml(term.direction || 'minimize')}</td>${['weight', 'reference', 'scale', 'normalized', 'contribution'].map(key => `<td>${renderNumericValue(term[key])}</td>`).join('')}</tr>`
+      })
+      .join('')
+    return `<details class="protein-loss-details"><summary>Loss breakdown · minimize</summary><p>${totals}</p><p>Metric contribution = sign × weight × (raw − reference) / scale; sign is +1 for minimize and −1 for maximize. Base loss includes structural terms and −weight × ESM2 log-likelihood. Hover a number for its full stored precision.</p><table><thead><tr><th>Term</th><th>Raw</th><th>Direction</th><th>Weight</th><th>Reference</th><th>Scale</th><th>Normalized</th><th>Contribution</th></tr></thead><tbody>${rows}</tbody></table></details>`
+  }
+
+  function renderBoundedLossDetails(loss) {
+    const totals = [
+      ['Bounded structural + ESM2 subtotal', loss.base_loss],
+      ['Bounded metric subtotal', loss.metric_loss],
+      ['Composite loss [0, 1]', loss.loss]
+    ]
+      .map(([label, value]) => `<span><strong>${label}</strong> ${renderNumericValue(value)}</span>`)
+      .join(' · ')
+    const terms = [...Object.entries(loss.components), ...(loss.esm2_component ? [['esm2', loss.esm2_component]] : [])]
+    const rows = terms
+      .filter(([, term]) => term && typeof term === 'object')
+      .map(([name, term]) => {
+        const label = name.startsWith('rosetta_') ? metricLabel(name) : `${metricLabel(name)} loss term`
+        return `<tr data-loss-term="${escapeHtml(name)}"><th scope="row">${escapeHtml(label)}</th><td>${renderNumericValue(term.raw)}</td><td>${escapeHtml(term.direction || (term.good > term.bad ? 'maximize' : 'minimize'))}</td>${['good', 'bad', 'penalty'].map(key => `<td>${renderNumericValue(term[key])}</td>`).join('')}<td>${escapeHtml(term.group || '-')}</td>${['weight', 'normalized_weight', 'effective_weight', 'contribution'].map(key => `<td>${renderNumericValue(term[key])}</td>`).join('')}</tr>`
+      })
+      .join('')
+    const groups = Object.entries(loss.groups || {})
+      .map(
+        ([name, group]) =>
+          `<tr data-loss-group="${escapeHtml(name)}"><th scope="row">${escapeHtml(name)}</th><td>${renderNumericValue(group.budget)}</td><td>${renderNumericValue(group.contribution)}</td></tr>`
+      )
+      .join('')
+    return `<details class="protein-loss-details"><summary>Loss breakdown · bounded · minimize</summary><p>${totals}</p><p>Calibration: <code>${escapeHtml(loss.loss_combination?.calibration_id || 'Unavailable')}</code> · ${escapeHtml(loss.formula_version)}. These are explicitly configured fixed anchors, not universal scientific defaults or values fitted to this batch. Penalty = clip((raw − good) / (bad − good), 0, 1). Contribution = group budget × normalized within-group weight × penalty. Lower is better; good-anchor values score 0, bad-anchor values score 1. Hover a number for its full stored precision.</p><table><thead><tr><th>Group</th><th>Budget</th><th>Contribution</th></tr></thead><tbody>${groups}</tbody></table><table><thead><tr><th>Term</th><th>Raw</th><th>Direction</th><th>Good</th><th>Bad</th><th>Penalty [0, 1]</th><th>Group</th><th>Weight</th><th>Within-group weight</th><th>Effective weight</th><th>Contribution</th></tr></thead><tbody>${rows}</tbody></table><p><strong>Linear diagnostics only — not used for selection:</strong> Original linear base ${renderNumericValue(loss.original_base_loss)} · Legacy linear composite ${renderNumericValue(loss.legacy_loss)}. Bounded anchors supersede the legacy metric reference and scale.</p></details>`
+  }
+
   function renderCandidateRow(candidate, selectedKeys, isLeader, run, extraMetrics) {
     const key = candidateKey(candidate)
     const checked = selectedKeys.has(key)
     const ranking = rankingValue(candidate)
     const cdrContacts = candidateTableValue(candidate, run, 'cdr_contacts')
     const minPae = candidateTableValue(candidate, run, 'min_pae')
+    const minPaeDetails =
+      minPae === null
+        ? `Min ipAE unavailable: ${candidate.metadata?.min_ipae?.reason || 'raw binder–target PAE was not recorded for this candidate'}`
+        : metricDescription('min_ipae', run)
     const sequence = candidate.sequence || 'Sequence unavailable'
     const analysis = candidate.metadata?.pyrosetta
     const analysisDetails = analysis
@@ -485,9 +558,10 @@
           `Elapsed: ${formatNumber(analysis.elapsed_seconds)} s`,
           ...Object.entries(candidate.metadata?.loss?.components || {})
             .filter(([name]) => name.startsWith('rosetta_'))
-            .map(
-              ([name, term]) =>
-                `${metricLabel(name)}: raw ${formatNumber(term.raw)}, ${term.direction}, weight ${formatNumber(term.weight)}, scale ${formatNumber(term.scale)}, loss contribution ${formatNumber(term.contribution)}`
+            .map(([name, term]) =>
+              candidate.metadata?.loss?.formula_version === 'bounded-fixed-grouped-v1'
+                ? `${metricLabel(name)}: raw ${formatNumber(term.raw)}, good ${formatNumber(term.good)}, bad ${formatNumber(term.bad)}, penalty ${formatNumber(term.penalty)}, group ${term.group}, effective weight ${formatNumber(term.effective_weight)}, loss contribution ${formatNumber(term.contribution)}`
+                : `${metricLabel(name)}: raw ${formatNumber(term.raw)}, ${term.direction}, weight ${formatNumber(term.weight)}, reference ${formatNumber(term.reference)}, scale ${formatNumber(term.scale)}, loss contribution ${formatNumber(term.contribution)}`
             ),
           ...(analysis.contact_residues?.length
             ? [
@@ -529,8 +603,9 @@
       <div class="protein-candidate-sequence"><div class="protein-candidate-sequence-main"><span class="protein-sequence-summary" tabindex="0">${renderCandidateSequence(candidate, run)}</span><button type="button" data-copy-sequence="${escapeHtml(sequence)}" title="Copy sequence">Copy</button>${renderSequencePreview(candidate, run)}</div><small>${escapeHtml(sequence.length)} residues${isLeader ? ' · cycle leader' : ''}${missingProperties.length ? ` · <span title="Missing: ${escapeHtml(missingProperties.join(', '))}">metrics incomplete</span>` : ''}</small></div>
       <div class="protein-candidate-score"><strong>${escapeHtml(formatNumber(ranking))}</strong></div>
       <div class="protein-candidate-metric"><strong>${escapeHtml(formatNumber(cdrContacts))}</strong></div>
-      <div class="protein-candidate-metric"><strong>${escapeHtml(formatNumber(minPae))}</strong></div>
-      ${extraMetrics.map(definition => `<div class="protein-candidate-metric"><strong>${escapeHtml(formatNumber(propertyValue(candidate, definition)))}</strong></div>`).join('')}
+      <div class="protein-candidate-metric" title="${escapeHtml(minPaeDetails)}"><strong>${renderNumericValue(minPae)}</strong></div>
+      ${extraMetrics.map(definition => `<div class="protein-candidate-metric"><strong>${renderNumericValue(propertyValue(candidate, definition))}</strong></div>`).join('')}
+      ${renderLossDetails(candidate)}
     </div>`
   }
 
@@ -561,16 +636,33 @@
 
   function propertyDomain(candidates, definition) {
     const values = candidates.map(candidate => propertyValue(candidate, definition)).filter(value => value !== null)
-    if (!values.length) return { min: 0, max: 1 }
-    const observedMax = Math.max(0, ...values)
-    if (definition.key === 'contacts' || definition.key === 'frame_contacts') {
-      return { min: 0, max: Math.max(5, Math.ceil(observedMax / 5) * 5) }
+    if (!values.length) return { min: 0, max: 1, available: false }
+    const observedMin = Math.min(...values)
+    const observedMax = Math.max(...values)
+    const key = definition.key.replace(/^metric:/, '').replace(/^confidence\./, '')
+    if (
+      [
+        'contacts',
+        'frame_contacts',
+        'rosetta_interface_hbonds',
+        'rosetta_interface_unsat_hbonds',
+        'rosetta_interface_residues'
+      ].includes(key)
+    ) {
+      return { min: Math.min(0, Math.floor(observedMin / 5) * 5), max: Math.max(5, Math.ceil(observedMax / 5) * 5) }
     }
-    return { min: 0, max: Math.max(1, Math.ceil(observedMax)) }
+    // Confidence values are displayed in their persisted scale, never silently normalized.
+    if (/plddt/i.test(key) && observedMin >= 0 && observedMax <= 100) return { min: 0, max: observedMax <= 1 ? 1 : 100 }
+    if (observedMin < 0) {
+      const padding = (observedMax - observedMin || Math.abs(observedMin) || 1) * 0.05
+      return { min: observedMin - padding, max: observedMax + padding }
+    }
+    return { min: Math.min(0, Math.floor(observedMin)), max: Math.max(1, Math.ceil(observedMax)) }
   }
 
   function propertyTicks(axis, intervals = 5) {
-    return Array.from({ length: intervals + 1 }, (_, index) => axis.max * (1 - index / intervals))
+    if (axis.available === false) return []
+    return Array.from({ length: intervals + 1 }, (_, index) => axis.max - ((axis.max - axis.min) * index) / intervals)
   }
 
   function minIpaColor(value, max) {
@@ -642,9 +734,10 @@
             return `<g class="protein-property-tick"><line x1="-4" x2="4" y1="${y}" y2="${y}"/><text x="-8" y="${y + 3}" text-anchor="end">${escapeHtml(formatNumber(value))}</text></g>`
           })
           .join('')
-        return `<g class="protein-property-axis${reflow ? ' is-reflowing' : ''}" data-axis-key="${escapeHtml(axis.key)}" transform="translate(${axis.x} 0)">
-        <text class="protein-property-label" x="0" y="18" text-anchor="middle">${escapeHtml(axis.label)}</text>
+        return `<g class="protein-property-axis${reflow ? ' is-reflowing' : ''}" data-axis-key="${escapeHtml(axis.key)}" data-axis-min="${axis.min}" data-axis-max="${axis.max}" transform="translate(${axis.x} 0)">
+        <text class="protein-property-label" x="0" y="18" text-anchor="middle">${escapeHtml(axis.label)}<title>${escapeHtml(metricDescription(axis.key, run))}</title></text>
         <line class="protein-property-spine" x1="0" x2="0" y1="${geometry.top}" y2="${geometry.height - geometry.bottom}"/>
+        ${axis.available === false ? `<text class="protein-axis-label" x="0" y="${geometry.top + 14}" text-anchor="middle">Unavailable</text>` : ''}
         ${ticks}
       </g>`
       })
@@ -657,16 +750,22 @@
         const key = candidateKey(candidate)
         const isSelected = selectedKeys.has(key)
         const missing = []
-        const points = geometry.axes.map(axis => {
+        const segments = []
+        let points = []
+        for (const axis of geometry.axes) {
           const value = propertyValue(candidate, axis)
-          if (value === null) missing.push(axis.label)
-          return { x: axis.x, y: geometry.y(value ?? axis.min, axis) }
-        })
+          if (value === null) {
+            missing.push(axis.label)
+            if (points.length) segments.push(points)
+            points = []
+          } else points.push({ x: axis.x, y: geometry.y(value, axis) })
+        }
+        if (points.length) segments.push(points)
         const colorValue = propertyValue(candidate, colorDefinition)
         const color = propertyColor(colorValue, colorDomain)
         const title = `${candidate.candidateId} · cycle ${candidate.cycle} · ${colorDefinition.label} ${formatNumber(colorValue)}${missing.length ? ` · unavailable: ${missing.join(', ')}` : ''}`
         const stateClass = selected.length ? (isSelected ? ' is-selected' : ' is-muted') : ' is-all'
-        const path = smoothPath(points)
+        const path = segments.map(smoothPath).join(' ')
         return `<g class="protein-candidate-line-control" data-line-key="${escapeHtml(key)}" role="button" tabindex="0" aria-pressed="${isSelected}" style="--candidate-color:${color}"><path class="protein-candidate-line-hit" d="${path}"/><path class="protein-candidate-line${stateClass}${key === enteringKey ? ' is-entering' : ''}${reflow ? ' is-reflowing' : ''}${missing.length ? ' has-missing-values' : ''}" pathLength="1" d="${path}"><title>${escapeHtml(title)}</title></path></g>`
       })
       .join('')
@@ -694,7 +793,7 @@
       rosetta_total_score: 'Rosetta total (REU)',
       rosetta_interface_dg: 'Interface ΔG (REU)',
       rosetta_interface_sasa: 'Interface ΔSASA (Å²)',
-      rosetta_interface_dg_per_sasa: 'Interface 100×ΔG/ΔSASA',
+      rosetta_interface_dg_per_sasa: 'Interface 100×ΔG/ΔSASA (REU/Å²)',
       rosetta_interface_sc: 'Shape complementarity',
       rosetta_interface_hbonds: 'Interface H-bonds',
       rosetta_interface_unsat_hbonds: 'Buried unsatisfied H-bonds',
@@ -730,9 +829,57 @@
       .join(' ')
   }
 
+  function metricDescription(value, run) {
+    const key = String(value)
+      .replace(/^metric:/, '')
+      .replace(/^confidence\./, '')
+    const configured = allCandidates(run || {})
+      .map(candidate => candidate.metadata?.loss?.components?.[key]?.direction)
+      .find(Boolean)
+    if (
+      key === 'loss' &&
+      allCandidates(run || {}).some(
+        candidate => candidate.metadata?.loss?.formula_version === 'bounded-fixed-grouped-v1'
+      )
+    ) {
+      return 'Lower is preferred · Bounded composite loss [0, 1] from explicitly configured fixed anchors and group budgets'
+    }
+    const direction =
+      configured ||
+      (key === run?.objectiveKey
+        ? run.minimize === false
+          ? 'maximize'
+          : 'minimize'
+        : key === 'loss'
+          ? 'minimize'
+          : '')
+    const units = {
+      rosetta_total_score: 'Rosetta energy units (REU)',
+      rosetta_interface_dg: 'Rosetta energy units (REU)',
+      rosetta_interface_sasa: 'Å²',
+      rosetta_interface_dg_per_sasa: '100 × REU/Å²',
+      rosetta_interface_sc: 'dimensionless',
+      min_ipa:
+        'Å; raw minimum interchain predicted aligned error across configured binder–target pairs with valid frames, both directions; not mean i_pae loss or ipSAE',
+      min_ipae:
+        'Å; raw minimum interchain predicted aligned error across configured binder–target pairs with valid frames, both directions; not mean i_pae loss or ipSAE',
+      iptm: 'dimensionless',
+      ptm: 'dimensionless',
+      ipsae: 'dimensionless'
+    }
+    const unit =
+      units[key] ||
+      (/^rosetta_interface_(hbonds|unsat_hbonds|residues)$/.test(key) || /contacts$/.test(key)
+        ? 'count'
+        : /plddt/i.test(key)
+          ? 'Stored pLDDT scale; no rescaling'
+          : 'Stored numeric value')
+    return `${direction ? `${direction === 'minimize' ? 'Lower' : 'Higher'} is preferred by the configured objective · ` : ''}${unit}`
+  }
+
   function availableProperties(run) {
     const definitions = [...PROPERTY_DEFINITIONS]
-    const known = new Set(definitions.map(definition => definition.paths[0]))
+    const known = new Set(definitions.flatMap(definition => definition.paths))
     for (const candidate of run ? allCandidates(run) : []) {
       for (const [key, value] of Object.entries(candidate.metrics || {})) {
         const path = `metrics.${key}`
@@ -772,6 +919,19 @@
     const minPaeScores = values('min_ipa')
     const metrics = [
       ['Candidates', candidates.length],
+      ...(run.objectiveKey
+        ? [
+            [
+              `Best ${metricLabel(run.objectiveKey)} (${run.minimize === false ? 'maximize' : 'minimize'})`,
+              finiteValue(run.bestObjective) ??
+                (candidates.some(item => finiteValue(item.objective) !== null)
+                  ? (run.minimize === false ? Math.max : Math.min)(
+                      ...candidates.map(item => finiteValue(item.objective)).filter(value => value !== null)
+                    )
+                  : null)
+            ]
+          ]
+        : []),
       ['Best ranking', rankingScores.length ? Math.max(...rankingScores) : null],
       ['Best ipTM', iptmScores.length ? Math.max(...iptmScores) : null],
       ['Min ipAE', minPaeScores.length ? Math.min(...minPaeScores) : null]
@@ -1725,6 +1885,37 @@
     if (resultCount) resultCount.textContent = String(visibleCount)
   }
 
+  function refreshTableFilterRange(saved, domain) {
+    // Untouched endpoints follow incoming results instead of becoming accidental filters.
+    const range = {
+      min: saved?.min > saved?.domainMin ? Math.max(domain.min, Math.min(saved.min, domain.max)) : domain.min,
+      max: saved?.max < saved?.domainMax ? Math.max(domain.min, Math.min(saved.max, domain.max)) : domain.max,
+      domainMin: domain.min,
+      domainMax: domain.max
+    }
+    if (range.min > range.max) [range.min, range.max] = [range.max, range.min]
+    return range
+  }
+
+  function tableFilterSliderPosition(range, bound, ticks) {
+    const span = range.domainMax - range.domainMin
+    return span ? Math.round(((range[bound] - range.domainMin) / span) * ticks) : bound === 'min' ? 0 : ticks
+  }
+
+  function updateTableFilterRange(range, bound, position, ticks) {
+    if (!Number.isFinite(position) || !Number.isFinite(ticks) || ticks <= 0) return
+    // Integer slider coordinates make both full-precision metric endpoints reachable.
+    const value =
+      position <= 0
+        ? range.domainMin
+        : position >= ticks
+          ? range.domainMax
+          : range.domainMin + (range.domainMax - range.domainMin) * (position / ticks)
+    range[bound] = value
+    // Never read the untouched bound back from a browser-quantized slider value.
+    if (range.min > range.max) range[bound === 'min' ? 'max' : 'min'] = value
+  }
+
   function bindCandidateTableControls(rootElement, run) {
     const state = rootElement._proteinCandidateTableState
     const sort = rootElement.querySelector('[data-candidate-sort]')
@@ -1738,17 +1929,16 @@
     TABLE_FILTER_DEFINITIONS.forEach(definition => {
       const domain = tableFilterDomain(run, definition)
       const saved = state.ranges[definition.key]
-      const range = {
-        min: Math.max(domain.min, Math.min(saved?.min ?? domain.min, domain.max)),
-        max: Math.max(domain.min, Math.min(saved?.max ?? domain.max, domain.max)),
-        domainMin: domain.min,
-        domainMax: domain.max
-      }
-      if (range.min > range.max) [range.min, range.max] = [range.max, range.min]
+      const range = refreshTableFilterRange(saved, domain)
       state.ranges[definition.key] = range
       const inputs = [...rootElement.querySelectorAll(`[data-candidate-filter="${definition.key}"]`)]
       inputs.forEach(input => {
-        input.value = String(range[input.dataset.filterBound])
+        input.value = String(tableFilterSliderPosition(range, input.dataset.filterBound, Number(input.max)))
+        input.setAttribute(
+          'aria-label',
+          `${input.dataset.filterBound === 'min' ? 'Minimum' : 'Maximum'} ${definition.label}`
+        )
+        input.setAttribute('aria-valuetext', String(range[input.dataset.filterBound]))
       })
       const output = rootElement.querySelector(`[data-filter-row="${definition.key}"] output`)
       if (output) output.textContent = `${formatNumber(range.min)} – ${formatNumber(range.max)}`
@@ -1771,16 +1961,12 @@
       input.addEventListener('input', () => {
         const key = input.dataset.candidateFilter
         const range = state.ranges[key]
-        const paired = [...rootElement.querySelectorAll(`[data-candidate-filter="${key}"]`)].find(
-          item => item !== input
-        )
-        if (input.dataset.filterBound === 'min' && Number(input.value) > Number(paired.value))
-          paired.value = input.value
-        if (input.dataset.filterBound === 'max' && Number(input.value) < Number(paired.value))
-          paired.value = input.value
+        updateTableFilterRange(range, input.dataset.filterBound, Number(input.value), Number(input.max))
         const inputs = [...rootElement.querySelectorAll(`[data-candidate-filter="${key}"]`)]
-        range.min = Number(inputs.find(item => item.dataset.filterBound === 'min').value)
-        range.max = Number(inputs.find(item => item.dataset.filterBound === 'max').value)
+        inputs.forEach(item => {
+          item.value = String(tableFilterSliderPosition(range, item.dataset.filterBound, Number(item.max)))
+          item.setAttribute('aria-valuetext', String(range[item.dataset.filterBound]))
+        })
         const output = rootElement.querySelector(`[data-filter-row="${key}"] output`)
         if (output) output.textContent = `${formatNumber(range.min)} – ${formatNumber(range.max)}`
         applyCandidateTableState(rootElement)
@@ -1794,7 +1980,8 @@
         range.min = range.domainMin
         range.max = range.domainMax
         rootElement.querySelectorAll(`[data-candidate-filter="${definition.key}"]`).forEach(input => {
-          input.value = String(range[input.dataset.filterBound])
+          input.value = String(tableFilterSliderPosition(range, input.dataset.filterBound, Number(input.max)))
+          input.setAttribute('aria-valuetext', String(range[input.dataset.filterBound]))
         })
         const output = rootElement.querySelector(`[data-filter-row="${definition.key}"] output`)
         if (output) output.textContent = `${formatNumber(range.min)} – ${formatNumber(range.max)}`
@@ -1976,10 +2163,11 @@
         showCandidateStructures(rootElement, run, structureCandidates(rootElement, run, byKey))
       }
       row.addEventListener('click', event => {
-        if (event.target.closest('.protein-candidate-check, [data-copy-sequence]')) return
+        if (event.target.closest('.protein-candidate-check, [data-copy-sequence], .protein-loss-details')) return
         activate()
       })
       row.addEventListener('keydown', event => {
+        if (event.target.closest('.protein-loss-details')) return
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
           activate()
@@ -2043,6 +2231,10 @@
     propertyTicks,
     propertyDefinitions,
     metricLabel,
+    metricDescription,
+    refreshTableFilterRange,
+    tableFilterSliderPosition,
+    updateTableFilterRange,
     renderParallelCoordinates,
     renderFullCandidateSequence,
     renderProteinDesignDashboard,

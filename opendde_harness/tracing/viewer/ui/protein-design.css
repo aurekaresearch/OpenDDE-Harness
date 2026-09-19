@@ -878,6 +878,39 @@ body.app-view-protein-design {
   font: 600 12px var(--mono);
 }
 
+.protein-loss-details {
+  grid-column: 2 / -1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.protein-loss-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.protein-loss-details p {
+  max-width: 95ch;
+  white-space: normal;
+}
+
+.protein-loss-details table {
+  border-collapse: collapse;
+  font: 11px var(--mono);
+}
+
+.protein-loss-details th,
+.protein-loss-details td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+
+.protein-loss-details th:first-child {
+  text-align: left;
+}
+
 .protein-candidate-cycle span {
   display: inline-grid;
   min-width: 28px;

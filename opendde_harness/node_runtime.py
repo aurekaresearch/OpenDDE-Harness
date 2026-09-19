@@ -103,7 +103,15 @@ def find_node() -> Tuple[Optional[str], Optional[Tuple[int, int, int]]]:
                 seen_path.add(cand)
                 candidates.append(cand)
 
-        # Priority 4: OpenDDE Harness-managed private runtime installed by the one-line
+        # Priority 4: nvm installations are not placed on PATH in detached or
+        # non-interactive shells, even when the same account's interactive
+        # shell uses them. Background workers must still be able to use that
+        # already-installed runtime.
+        nvm_root = Path(os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))) / "versions" / "node"
+        if nvm_root.is_dir():
+            candidates.extend(str(path) for path in sorted(nvm_root.glob("v*/bin/node"), reverse=True))
+
+        # Priority 5: OpenDDE Harness-managed private runtime installed by the one-line
         # installer into ~/.opendde_harness/runtime/. This is the zero-config fallback so
         # a user who has no system Node still gets a working `ddeharness tui` after
         # the installer provisioned a private Node here. Glob to tolerate the

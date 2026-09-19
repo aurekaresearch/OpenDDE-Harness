@@ -93,6 +93,11 @@ def test_valid_ranking_needs_only_one_attempt():
     provider = Provider([LLMResponse(ranking())])
     run(provider)
     assert len(provider.calls) == 1
+    prompt = json.dumps(provider.calls[0]["messages"])
+    assert "Authoritative selection objective" in prompt
+    assert "commentary cannot override it" in prompt
+    assert "Your explanations and" in AGENT_PROFILES[AgentRole.POST_FILTER].system_prompt
+    assert "cannot override eligibility, order, or top_k" in AGENT_PROFILES[AgentRole.POST_FILTER].system_prompt
 
 
 def test_invalid_rankings_exhaust_three_attempts():
