@@ -20,6 +20,10 @@ forward the actual viewer port with SSH; for port 4318, use
 - **Min ipAE** refers to the available interface PAE metric, not whole-complex PAE.
 - Switch **View** to **Post-filter** for terminal ranking, per-candidate metrics and
   structures. If that stage has not produced data, the panel remains empty.
+- Optional [PyRosetta analysis](pyrosetta.md) adds relaxed interface scores to the
+  same numeric columns and comparison controls. The candidate's PyRosetta status
+  tooltip explains failures and loss contributions. Structures in the viewer remain
+  the original folds; the relaxed PDB is retained separately on compute.
 
 ## Design loop and search tree
 

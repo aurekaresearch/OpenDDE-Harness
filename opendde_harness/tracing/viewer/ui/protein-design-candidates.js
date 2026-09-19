@@ -415,7 +415,8 @@
         metadata: {
           ...original?.metadata,
           loss: decision.metadata?.loss || null,
-          gate_evidence: decision.metadata?.gate_evidence || null
+          gate_evidence: decision.metadata?.gate_evidence || null,
+          pyrosetta: decision.metadata?.pyrosetta || null
         },
         postFilterDecision: decision
       }
@@ -476,6 +477,31 @@
     const cdrContacts = candidateTableValue(candidate, run, 'cdr_contacts')
     const minPae = candidateTableValue(candidate, run, 'min_pae')
     const sequence = candidate.sequence || 'Sequence unavailable'
+    const analysis = candidate.metadata?.pyrosetta
+    const analysisDetails = analysis
+      ? [
+          analysis.status === 'success' ? 'FastRelax → InterfaceAnalyzer' : analysis.error,
+          analysis.provenance?.score_function,
+          `Elapsed: ${formatNumber(analysis.elapsed_seconds)} s`,
+          ...Object.entries(candidate.metadata?.loss?.components || {})
+            .filter(([name]) => name.startsWith('rosetta_'))
+            .map(
+              ([name, term]) =>
+                `${metricLabel(name)}: raw ${formatNumber(term.raw)}, ${term.direction}, weight ${formatNumber(term.weight)}, scale ${formatNumber(term.scale)}, loss contribution ${formatNumber(term.contribution)}`
+            ),
+          ...(analysis.contact_residues?.length
+            ? [
+                `Contact residue REU (zero-based chain indices; showing ${analysis.contact_residues.length}/${analysis.provenance?.contact_residue_count ?? analysis.contact_residues.length}):`,
+                ...analysis.contact_residues.map(
+                  row =>
+                    `${row.chain_id}[${row.residue_index}] ${row.amino_acid}: bound ${formatNumber(row.bound_score_reu)}, interface ΔG ${formatNumber(row.interface_dg_reu)}`
+                )
+              ]
+            : [])
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : ''
     const decision = candidate.postFilterDecision
     const decisionLabel = decision
       ? `#${decision.rank || '-'} · ${decision.passFilter ? 'Selected' : decision.hardEligible ? 'Not selected' : 'Hard rejected'}`
@@ -498,7 +524,7 @@
         <span aria-hidden="true"></span>
       </label>
       <div class="protein-candidate-cycle"><span>${escapeHtml(candidate.cycle)}</span></div>
-      <div class="protein-candidate-id"><code title="${escapeHtml(candidate.candidateId)}">${escapeHtml(candidate.candidateId)}</code>${decision ? `<small class="protein-post-filter-status" tabindex="0" title="${escapeHtml(decisionDetail)}">${escapeHtml(decisionLabel)}</small>` : ''}</div>
+      <div class="protein-candidate-id"><code title="${escapeHtml(candidate.candidateId)}">${escapeHtml(candidate.candidateId)}</code>${decision ? `<small class="protein-post-filter-status" tabindex="0" title="${escapeHtml(decisionDetail)}">${escapeHtml(decisionLabel)}</small>` : ''}${analysis ? `<small class="protein-post-filter-status" tabindex="0" title="${escapeHtml(analysisDetails)}">PyRosetta: ${escapeHtml(analysis.status)}</small>` : ''}</div>
       <div class="protein-candidate-target" title="${escapeHtml(run.target || 'Unknown target')}">${escapeHtml(run.target || '-')}</div>
       <div class="protein-candidate-sequence"><div class="protein-candidate-sequence-main"><span class="protein-sequence-summary" tabindex="0">${renderCandidateSequence(candidate, run)}</span><button type="button" data-copy-sequence="${escapeHtml(sequence)}" title="Copy sequence">Copy</button>${renderSequencePreview(candidate, run)}</div><small>${escapeHtml(sequence.length)} residues${isLeader ? ' · cycle leader' : ''}${missingProperties.length ? ` · <span title="Missing: ${escapeHtml(missingProperties.join(', '))}">metrics incomplete</span>` : ''}</small></div>
       <div class="protein-candidate-score"><strong>${escapeHtml(formatNumber(ranking))}</strong></div>
@@ -664,6 +690,17 @@
   }
 
   function metricLabel(value) {
+    const rosettaLabels = {
+      rosetta_total_score: 'Rosetta total (REU)',
+      rosetta_interface_dg: 'Interface ΔG (REU)',
+      rosetta_interface_sasa: 'Interface ΔSASA (Å²)',
+      rosetta_interface_dg_per_sasa: 'Interface 100×ΔG/ΔSASA',
+      rosetta_interface_sc: 'Shape complementarity',
+      rosetta_interface_hbonds: 'Interface H-bonds',
+      rosetta_interface_unsat_hbonds: 'Buried unsatisfied H-bonds',
+      rosetta_interface_residues: 'Interface residues'
+    }
+    if (Object.hasOwn(rosettaLabels, value)) return rosettaLabels[value]
     const labels = {
       iptm: 'ipTM',
       ptm: 'pTM',

@@ -132,6 +132,7 @@ test('projects dynamic cycle and global-best metric series without conflating ca
         objective: 0.4,
         metrics: {
           iptm: 0.7,
+          rosetta_interface_dg: -12.5,
           confidence: { plddt: 82.5 },
           gate_passed: 1.0,
           cdr3_gate_passed: 1.0,
@@ -186,10 +187,11 @@ test('projects dynamic cycle and global-best metric series without conflating ca
       {
         candidate_id: 'cycle-best',
         sequence: 'ACDE',
-        metrics: { iptm: 0.81, plddt: 0.88, cdr_contact_fraction: 0.84, gate_passed: 1 },
+        metrics: { iptm: 0.81, plddt: 0.88, cdr_contact_fraction: 0.84, gate_passed: 1, rosetta_interface_dg: -15 },
         metadata: {
           gate_evidence: { cdr_total_contacts: 66, framework_total_contacts: 0 },
-          loss: { loss_components: { i_pae: 0.3 } }
+          loss: { loss_components: { i_pae: 0.3 } },
+          pyrosetta: { status: 'success', metrics: { rosetta_interface_dg: -15 } }
         }
       }
     ],
@@ -235,7 +237,8 @@ test('projects dynamic cycle and global-best metric series without conflating ca
     readArtifact: artifactPath => artifacts.get(artifactPath) || null
   })
 
-  assert.deepEqual(projected.run.metricNames, ['confidence.plddt', 'iptm', 'loss'])
+  assert.deepEqual(projected.run.metricNames, ['confidence.plddt', 'iptm', 'loss', 'rosetta_interface_dg'])
+  assert.equal(projected.run.series.rosetta_interface_dg.cycleBest[0].value, -12.5)
   assert.deepEqual(projected.run.series.loss.cycleBest, [{ cycle: 0, candidateId: 'cycle-best', value: 0.4 }])
   assert.deepEqual(projected.run.series.loss.globalBest, [{ cycle: 0, candidateId: 'global-best', value: 0.3 }])
   assert.equal(projected.run.structures[0].candidateId, 'cycle-best')
@@ -256,6 +259,7 @@ test('projects dynamic cycle and global-best metric series without conflating ca
   assert.deepEqual(projected.run.postFilter.decisions[0].binderChainIds, ['D'])
   assert.equal(projected.run.postFilter.decisions[0].sequence, 'ACDE')
   assert.equal(projected.run.postFilter.decisions[0].metrics.iptm, 0.81)
+  assert.equal(projected.run.postFilter.decisions[0].metrics.rosetta_interface_dg, -15)
   assert.equal(projected.run.postFilter.decisions[0].metrics.plddt, 0.88)
   assert.equal(projected.run.postFilter.decisions[0].metrics.cdr_contact_fraction, 0.84)
   assert.equal(projected.run.postFilter.decisions[0].metrics.gate_passed, undefined)
@@ -555,6 +559,6 @@ test('post-filter failures are failed, never fallback, and obsolete scores are i
     assert.equal(Object.hasOwn(result, 'metricWeights'), false)
     assert.equal(Object.hasOwn(result.decisions[0], 'score'), false)
     assert.equal(result.decisions[0].rank, 1)
-    assert.deepEqual(result.decisions[0].metadata, { gate_evidence: null, loss: null })
+    assert.deepEqual(result.decisions[0].metadata, { gate_evidence: null, loss: null, pyrosetta: null })
   }
 })

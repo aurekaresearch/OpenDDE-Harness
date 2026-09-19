@@ -23,7 +23,7 @@
     typeof module === 'object' && module.exports
       ? require('./protein-design-candidates')
       : window.ProteinDesignCandidates
-  const COMMON_METRICS = [/^iptm$/i, /plddt/i, /ipsae/i, /contact|i_con/i, /loss/i]
+  const COMMON_METRICS = [/^iptm$/i, /plddt/i, /^rosetta_interface_(dg|sc|sasa)$/i, /ipsae/i, /contact|i_con/i, /loss/i]
   let threeDmolPromise = null
 
   function escapeHtml(value) {

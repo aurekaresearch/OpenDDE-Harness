@@ -154,6 +154,45 @@ test('metric labels use canonical scientific capitalization', () => {
   }
 })
 
+test('Rosetta metrics are selectable and analysis status exposes escaped loss and failure details', () => {
+  const metrics = { rosetta_interface_dg: -12.5, rosetta_interface_sc: 0.65 }
+  const metadata = {
+    pyrosetta: {
+      status: 'success',
+      elapsed_seconds: 2,
+      provenance: { score_function: 'ref2015' },
+      contact_residues: [
+        { chain_id: 'B', residue_index: 9, amino_acid: 'W', bound_score_reu: -2, interface_dg_reu: -1 }
+      ]
+    },
+    loss: {
+      components: {
+        rosetta_interface_dg: { raw: -12.5, direction: 'minimize', weight: 0.5, scale: 10, contribution: -0.625 }
+      }
+    }
+  }
+  const candidate = { candidateId: 'relaxed', sequence: 'AAA', cycle: 1, metrics, metadata }
+  const run = { cycles: [{ cycle: 1, candidates: [candidate] }] }
+  const html = renderProteinDesignDashboard({ run })
+  assert.match(html, /PyRosetta: success/)
+  assert.match(html, /FastRelax → InterfaceAnalyzer/)
+  assert.match(html, /loss contribution -0.625/)
+  assert.match(html, /B\[9\] W: bound -2, interface ΔG -1/)
+  assert.match(html, /value="metric:rosetta_interface_dg">Interface ΔG \(REU\)/)
+  assert.match(html, /&quot;rosetta_interface_dg&quot;:-12.5/)
+  assert.equal(metricLabel('rosetta_interface_sasa'), 'Interface ΔSASA (Å²)')
+  metadata.pyrosetta = { status: 'failed', error: '<script>bad</script>' }
+  const failed = renderProteinDesignDashboard({ run })
+  assert.match(failed, /PyRosetta: failed/)
+  assert.match(failed, /&lt;script&gt;bad&lt;\/script&gt;/)
+  assert.doesNotMatch(failed, /<script>bad/)
+
+  run.postFilter = { decisions: [{ candidateId: 'relaxed', metrics: {} }] }
+  const refold = resultRun(run, 'post-filter')
+  assert.equal(candidateGroups(refold)[0].candidates[0].metadata.pyrosetta, null)
+  assert.doesNotMatch(renderProteinDesignDashboard({ run: refold }), /PyRosetta: failed/)
+})
+
 function pdbFromPoints(points) {
   return `${points.map(([x, y, z], index) => `ATOM  ${String(index + 1).padStart(5)}  CA  ALA A${String(index + 1).padStart(4)}    ${x.toFixed(3).padStart(8)}${y.toFixed(3).padStart(8)}${z.toFixed(3).padStart(8)}  1.00 90.00           C`).join('\n')}\nEND\n`
 }

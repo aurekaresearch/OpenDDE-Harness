@@ -10,7 +10,7 @@ test('theme control restores the saved mode and persists both toggle directions'
   const source = fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8')
   const themeSource = source.slice(
     source.indexOf('function applyTheme(theme)'),
-    source.lastIndexOf('applyStaticI18n();')
+    source.lastIndexOf('applyStaticI18n()')
   )
   const attributes = {}
   let click
@@ -163,6 +163,25 @@ const run = {
     edges: [{ source: 'cycle:0', target: 'candidate:candidate-2' }]
   }
 }
+
+test('interface scores remain visible in the bounded trend chart selection', () => {
+  const metrics = [
+    'loss',
+    'iptm',
+    'plddt',
+    'ipsae',
+    'cdr_contacts',
+    'i_con',
+    'rosetta_interface_dg',
+    'rosetta_interface_sasa',
+    'rosetta_interface_sc',
+    'z_metric'
+  ]
+  const selected = orderMetricNames(metrics, 'loss').slice(0, 8)
+  for (const name of ['rosetta_interface_dg', 'rosetta_interface_sasa', 'rosetta_interface_sc']) {
+    assert.ok(selected.includes(name))
+  }
+})
 
 test('shell exposes API Calls, Traces, and Protein design workspaces', () => {
   assert.match(shell, /data-app-view="api"/)

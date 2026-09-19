@@ -271,7 +271,8 @@ function projectPostFilter(summary, readArtifact) {
         metrics,
         metadata: {
           gate_evidence: candidate.metadata?.gate_evidence || null,
-          loss: candidate.metadata?.loss || null
+          loss: candidate.metadata?.loss || null,
+          pyrosetta: candidate.metadata?.pyrosetta || null
         },
         passFilter: decision?.pass_filter === true,
         hardEligible: decision?.hard_eligible === true,
