@@ -15,6 +15,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--dependencies-only", action="store_true")
 parser.add_argument("--environment", type=Path)
+parser.add_argument("--allow-pyrosetta", action="store_true")
 args = parser.parse_args()
 
 if args.environment:
@@ -38,9 +39,14 @@ if args.environment:
         raise SystemExit("FoldMason version does not match the environment contract")
     print(f"Environment contract verified: {spec['id']}: {digest}")
 
-for name in ("pyrosetta", "pyright"):
+excluded_dependencies = ("pyright",) if args.allow_pyrosetta else ("pyrosetta", "pyright")
+for name in excluded_dependencies:
     if importlib.util.find_spec(name) is not None or shutil.which(name):
         raise SystemExit(f"Excluded dependency present: {name}")
+
+if args.allow_pyrosetta:
+    importlib.import_module("pyrosetta")
+    print("Import OK: pyrosetta")
 
 for name in (
     "torch",

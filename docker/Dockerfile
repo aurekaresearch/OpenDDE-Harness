@@ -81,6 +81,10 @@ LABEL org.opendde-harness.environment=${ENVIRONMENT_ID} \
     org.opendde-harness.environment-sha256=${ENVIRONMENT_SHA256} \
     org.opendde-harness.pyrosetta=${INSTALL_PYROSETTA}
 RUN --mount=type=bind,source=docker/doctor.py,target=/tmp/doctor.py \
-    python /tmp/doctor.py --dependencies-only --environment /opt/compute-environment.json
+    if [[ "$INSTALL_PYROSETTA" == 1 ]]; then \
+        python /tmp/doctor.py --dependencies-only --environment /opt/compute-environment.json --allow-pyrosetta; \
+    else \
+        python /tmp/doctor.py --dependencies-only --environment /opt/compute-environment.json; \
+    fi
 EXPOSE 8080
 CMD ["python"]
