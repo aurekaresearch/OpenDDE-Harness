@@ -12,6 +12,7 @@ import yaml
 
 from opendde_harness.plugin.protein_design.core.contracts import Placement, WorkflowConfig
 from opendde_harness.plugin.protein_design.servers.backends.loss_objective import normalize_loss_weights
+from opendde_harness.plugin.protein_design.servers.backends.pyrosetta_analysis import PyRosettaConfig, interface_chains
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ class WorkflowConfigLoader:
             "need_atom_confidence",
             "persistent_worker",
             "persistent_worker_timeout_seconds",
+            "pyrosetta",
             "recycling_cycles",
             "seeds",
             "subprocess_timeout_seconds",
@@ -571,6 +573,11 @@ class WorkflowConfigLoader:
                     "local pairedMsaPath/unpairedMsaPath values cannot be uploaded"
                 )
         fold_options = {key: value for key, value in fold.items() if key != "model"}
+        if "pyrosetta" in fold:
+            analysis = PyRosettaConfig.model_validate(fold["pyrosetta"])
+            if analysis.enabled:
+                interface_chains(list(binder_chains), list(target_chains))
+            fold_options["pyrosetta"] = analysis.model_dump()
         loss_weights = normalize_loss_weights(design.get("loss_weights"))
         target_hotspots = {
             str(chain_id): list(value.get("hotspots", []))
