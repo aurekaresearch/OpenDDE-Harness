@@ -133,6 +133,11 @@ Transfer the archive, verify its checksum against the publisher's trusted value,
 
 ## Download model assets
 
+Optional CPU relaxation and interface/residue scoring require the separately
+licensed [PyRosetta extra](pyrosetta.md#installation) in the compute service's
+Python environment, or the opt-in custom runtime image for Docker-managed compute.
+It is not installed by default or downloaded by model-asset preparation.
+
 Only local OpenDDE folding requires the OpenDDE checkpoint and common data; both folding modes require external SolubleMPNN and ESM2 weights. Run on the compute host after client installation:
 
 ```bash

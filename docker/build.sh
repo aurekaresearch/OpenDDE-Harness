@@ -10,6 +10,7 @@ while [[ "${1:-}" == --* ]]; do
             echo "Usage: bash docker/build.sh [--dry-run] [--push] [IMAGE_TAG ...]"
             echo "Default tag comes from docker/environment.json; builds only, never starts containers."
             echo "Builds a runtime-only image. Source code and all model assets must be mounted at runtime."
+            echo "INSTALL_PYROSETTA=1 adds the separately licensed optional backend; requires an explicit private image tag."
             echo "--push exports directly to the registry instead of loading the image locally."
             echo "Python packages and Triton use TUNA; PyTorch CUDA wheels use NJU. Override PYPI_INDEX_URL, PYTORCH_WHEEL_BASE and TRITON_WHEEL_URL if needed."
             echo "Base images: use local official cache, otherwise pull official first, then m.daocloud.io on failure."
@@ -22,6 +23,12 @@ while [[ "${1:-}" == --* ]]; do
     esac
     shift
 done
+install_pyrosetta="${INSTALL_PYROSETTA:-0}"
+[[ "$install_pyrosetta" == 0 || "$install_pyrosetta" == 1 ]] || { echo "INSTALL_PYROSETTA must be 0 or 1" >&2; exit 2; }
+if [[ "$install_pyrosetta" == 1 && $# -eq 0 ]]; then
+    echo "PyRosetta builds require an explicit image tag; verify your license before redistribution" >&2
+    exit 2
+fi
 metadata=$(python3 -c 'import hashlib,json,sys; p=json.load(open(sys.argv[1])); print(p["id"],p["image"],p["cuda_image"],p["uv_image"],p["foldmason_revision"],hashlib.sha256(json.dumps(p,sort_keys=True,separators=(",", ":")).encode()).hexdigest(),sep="\n")' "$script_dir/environment.json")
 environment=()
 while IFS= read -r value; do
@@ -74,6 +81,7 @@ command=(docker buildx build --platform linux/amd64
     --build-arg "FOLDMASON_REV=${environment[4]}"
     --build-arg "ENVIRONMENT_ID=${environment[0]}"
     --build-arg "ENVIRONMENT_SHA256=${environment[5]}"
+    --build-arg "INSTALL_PYROSETTA=$install_pyrosetta"
     --file "$script_dir/Dockerfile")
 if [[ "$push" -eq 1 ]]; then
     command+=(--push)

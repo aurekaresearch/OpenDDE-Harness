@@ -1803,7 +1803,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.5.1.17"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/78/4535c9c7f859a64781e43c969a3a7e84c54634e319a996d43ef32ce46f83/nvidia_cudnn_cu12-9.5.1.17-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:30ac3869f6db17d170e0e556dd6cc5eee02647abc31ca856634d5a40f82c15b2", size = 570988386, upload-time = "2024-10-25T19:54:26.39Z" },
@@ -1814,7 +1814,7 @@ name = "nvidia-cufft-cu12"
 version = "11.3.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8f/16/73727675941ab8e6ffd86ca3a4b7b47065edcca7a997920b831f8147c99d/nvidia_cufft_cu12-11.3.0.4-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:ccba62eb9cef5559abd5e0d54ceed2d9934030f51163df018532142a8ec533e5", size = 200221632, upload-time = "2024-11-20T17:41:32.357Z" },
@@ -1843,9 +1843,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-cusparse-cu12", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cusparse-cu12" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/6e/c2cf12c9ff8b872e92b4a5740701e51ff17689c4d726fca91875b07f655d/nvidia_cusolver_cu12-11.7.1.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:e9e49843a7707e42022babb9bcfa33c29857a93b88020c4e4434656a655b698c", size = 158229790, upload-time = "2024-11-20T17:43:43.211Z" },
@@ -1857,7 +1857,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/06/1e/b8b7c2f4099a37b96af5c9bb158632ea9e5d9d27d7391d7eb8fc45236674/nvidia_cusparse_cu12-12.5.4.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:7556d9eca156e18184b94947ade0fba5bb47d69cec46bf8660fd2c71a4b48b73", size = 216561367, upload-time = "2024-11-20T17:44:54.824Z" },
@@ -1958,6 +1958,10 @@ protein-design = [
     { name = "transformers" },
     { name = "uvicorn" },
 ]
+pyrosetta = [
+    { name = "biotite" },
+    { name = "pyrosetta" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1975,6 +1979,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "biotite", marker = "extra == 'protein-design'", specifier = ">=1.2,<2.0" },
+    { name = "biotite", marker = "extra == 'pyrosetta'", specifier = ">=1.2,<2.0" },
     { name = "everos", extras = ["multimodal"], specifier = "==1.3.1" },
     { name = "fastapi", marker = "extra == 'protein-design'", specifier = ">=0.116,<1.0" },
     { name = "gradio-client", marker = "extra == 'protein-design'", specifier = ">=0.10.0" },
@@ -1989,6 +1994,7 @@ requires-dist = [
     { name = "prompt-toolkit", specifier = ">=3.0.0" },
     { name = "pydantic", specifier = ">=2.12.0,<3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.14.2,<3.0.0" },
+    { name = "pyrosetta", marker = "extra == 'pyrosetta'", specifier = "==2026.29+releasequarterly.80a0635615", index = "https://west.rosettacommons.org/pyrosetta/quarterly/release" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0,<10.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -2005,7 +2011,7 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'protein-design'", specifier = ">=0.35,<1.0" },
     { name = "watchfiles", specifier = ">=0.21,<2.0" },
 ]
-provides-extras = ["dev", "protein-design"]
+provides-extras = ["dev", "protein-design", "pyrosetta"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2497,6 +2503,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/37/fe/65c989f70bd630b589adfbbcd6ed238af22319e90f059946c26b4835e44b/pyparsing-3.1.1.tar.gz", hash = "sha256:ede28a1a32462f5a9705e07aea48001a08f7cf81a021585011deba701581a0db", size = 884814, upload-time = "2023-07-30T15:07:02.617Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/39/92/8486ede85fcc088f1b3dba4ce92dd29d126fd96b0008ea213167940a2475/pyparsing-3.1.1-py3-none-any.whl", hash = "sha256:32c7c0b711493c72ff18a981d24f28aaf9c1fb7ed5e9667c9e84e3db623bdbfb", size = 103139, upload-time = "2023-07-30T15:06:59.829Z" },
+]
+
+[[package]]
+name = "pyrosetta"
+version = "2026.29+releasequarterly.80a0635615"
+source = { registry = "https://west.rosettacommons.org/pyrosetta/quarterly/release" }
+dependencies = [
+    { name = "numpy" },
+]
+wheels = [
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp312-cp312-linux_x86_64.whl" },
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp312-cp312-macosx_12_0_arm64.whl" },
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp312-cp312-macosx_12_0_x86_64.whl" },
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp313-cp313-linux_x86_64.whl" },
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp313-cp313-macosx_12_0_arm64.whl" },
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp313-cp313-macosx_12_0_x86_64.whl" },
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp314-cp314-linux_x86_64.whl" },
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp314-cp314-macosx_12_0_arm64.whl" },
+    { url = "https://west.rosettacommons.org/pyrosetta/quarterly/release/pyrosetta-2026.29%2Breleasequarterly.80a0635615-cp314-cp314-macosx_12_0_x86_64.whl" },
 ]
 
 [[package]]
@@ -3410,7 +3435,7 @@ name = "triton"
 version = "3.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "setuptools", marker = "sys_platform == 'linux'" },
+    { name = "setuptools" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/5f/950fb373bf9c01ad4eb5a8cd5eaf32cdf9e238c02f9293557a2129b9c4ac/triton-3.3.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9999e83aba21e1a78c1f36f21bce621b77bcaa530277a50484a7cb4a822f6e43", size = 155669138, upload-time = "2025-05-29T23:39:51.771Z" },

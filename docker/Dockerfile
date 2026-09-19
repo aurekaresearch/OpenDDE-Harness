@@ -50,6 +50,19 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && uv pip check --python /opt/runtime/bin/python \
     && uv pip freeze --python /opt/runtime/bin/python > /opt/runtime-packages.txt
 
+# Licensed backend is opt-in; keep the shared runtime unchanged by default.
+ARG INSTALL_PYROSETTA=0
+COPY pyproject.toml /tmp/harness-pyproject.toml
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [[ "$INSTALL_PYROSETTA" == 1 ]]; then \
+        pyrosetta_requirement=$(python3 -c 'import tomllib; p = tomllib.load(open("/tmp/harness-pyproject.toml", "rb")); print(next(r for r in p["project"]["optional-dependencies"]["pyrosetta"] if r.startswith("pyrosetta==")))'); \
+        UV_HTTP_TIMEOUT=300 UV_HTTP_RETRIES=5 uv pip install --python /opt/runtime/bin/python --no-deps \
+            --no-index --find-links https://west.rosettacommons.org/pyrosetta/quarterly/release "$pyrosetta_requirement" \
+        && uv pip check --python /opt/runtime/bin/python \
+        && /opt/runtime/bin/python -c 'import pyrosetta; print(pyrosetta.rosetta.utility.Version.version())' \
+        && uv pip freeze --python /opt/runtime/bin/python > /opt/runtime-packages.txt; \
+    elif [[ "$INSTALL_PYROSETTA" != 0 ]]; then exit 2; fi
+
 FROM runtime-base AS release
 WORKDIR /workspace
 COPY --from=compute-build /opt/runtime /opt/runtime
@@ -63,8 +76,10 @@ RUN printf '%s\n' '#!/bin/sh' \
     && dpkg-query -W > /opt/system-packages.txt
 ARG ENVIRONMENT_ID
 ARG ENVIRONMENT_SHA256
+ARG INSTALL_PYROSETTA=0
 LABEL org.opendde-harness.environment=${ENVIRONMENT_ID} \
-    org.opendde-harness.environment-sha256=${ENVIRONMENT_SHA256}
+    org.opendde-harness.environment-sha256=${ENVIRONMENT_SHA256} \
+    org.opendde-harness.pyrosetta=${INSTALL_PYROSETTA}
 RUN --mount=type=bind,source=docker/doctor.py,target=/tmp/doctor.py \
     python /tmp/doctor.py --dependencies-only --environment /opt/compute-environment.json
 EXPOSE 8080

@@ -217,6 +217,21 @@ def test_model_preparation_preserves_populated_destination(tmp_path):
     assert list(tmp_path.iterdir()) == [existing]
 
 
+@pytest.mark.parametrize(
+    "enabled,tag,expected", [("0", None, 0), ("1", "private/runtime:pyrosetta", 0), ("1", None, 2), ("yes", None, 2)]
+)
+def test_optional_pyrosetta_build_is_explicit(enabled, tag, expected):
+    command = ["bash", str(ROOT / "docker/build.sh"), "--dry-run"]
+    if tag:
+        command.append(tag)
+    result = subprocess.run(command, env={**os.environ, "INSTALL_PYROSETTA": enabled}, text=True, capture_output=True)
+    assert result.returncode == expected
+    if expected == 0:
+        assert f"INSTALL_PYROSETTA={enabled}" in shlex.split(result.stdout)
+    else:
+        assert "PyRosetta" in result.stderr or "INSTALL_PYROSETTA" in result.stderr
+
+
 @pytest.mark.parametrize("checkpoint_name", [None, "opendde.pt", "custom checkpoint.pt"])
 def test_model_staging_preserves_checkpoint_name_and_checksums(tmp_path, checkpoint_name):
     scripts = tmp_path / "docker"

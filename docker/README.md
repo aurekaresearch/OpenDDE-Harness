@@ -32,6 +32,25 @@ label, so changing its `image` field would invalidate existing images.
 Building loads the image locally without starting containers. The dry run needs
 no model assets and performs no network requests.
 
+### Optional PyRosetta runtime
+
+After verifying your [PyRosetta license](https://www.pyrosetta.org/downloads), build
+an explicitly named image for your own compute service:
+
+```bash
+INSTALL_PYROSETTA=1 bash docker/build.sh --dry-run private/opendde-harness:pyrosetta
+INSTALL_PYROSETTA=1 bash docker/build.sh private/opendde-harness:pyrosetta
+```
+
+The build reads the exact PyRosetta pin from the project's optional dependency
+set and downloads its official quarterly wheel. The existing image already has
+NumPy and Biotite; other packages are not upgraded. Its package inventory records
+the installed version, and the image gains `org.opendde-harness.pyrosetta=1`.
+Default builds still omit PyRosetta. Do not publish a licensed image without the
+necessary redistribution rights. Select your image using
+`OPENDDE_HARNESS_COMPUTE_IMAGE` before starting a new service. For workflow options,
+CPU limits, and scientific validation, see [PyRosetta analysis](../docs/pyrosetta.md).
+
 ## Prepare code and model assets
 
 For installed releases, use `ddeharness onboard`; see
