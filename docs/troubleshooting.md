@@ -8,11 +8,14 @@ until you have checked whether the previous request is still running.
 
 | Symptom | What to check |
 | --- | --- |
-| `ddeharness: command not found` | Open a new shell after installation and check `command -v ddeharness`; ensure the uv tool binary directory is on PATH. |
+| `ddeharness: command not found` | For an editable checkout installed with `make install`, run `uv run ddeharness` from the repository root. For a uv tool installation, open a new shell and check `command -v ddeharness`; ensure the uv tool binary directory is on PATH. |
+| `ui-tui/dist` missing or stale and npm unavailable | Source builds require Node.js 22.19 or newer and npm in the same shell. Run `npm --prefix ui-tui ci` and `npm --prefix ui-tui run build`, then retry installation. |
 | TUI bundle built, then Python installation fails | `built .../ui-tui/dist/entry.js` only confirms frontend compilation. Fix the Python dependency/index error and rerun `uv tool install --python 3.12 --reinstall .` from the source checkout. |
 | The terminal UI is garbled, colorless, or left on the alternate screen | See the [TUI guide](tui.md#troubleshooting); `reset` recovers a terminal a killed process left behind. |
 | Client updated but compute image unchanged | Expected: client installation does not change compute. Pull the publisher's new image and rerun `ddeharness onboard` after the running container's tasks finish. |
 | Image pull fails | Confirm the full published image reference, registry access, credentials and disk space. Set `OPENDDE_HARNESS_COMPUTE_IMAGE` before onboarding a new container. The default image is `aurekaresearch/opendde-harness:v1`. No automatic build fallback occurs. |
+| PyRosetta image build cannot copy `pyproject.toml`, or reports `Excluded dependency present: pyrosetta` | Use the corrected build context and opt-in doctor together; see [PyRosetta runtime troubleshooting](../docker/README.md#optional-pyrosetta-runtime). A successful `--dry-run` does not validate the image build. |
+| PyRosetta imports on the host but fails in a task | Verify the selected worker image contains PyRosetta, then select it during onboarding after active tasks finish. The host `.venv` is separate from the worker; see [Docker-managed installation](pyrosetta.md#docker-managed-compute). |
 | Config fails schema validation with unknown keys | Keys from earlier releases are not migrated. Remove the named keys from `~/.opendde_harness/config.json`, or run `ddeharness onboard` to write a fresh one. The error names the full key path. |
 | Example YAML not found | Run `ddeharness protein-design context --json` for verified paths to the two YAMLs in `docs/examples/`. The workspace may not be the checkout. Supply the real checkout with `--repository-root` if needed, rather than repeatedly searching global wildcards. |
 | Compute connection refused | Check the task's resolved compute URL, service status, authentication and network access. `127.0.0.1` means the host of the calling process, not necessarily your laptop. |

@@ -64,15 +64,56 @@ uv tool install --python 3.12 --reinstall .
 
 To install edits already in the checkout, omit `git pull`.
 
+### Develop from an editable checkout
+
+For development, clone your fork and select the branch you intend to change.
+From its repository root, with uv and Node.js 22.19 or newer with npm available:
+
+```bash
+node --version
+npm --version
+npm --prefix ui-tui ci
+npm --prefix ui-tui run build
+make install
+uv run ddeharness --help
+uv run python -c 'import opendde_harness; print(opendde_harness.__file__)'
+```
+
+`make install` synchronizes the locked dependencies and installs the current
+project in editable mode in `.venv`. The printed module path should point into
+your checkout. Run `uv run ddeharness` from that directory to use your changes;
+no shell activation or globally installed command is required. Restart the TUI
+after Python edits. Rebuild the TUI with `make build-tui` after frontend edits.
+
+To update this checkout, first let its active design tasks finish, close the TUI,
+and inspect `git status --short`. Preserve any local edits before pulling. Stop
+idle compute before updating code mounted into a container:
+
+```bash
+uv run ddeharness compute stop
+git pull --ff-only
+make install
+make build-tui
+```
+
+If `compute stop` reports active jobs or task leases, wait until they finish.
+The pull updates your current tracked branch; `git log -1 --oneline` identifies
+the revision being installed. These steps update the client, not the Docker
+image. For a host-native PyRosetta service, follow the
+[extra-preserving installation commands](pyrosetta.md#host-native-compute-service)
+instead of plain `make install` when synchronizing its Python environment.
+
 ### Verify the installation
 
-After either installation:
+For a tool installation:
 
 ```bash
 ddeharness --version
 ddeharness --help
 ddeharness tui --check
 ```
+
+For an editable checkout, prefix these commands with `uv run`.
 
 If `ddeharness` is not on PATH, run `uv tool update-shell` and open a new terminal.
 Package installation prepares the client; run `ddeharness onboard` to configure
@@ -113,6 +154,40 @@ started by an earlier release keeps its code until it exits when idle; the updat
 release starts its own container when a task needs it (see the
 [container lifecycle](onboarding.md#container-lifecycle)). For development,
 set `OPENDDE_HARNESS_COMPUTE_SOURCE_DIR` to a prepared checkout.
+
+### Use a development checkout for local compute
+
+An editable client and the Docker worker can otherwise use different code:
+managed compute normally mounts a prepared snapshot. On the Linux compute host,
+from the development checkout, prepare its pinned upstream sources and select
+it explicitly before onboarding:
+
+```bash
+uv run ddeharness compute prepare --sources-only "$PWD"
+export OPENDDE_HARNESS_COMPUTE_SOURCE_DIR="$PWD"
+uv run ddeharness onboard
+uv run ddeharness doctor --compute-only
+```
+
+Choose **Local Linux Docker environment**, then the intended folding mode.
+Onboarding saves the checkout path and image selection. To use PyRosetta, first
+build and verify the [optional runtime image](../docker/README.md#optional-pyrosetta-runtime)
+and export `OPENDDE_HARNESS_COMPUTE_IMAGE` before onboarding. Set that image
+override again whenever rerunning onboarding; without it, the wizard selects the
+default image. Installing PyRosetta only in the host `.venv` does not install it
+in the worker container.
+
+Let active tasks finish and stop idle compute before editing or pulling code
+mounted from this checkout. The next service start uses the updated files.
+Client installation and image builds do not replace an already running worker.
+
+| Change | Required update |
+| --- | --- |
+| Harness Python source | Restart the client and idle compute worker after editing |
+| TUI source or frontend lockfile | Run `npm --prefix ui-tui ci` when dependencies change, then `make build-tui`; restart the TUI |
+| Client dependencies or `uv.lock` | Run `make install` (preserve extras for a host-native service) |
+| Docker runtime dependencies, Dockerfile, or PyRosetta pin | Rebuild the custom image, then select it during onboarding after active tasks finish |
+| Design YAML | Validate a copy and start a new task; an existing task keeps its resolved configuration |
 
 The pinned upstream sources (OpenDDE, LigandMPNN, PLIP) are downloaded as archives from `codeload.github.com` with a per-source progress display. Each archive is cached by revision under `runtime-code/sources/`, and a new snapshot reuses the cached archive or the verified sources of a previous snapshot, so a client update downloads again only when a pinned revision changes. If GitHub is slow or unreachable, set `https_proxy` (the downloader honours it) or pass `--upstream-dir DIR` to `ddeharness compute prepare`, where `DIR` holds local Git checkouts at the pinned revisions.
 

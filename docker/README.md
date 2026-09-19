@@ -30,7 +30,9 @@ historical reference in `environment.json`. Pass an explicit tag to choose anoth
 build destination. The contract's canonical JSON determines the image compatibility
 label, so changing its `image` field would invalidate existing images.
 Building loads the image locally without starting containers. The dry run needs
-no model assets and performs no network requests.
+no model assets and performs no network requests. It only prints the build
+command; it does not validate `COPY` inputs, install packages, or run the image
+checks. Run the actual build to verify those steps.
 
 ### Optional PyRosetta runtime
 
@@ -46,10 +48,52 @@ The build reads the exact PyRosetta pin from the project's optional dependency
 set and downloads its official quarterly wheel. The existing image already has
 NumPy and Biotite; other packages are not upgraded. Its package inventory records
 the installed version, and the image gains `org.opendde-harness.pyrosetta=1`.
-Default builds still omit PyRosetta. Do not publish a licensed image without the
-necessary redistribution rights. Select your image using
-`OPENDDE_HARNESS_COMPUTE_IMAGE` before starting a new service. For workflow options,
-CPU limits, and scientific validation, see [PyRosetta analysis](../docs/pyrosetta.md).
+The final dependency check imports PyRosetta only for the opt-in build; default
+builds still exclude it. The `private/` prefix is a local tag in these commands,
+not a registry access policy. Building without `--push` does not publish the image.
+Do not publish a licensed image without the necessary redistribution rights.
+
+After the build succeeds, verify the label and import in the resulting image:
+
+```bash
+docker image inspect \
+  --format '{{ index .Config.Labels "org.opendde-harness.pyrosetta" }}' \
+  private/opendde-harness:pyrosetta
+docker run --rm --network none --entrypoint python \
+  private/opendde-harness:pyrosetta \
+  -c 'import pyrosetta; print(pyrosetta.version())'
+```
+
+Expect label `1` and the version pinned in `pyproject.toml`. These checks need no
+GPU or model weights; they verify installation, not relaxation or GPU inference.
+
+To select this image for an editable client, run from the repository root after
+active tasks finish:
+
+```bash
+uv run ddeharness compute stop
+export OPENDDE_HARNESS_COMPUTE_IMAGE=private/opendde-harness:pyrosetta
+uv run ddeharness onboard
+uv run ddeharness doctor --compute-only
+```
+
+If `compute stop` refuses because the service is busy, wait before proceeding.
+Choose local Linux Docker and verify the wizard displays the custom image.
+Onboarding saves the image selection for subsequent automatic starts; set the
+override again when rerunning onboarding. For a globally installed client,
+omit `uv run`. For development, also
+[select the source checkout](../docs/installation.md#use-a-development-checkout-for-local-compute)
+before onboarding. Building a new image alone does not update a running worker.
+For workflow options, CPU limits, and scientific validation, see
+[PyRosetta analysis](../docs/pyrosetta.md).
+
+If an older checkout fails with `COPY pyproject.toml ... not found`, verify that
+the repository-root file exists and `Dockerfile.dockerignore` includes
+`!pyproject.toml` after its `**` rule. If an opt-in build fails with
+`Excluded dependency present: pyrosetta`, update both the Dockerfile and
+`doctor.py`: the final build check must pass `--allow-pyrosetta` only when
+`INSTALL_PYROSETTA=1`. Preserve local work, pull the fixed branch, and rerun the
+same build command; successful layers can be reused from Docker's cache.
 
 ## Prepare code and model assets
 
@@ -130,6 +174,10 @@ PLIP, FoldMason and structural analysis. For local OpenDDE prediction and confid
 the OpenDDE data root at `/opendde`, and provide `--structure`. Repeat with `--device cuda` and a
 Docker GPU device request for CUDA verification; each run needs an empty output directory. The examples use the published image;
 substitute your local tag to validate a new build.
+When using the PyRosetta image, add `--allow-pyrosetta` to the
+`/workspace/docker/doctor.py` command. This requires a successful PyRosetta
+import while keeping the other dependency checks; without the flag the doctor
+expects the default image, which excludes PyRosetta.
 Editing mounted
 source during a running job is unsupported; restart workers after source updates.
 
@@ -139,6 +187,7 @@ source during a running job is unsupported; restart workers after source updates
 | --- | --- |
 | `Dockerfile` | Runtime-only build with independent dependency and FoldMason stages |
 | `Dockerfile.dockerignore` | Allowlisted build context |
+| `../pyproject.toml` | Exact optional PyRosetta pin, read only in the build stage |
 | `build.sh` | Buildx entry point and base-image resolution |
 | `environment.json` | Independent environment ID, pinned base images, Python packages and tool binary revision |
 | `versions.env` | Upstream source and ESM snapshot revisions |

@@ -1,12 +1,34 @@
 # PyRosetta relaxation and interface scoring
 
-PyRosetta analysis is opt-in and runs on the **compute service host**, including
-when folding uses Docker or the remote OpenDDE API. The client does not import it.
+PyRosetta analysis is opt-in and runs in the **compute service's Python
+environment**, including when folding uses the remote OpenDDE API. With managed
+Docker compute, that environment is inside the worker container. The client
+does not import it.
 
 ## Installation
 
-From a source checkout on that host, using a recent uv with flat-index support,
-opt into the optional dependency set:
+PyRosetta is **not Apache-2.0**: its downloads have a separate
+[non-commercial license; commercial use requires a separate license](https://www.pyrosetta.org/downloads).
+Verify your usage rights before installation or redistribution.
+
+### Docker-managed compute
+
+For the **Local Linux Docker environment** selected during onboarding, follow the
+[optional runtime image build and verification](../docker/README.md#optional-pyrosetta-runtime).
+That procedure builds `private/opendde-harness:pyrosetta`, checks its label and
+PyRosetta import, and selects it with `OPENDDE_HARNESS_COMPUTE_IMAGE` during
+onboarding. The default shared image does not contain PyRosetta. Installing the
+extra only in the client's or host's `.venv` does not provision the container.
+
+For work on a fork, use an [editable client](installation.md#develop-from-an-editable-checkout)
+and [mount the development checkout](installation.md#use-a-development-checkout-for-local-compute).
+Let active tasks finish before switching worker code or images. Neither building
+the image nor enabling analysis in a new YAML changes an already running task.
+
+### Host-native compute service
+
+If the compute service runs directly on the host, install into its Python
+environment. From its source checkout, using a recent uv with flat-index support:
 
 ```bash
 uv sync --extra pyrosetta
@@ -23,14 +45,17 @@ a compatible separately provisioned build. Keep `--extra pyrosetta` on subsequen
 `uv run`/`uv sync` commands so uv does not remove the optional backend. Add
 `--extra protein-design` when also provisioning the existing prediction dependencies.
 
-PyRosetta is **not Apache-2.0**: its downloads have a separate
-[non-commercial license; commercial use requires a separate license](https://www.pyrosetta.org/downloads).
-Verify your usage rights before installation or redistribution. Ordinary installs
-and the shared Docker compute image remain unchanged. If the service itself runs
-inside Docker (as with managed compute), use the
-[opt-in runtime image build](../docker/README.md#optional-pyrosetta-runtime);
-installing the extra only on the client/host will not provision that container.
-For a host-native service, install the extra in its Python environment.
+For a development service that also needs prediction dependencies, preserve both
+extras while syncing or running commands:
+
+```bash
+uv sync --locked --extra dev --extra protein-design --extra pyrosetta --dev
+uv run --extra protein-design --extra pyrosetta python -c 'import pyrosetta; print(pyrosetta.version())'
+```
+
+Plain `make install` does not retain the PyRosetta extra; use the explicit sync
+above for this environment. A Docker-managed client can continue using
+`make install` because its scientific dependencies live in the image.
 
 ## Workflow configuration
 
