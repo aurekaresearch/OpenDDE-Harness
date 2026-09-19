@@ -1785,6 +1785,11 @@ class DesignOrchestrator:
                 "candidate_gate_evidence": {
                     candidate.candidate_id: candidate.metadata.get("gate_evidence", {}) for candidate in candidates
                 },
+                "candidate_pyrosetta_evidence": {
+                    candidate.candidate_id: candidate.metadata["pyrosetta"]
+                    for candidate in candidates
+                    if "pyrosetta" in candidate.metadata
+                },
                 "candidate_changes": candidate_changes,
                 "recurring_offenders": recurring_offenders,
             },

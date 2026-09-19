@@ -11,7 +11,10 @@ from typing import Any
 import yaml
 
 from opendde_harness.plugin.protein_design.core.contracts import Placement, WorkflowConfig
-from opendde_harness.plugin.protein_design.servers.backends.loss_objective import normalize_loss_weights
+from opendde_harness.plugin.protein_design.servers.backends.loss_objective import (
+    normalize_loss_weights,
+    normalize_metric_loss_terms,
+)
 from opendde_harness.plugin.protein_design.servers.backends.pyrosetta_analysis import PyRosettaConfig, interface_chains
 
 
@@ -51,6 +54,7 @@ class WorkflowConfigLoader:
             "hotspot_contact_cutoff_a",
             "initial_structure_path",
             "loss_weights",
+            "metric_loss_terms",
             "n_cycles",
             "num_mutations",
             "num_sequences",
@@ -579,6 +583,14 @@ class WorkflowConfigLoader:
                 interface_chains(list(binder_chains), list(target_chains))
             fold_options["pyrosetta"] = analysis.model_dump()
         loss_weights = normalize_loss_weights(design.get("loss_weights"))
+        if "metric_loss_terms" in design:
+            terms = normalize_metric_loss_terms(design["metric_loss_terms"])
+            if any(term["weight"] > 0 for term in terms.values()):
+                if str(design.get("optimization_metric", "loss")).lower() != "loss":
+                    raise ValueError("design.metric_loss_terms requires optimization_metric: loss")
+                if not fold_options.get("pyrosetta", {}).get("enabled"):
+                    raise ValueError("design.metric_loss_terms requires fold.pyrosetta.enabled: true")
+            fold_options["metric_loss_terms"] = terms
         target_hotspots = {
             str(chain_id): list(value.get("hotspots", []))
             for chain_id, value in target_chains.items()

@@ -218,6 +218,7 @@ class ProteinDesignPhases:
             parent_ipsae=self._metric(best, "ipsae"),
             parent_ranking_score=best.objective if best else None,
             metric_context=best.metrics if best else {},
+            pyrosetta_residue_context=json.dumps((parent.get("metadata") or {}).get("pyrosetta", "not available")),
             mutable_positions_formatted=dict(config.mutable_positions),
             antibody_population_info=parents,
             parent_selection_mode="python_deterministic",

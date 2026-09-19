@@ -160,6 +160,7 @@ Names in this table are relative to `design`.
 | `stagnation_full_redesign_threshold` | `0` (off); non-negative integer | Request full redesign after the configured no-improvement streak, subject to its repeat interval. |
 | `optimization_metric` | `loss`; `loss` or `iptm` | Minimize the weighted loss or maximize ipTM. No separate direction field is needed. |
 | `loss_weights` | Built-in coefficients below | Partial mapping overrides named coefficients; omitted coefficients retain defaults. Set a term to 0 to disable it. |
+| `metric_loss_terms` | `{}` | Additional named PyRosetta metric terms with explicit direction, weight, scale and reference. Requires loss optimization and enabled analysis for positive weights. See [PyRosetta analysis](pyrosetta.md). |
 | `cdr_contact_fraction_threshold` | `0.5` | Hard CDR-contact gate threshold; intended fractional values are in [0,1]. |
 | `hotspot_contact_cutoff_a` | `5.0` Å | Distance used to evaluate hotspot contact evidence. Use a positive distance. |
 | `enable_quality_check` | `true` | Enable eligible Quality Agent checks after geometry gates. |
@@ -251,6 +252,7 @@ and local A3M paths. Local GPU/image settings do not allocate remote API GPUs.
 | `gpus` | `"all"` | Local GPU selection; use worker-visible IDs. API mode does not use this to select remote GPUs. |
 | `persistent_worker` | `true` | Reuse the local inference worker instead of one-shot execution where supported. |
 | `persistent_worker_timeout_seconds` | 900 | Persistent worker wait/readiness timeout. |
+| `pyrosetta` | Disabled | Optional CPU FastRelax followed by InterfaceAnalyzer on the selected fold/refold complex. See [configuration and metrics](pyrosetta.md). |
 | `subprocess_timeout_seconds` | 7200 | One-shot Docker batch timeout. |
 | `ipsae_dist_cutoff` | 10.0 Å | Distance threshold for ipSAE reporting. |
 | `ipsae_pae_cutoff` | 10.0 | PAE threshold for ipSAE reporting. |

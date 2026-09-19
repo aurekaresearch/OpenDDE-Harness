@@ -39,6 +39,17 @@ DESIGN_PROMPT = """Design antibody variants against {target_name}. Use only the 
 Canonical optimization context (all arithmetic is computed by Python):
 {metric_context}
 
+Selected parent's relaxed contact-residue scores (if available):
+{pyrosetta_residue_context}
+`residue_index` is zero-based within `chain_id`, matching mutation positions;
+PDB residue numbers and insertion codes are labels, not mutation indices.
+`bound_score_reu` is the full residue ref2015 energy in the relaxed complex,
+including intra-partner interactions, not a binding energy. `interface_dg_reu`
+is InterfaceAnalyzer's bound-minus-separated residue energy when available.
+These REU scores are modeling evidence, not measured affinities or predicted
+mutation effects. Use them alongside confidence/contact evidence and never
+override the mutable-position constraints. Missing scores are not zero.
+
 Population context:
 {antibody_population_info}
 

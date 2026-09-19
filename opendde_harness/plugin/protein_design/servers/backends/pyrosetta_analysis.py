@@ -57,7 +57,7 @@ class ContactResidueScore(BaseModel):
 
 
 class PyRosettaResult(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
     status: Literal["success", "failed", "skipped", "disabled"]
     metrics: dict[str, float] = Field(default_factory=dict)

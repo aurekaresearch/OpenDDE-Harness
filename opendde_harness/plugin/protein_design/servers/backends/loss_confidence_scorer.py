@@ -251,6 +251,8 @@ def score_confidence_loss(
     esm2_pll: float,
     loss_weights: Mapping[str, float] | None = None,
     target_hotspots: Mapping[str, Sequence[int]] | None = None,
+    metric_values: Mapping[str, Any] | None = None,
+    metric_terms: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Calculate the configured loss from one fold backend's confidence data.
 
@@ -345,7 +347,9 @@ def score_confidence_loss(
             chain_token_indices,
         ),
     }
-    objective = calculate_loss_objective(raw, esm2_pll, weights=loss_weights)
+    objective = calculate_loss_objective(
+        raw, esm2_pll, weights=loss_weights, metric_values=metric_values, metric_terms=metric_terms
+    )
     objective.update(
         {
             "confidence_backend": confidence_backend,
