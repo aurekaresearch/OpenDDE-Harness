@@ -68,6 +68,19 @@
     'sequence-id': 'Residue order'
   }
   let molstarPromise = null
+  const PROPERTY_COLOR_STORAGE_KEY = 'protein-design-property-color'
+
+  function readPropertyColorMode() {
+    try {
+      return window.localStorage.getItem(PROPERTY_COLOR_STORAGE_KEY) === 'last-property' ? 'last-property' : 'cycle'
+    } catch {
+      return 'cycle'
+    }
+  }
+
+  function propertyColorDefinition(definitions, mode) {
+    return mode === 'last-property' ? definitions.at(-1) : { key: 'cycle', label: 'Age / cycle', paths: ['cycle'] }
+  }
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -718,14 +731,16 @@
     selectedKeys,
     enteringKey = null,
     definitions = PROPERTY_DEFINITIONS,
-    reflow = false
+    reflow = false,
+    colorMode = 'cycle'
   ) {
     const allRunCandidates = allCandidates(run)
     const candidates = chartCandidates(run, selectedKeys)
     const selected = candidates.filter(candidate => selectedKeys.has(candidateKey(candidate)))
     const geometry = parallelGeometry(allRunCandidates, definitions)
-    const colorDefinition = definitions[definitions.length - 1]
-    const colorDomain = observedPropertyDomain(candidates, colorDefinition)
+    const colorDefinition = propertyColorDefinition(definitions, colorMode)
+    // Cycle colors stay stable when candidates are selected or metric axes change.
+    const colorDomain = observedPropertyDomain(colorMode === 'cycle' ? allRunCandidates : candidates, colorDefinition)
     const axes = geometry.axes
       .map(axis => {
         const ticks = propertyTicks(axis)
@@ -780,8 +795,10 @@
         <g class="protein-property-lines">${paths}</g>
         <g class="protein-property-axes">${axes}</g>
         <g class="protein-property-color-scale" data-color-property="${escapeHtml(colorDefinition.key)}" transform="translate(${geometry.width - 22} ${geometry.top})">
+          <title>${colorMode === 'cycle' ? `Creation cycle: ${formatNumber(colorDomain.min)} (older, orange) to ${formatNumber(colorDomain.max)} (newer, purple). Age means generation, not elapsed time.` : `${escapeHtml(colorDefinition.label)}: ${formatNumber(colorDomain.min)} (orange) to ${formatNumber(colorDomain.max)} (purple)`}</title>
           <text x="12" y="-12" text-anchor="end">${escapeHtml(colorDefinition.label)}</text>
           <rect width="12" height="${scaleHeight}" rx="3" fill="url(#proteinPropertyColorGradient)"/>
+          ${colorMode === 'cycle' ? `<text x="-6" y="8" text-anchor="end">${formatNumber(colorDomain.max)}</text><text x="-6" y="${scaleHeight}" text-anchor="end">${formatNumber(colorDomain.min)}</text>` : ''}
         </g>
       </svg>
       <div class="protein-property-summary">${summary}</div>
@@ -944,7 +961,7 @@
     return `<div class="protein-page-title"><div><span class="protein-target-icon" aria-hidden="true">⌬</span><div><h1>${escapeHtml(run.target || 'Protein design')}</h1><p><code>${escapeHtml(shortTaskId(run.taskId))}</code></p></div></div><div class="protein-overview-metrics">${metrics}</div><div class="protein-run-progress"><span class="protein-status-dot"></span><strong>${escapeHtml(run.status || 'unknown')}</strong><span>Cycle ${escapeHtml(run.cycle)} / ${escapeHtml(run.totalCycles || '?')}</span></div></div>`
   }
 
-  function renderProteinDesignDashboard(payload, selectedKeys = null, visiblePropertyKeys = null) {
+  function renderProteinDesignDashboard(payload, selectedKeys = null, visiblePropertyKeys = null, colorMode = 'cycle') {
     const runs = payload?.runs || []
     const run = payload?.run || null
     if (payload?.error)
@@ -968,8 +985,8 @@
             <div id="proteinStructureViewer" class="has-message" data-message="Loading Mol*…"></div>
           </div>
           <div class="protein-properties-pane">
-            <header>${renderPropertyPicker(resolvedPropertyKeys, run)}<small data-property-color-label>Colored by ${escapeHtml(definitions.at(-1).label)}</small></header>
-            <div id="proteinPropertiesChart">${renderParallelCoordinates(run, resolvedSelectedKeys, null, definitions)}</div>
+            <header>${renderPropertyPicker(resolvedPropertyKeys, run)}<label class="protein-property-color-control">Color by <select data-property-color-mode aria-label="Candidate line color"><option value="cycle"${colorMode === 'cycle' ? ' selected' : ''}>Age / cycle</option><option value="last-property"${colorMode === 'last-property' ? ' selected' : ''}>Last visible metric</option></select><small data-property-color-label>Colored by ${escapeHtml(propertyColorDefinition(definitions, colorMode).label)}</small></label></header>
+            <div id="proteinPropertiesChart">${renderParallelCoordinates(run, resolvedSelectedKeys, null, definitions, false, colorMode)}</div>
           </div>
         </section>
       </main>
@@ -1585,6 +1602,7 @@
       selectedKeys: [...(rootElement._proteinSelectedKeys || [])],
       lastSelectedKey: rootElement._proteinLastSelectedKey || null,
       visiblePropertyKeys: [...(rootElement._proteinVisiblePropertyKeys || [])],
+      propertyColorMode: rootElement._proteinPropertyColorMode,
       activeCandidateKey: rootElement._proteinActiveCandidateKey || null,
       openCycles: [...rootElement.querySelectorAll('.protein-cycle-more[open]')]
         .map(details => details.closest('.protein-cycle-group')?.dataset.cycle)
@@ -1784,9 +1802,17 @@
     const definitions = propertyDefinitions(rootElement._proteinVisiblePropertyKeys, run)
     if (!chart) return Promise.resolve()
     const previousLayout = reflow ? capturePropertyLayout(chart) : null
-    chart.innerHTML = renderParallelCoordinates(run, rootElement._proteinSelectedKeys, enteringKey, definitions, reflow)
+    const colorMode = rootElement._proteinPropertyColorMode || 'cycle'
+    chart.innerHTML = renderParallelCoordinates(
+      run,
+      rootElement._proteinSelectedKeys,
+      enteringKey,
+      definitions,
+      reflow,
+      colorMode
+    )
     const colorLabel = rootElement.querySelector('[data-property-color-label]')
-    if (colorLabel) colorLabel.textContent = `Colored by ${definitions.at(-1).label}`
+    if (colorLabel) colorLabel.textContent = `Colored by ${propertyColorDefinition(definitions, colorMode).label}`
     bindPropertyLines(rootElement)
     const enteringAnimation = animateEnteringPropertyLines(chart)
     if (previousLayout) {
@@ -2025,6 +2051,10 @@
         ? restoredPropertyKeys
         : PROPERTY_DEFINITIONS.map(definition => definition.key)
     )
+    rootElement._proteinPropertyColorMode =
+      sameRun && ['cycle', 'last-property'].includes(viewState.propertyColorMode)
+        ? viewState.propertyColorMode
+        : readPropertyColorMode()
     rootElement._proteinCandidateTableState =
       sameRun && rootElement._proteinCandidateTableState
         ? rootElement._proteinCandidateTableState
@@ -2042,7 +2072,8 @@
     rootElement.innerHTML = renderProteinDesignDashboard(
       { ...payload, run },
       rootElement._proteinSelectedKeys,
-      rootElement._proteinVisiblePropertyKeys
+      rootElement._proteinVisiblePropertyKeys,
+      rootElement._proteinPropertyColorMode
     )
     if (previousStage && rootElement._proteinViewerPromise) {
       rootElement.querySelector('#proteinStructureViewer')?.replaceWith(previousStage)
@@ -2101,6 +2132,15 @@
           showCandidateStructures(rootElement, run, structureCandidates(rootElement, run, byKey))
         }
       })
+    })
+    rootElement.querySelector('[data-property-color-mode]')?.addEventListener('change', event => {
+      rootElement._proteinPropertyColorMode = event.target.value === 'last-property' ? 'last-property' : 'cycle'
+      try {
+        window.localStorage.setItem(PROPERTY_COLOR_STORAGE_KEY, rootElement._proteinPropertyColorMode)
+      } catch {
+        // In-memory view state still preserves the choice if browser storage is unavailable.
+      }
+      updateProperties(rootElement, run)
     })
     rootElement.querySelectorAll('[data-property-key]').forEach(checkbox => {
       checkbox.addEventListener('change', () => {

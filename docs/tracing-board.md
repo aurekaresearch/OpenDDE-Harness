@@ -12,6 +12,13 @@ forward the actual viewer port with SSH; for port 4318, use
 - Browse candidates by cycle, sort/filter the table and select structures to compare.
   Scroll horizontally to see all recorded numeric metrics; the header stays aligned
   with the rows. Copy retrieves the complete sequence, not its shortened preview.
+- Above the properties chart, choose **Color by → Age / cycle** (the default)
+  to colour candidates by their creation cycle: older generations are orange and
+  newer generations purple. This means generation, not elapsed wall-clock age;
+  candidates from the same cycle have the same colour. **Last visible metric**
+  restores metric-based colouring. The choice is independent of visible axes and
+  is remembered in this browser across refreshes. It changes visualization only,
+  never the running task, candidate scores, or selection.
 - Sequence summaries show CDR labels directly. Hover for the complete sequence;
   the full sequence and structure viewer's sequence strip use matching purple CDR
   highlighting. CDR positions come from the

@@ -801,7 +801,7 @@ test('keeps long candidate rows compact while exposing the full sequence preview
   assert.match(html, /repeat\(3,var\(--protein-sequence-cell-width\)\)/)
 })
 
-test('uses zero-based rounded axes, equal spacing, and colors by the last visible property', () => {
+test('uses zero-based rounded axes, equal spacing, and optional last-visible-property coloring', () => {
   const geometry = parallelGeometry(run.cycles.flatMap(cycle => cycle.candidates))
   assert.equal(
     geometry.axes.every(axis => axis.min === 0),
@@ -826,7 +826,7 @@ test('uses zero-based rounded axes, equal spacing, and colors by the last visibl
   )
   assert.equal(subsetGeometry.axes[1].x - subsetGeometry.axes[0].x, subsetGeometry.axes[2].x - subsetGeometry.axes[1].x)
 
-  const html = renderParallelCoordinates(run, new Set())
+  const html = renderParallelCoordinates(run, new Set(), null, PROPERTY_DEFINITIONS, false, 'last-property')
   assert.match(html, /id="proteinPropertyColorGradient"/)
   assert.match(html, /class="protein-property-color-scale"/)
   assert.match(html, /data-color-property="frame_contacts"/)
@@ -848,7 +848,7 @@ test('uses zero-based rounded axes, equal spacing, and colors by the last visibl
   assert.doesNotMatch(html, /protein-property-legend-item/)
 
   const reordered = propertyDefinitions(['frame_contacts', 'ranking_score', 'iptm'])
-  const reorderedHtml = renderParallelCoordinates(run, new Set(), null, reordered)
+  const reorderedHtml = renderParallelCoordinates(run, new Set(), null, reordered, false, 'last-property')
   assert.deepEqual(
     reordered.map(definition => definition.key),
     ['frame_contacts', 'ranking_score', 'iptm']
@@ -859,6 +859,45 @@ test('uses zero-based rounded axes, equal spacing, and colors by the last visibl
   assert.ok(reorderedHtml.indexOf('data-axis-key="ranking_score"') < reorderedHtml.indexOf('data-axis-key="iptm"'))
   assert.match(reorderedHtml, /data-color-property="iptm"/)
   assert.doesNotMatch(reorderedHtml, /<text x="-7"/)
+})
+
+test('defaults to creation-cycle colors independent of metric axes and selected candidates', () => {
+  const before = JSON.stringify(run)
+  const html = renderParallelCoordinates(run, new Set())
+  assert.match(html, /data-color-property="cycle"/)
+  assert.match(html, /older, orange/)
+  assert.match(html, /newer, purple/)
+  assert.match(html, /Age means generation, not elapsed time/)
+  const reordered = propertyDefinitions(['loss', 'iptm'])
+  const changed = renderParallelCoordinates(run, new Set(['2:cycle-2-mid']), null, reordered)
+  const colorFor = (markup, key) => markup.match(new RegExp(`data-line-key="${key}"[^>]*--candidate-color:([^";]+)`))[1]
+  assert.equal(colorFor(html, '1:cycle-1-best'), 'rgb(255 122 26)')
+  assert.equal(colorFor(html, '2:cycle-2-best'), 'rgb(145 61 224)')
+  assert.equal(colorFor(changed, '2:cycle-2-mid'), colorFor(html, '2:cycle-2-best'))
+  assert.equal(colorFor(changed, '1:cycle-1-best'), colorFor(html, '1:cycle-1-best'))
+  assert.equal(JSON.stringify(run), before)
+  const dashboard = renderProteinDesignDashboard({ runs: [run], run })
+  assert.match(dashboard, /aria-label="Candidate line color"/)
+  assert.match(dashboard, /value="cycle" selected/)
+  assert.match(dashboard, /Last visible metric/)
+  const metricDashboard = renderProteinDesignDashboard(
+    { runs: [run], run },
+    null,
+    ['iptm', 'contacts'],
+    'last-property'
+  )
+  assert.match(metricDashboard, /value="last-property" selected/)
+  assert.match(metricDashboard, /Colored by Contacts/)
+})
+
+test('cycle colors handle cycle zero, a single generation, and unknown cycles', () => {
+  const one = { ...run, cycles: [{ cycle: 0, candidates: [candidate('zero', 0, 0.8)] }] }
+  const html = renderParallelCoordinates(one, new Set())
+  assert.match(html, /--candidate-color:rgb\(200 92 125\)/)
+  assert.match(html, /Creation cycle: 0 .* to 0 /)
+  const unknown = { ...run, cycles: [{ candidates: [candidate('unknown', null, 0.8)] }] }
+  assert.match(renderParallelCoordinates(unknown, new Set()), /--candidate-color:#8a8f98/)
+  assert.doesNotMatch(renderParallelCoordinates({ ...run, cycles: [] }, new Set()), /NaN|Infinity/)
 })
 
 test('adds selected candidates to cycle leaders and animates the full selected path', () => {
@@ -905,6 +944,7 @@ test('preserves selected candidates, active candidate, expanded cycles, and list
   const root = {
     _proteinSelectedKeys: new Set(['2:cycle-2-best', '1:cycle-1-best']),
     _proteinVisiblePropertyKeys: new Set(['iptm', 'ranking_score', 'min_ipa']),
+    _proteinPropertyColorMode: 'last-property',
     _proteinActiveCandidateKey: '2:cycle-2-best',
     querySelector: selector => (selector === '.protein-candidate-table' ? body : null),
     querySelectorAll: selector =>
@@ -921,6 +961,7 @@ test('preserves selected candidates, active candidate, expanded cycles, and list
   assert.equal(body.scrollLeft, 300)
   assert.deepEqual(saved.selectedKeys, ['2:cycle-2-best', '1:cycle-1-best'])
   assert.deepEqual(saved.visiblePropertyKeys, ['iptm', 'ranking_score', 'min_ipa'])
+  assert.equal(saved.propertyColorMode, 'last-property')
   assert.equal(saved.activeCandidateKey, '2:cycle-2-best')
   assert.equal(details.open, true)
 })

@@ -1343,6 +1343,24 @@ body.app-view-protein-design {
 
 .protein-properties-pane > header {
   min-height: 42px;
+  flex-wrap: wrap;
+}
+
+.protein-property-color-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.protein-property-color-control select {
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px;
 }
 
 .protein-properties-icon {
