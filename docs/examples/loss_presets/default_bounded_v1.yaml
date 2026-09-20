@@ -1,0 +1,64 @@
+# Reusable, opt-in loss-policy fragment, not a standalone workflow.
+# See README.md in this directory for how to apply it to a full design config.
+# User-selected preferences, not universal or biologically calibrated defaults.
+# The listed positive coefficients are the desired FINAL weights. The scorer
+# normalizes them within groups before applying budgets; do not multiply twice.
+design:
+  optimization_metric: loss
+  # Specify every standard coefficient: omitted entries retain built-in defaults.
+  loss_weights:
+    plddt: 0.05
+    i_plddt: 0.05
+    pae: 0.0
+    i_pae: 0.0
+    i_ptm: 0.1
+    con: 0.025
+    i_con: 0.05
+    rg: 0.025
+    dgram_cce: 0.0
+    esm2: 0.1
+  metric_loss_terms:
+    min_ipae: {direction: minimize, weight: 0.0}
+    ipsae: {direction: maximize, weight: 0.2}
+    rosetta_total_score: {direction: minimize, weight: 0.0}
+    rosetta_interface_dg: {direction: minimize, weight: 0.1}
+    rosetta_interface_sasa: {direction: maximize, weight: 0.0}
+    rosetta_interface_dg_per_sasa: {direction: minimize, weight: 0.2}
+    rosetta_interface_sc: {direction: maximize, weight: 0.1}
+    rosetta_interface_hbonds: {direction: maximize, weight: 0.0}
+    rosetta_interface_unsat_hbonds: {direction: minimize, weight: 0.0}
+    rosetta_interface_residues: {direction: maximize, weight: 0.0}
+  loss_combination:
+    mode: bounded_grouped
+    calibration_id: default-bounded-v1
+    groups:
+      confidence:
+        budget: 0.4
+        terms: [ipsae, i_ptm, plddt, i_plddt]
+      energy:
+        budget: 0.4
+        terms: [rosetta_interface_dg, rosetta_interface_sc, rosetta_interface_dg_per_sasa]
+      geometry_sequence:
+        budget: 0.2
+        terms: [esm2, i_con, rg, con]
+    # Anchors cover positive-weight terms only. Structural pLDDT and ipTM use
+    # 1 - raw confidence (confidence in [0, 1]), hence good=0 and bad=1 here.
+    anchors:
+      ipsae: {good: 1.0, bad: 0.0}
+      i_ptm: {good: 0.0, bad: 1.0}
+      plddt: {good: 0.0, bad: 1.0}
+      i_plddt: {good: 0.0, bad: 1.0}
+      rosetta_interface_dg: {good: -200.0, bad: 0.0}
+      rosetta_interface_sc: {good: 1.0, bad: 0.0}
+      rosetta_interface_dg_per_sasa: {good: -10.0, bad: 0.0}
+      esm2: {good: 0.0, bad: -5.0}
+      i_con: {good: 0.0, bad: 10.0}
+      rg: {good: 0.0, bad: 1.0}
+      con: {good: 0.0, bad: 10.0}
+fold:
+  need_atom_confidence: true
+  ipsae_pae_cutoff: 10.0
+  ipsae_dist_cutoff: 10.0
+  pyrosetta:
+    enabled: true
+    on_failure: fail

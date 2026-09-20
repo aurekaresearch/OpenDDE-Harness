@@ -301,6 +301,11 @@ provided. Supply a nonempty `calibration_id`, explicit fixed anchors for **every
 enabled structural, ESM2 and metric term, and a complete, nonoverlapping grouping.
 This separates numerical range from deliberate scientific priorities:
 
+For a reusable, explicitly selected 40/40/20 policy, see
+[default bounded loss v1](examples/loss_presets/README.md). It is a loss-policy
+fragment with documented weights and anchors, not an implicit application default
+or a standalone workflow.
+
 1. Transform each enabled loss component into a dimensionless penalty using fixed,
    documented good/bad anchors: `p = clip((raw - good) / (bad - good), 0, 1)`.
    For a quantity to minimize, `good < bad`; for one to maximize, `good > bad`.
