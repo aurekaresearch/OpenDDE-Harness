@@ -33,6 +33,9 @@ LOSS_OBJECTIVE_VERSION = "vhh-confidence-contact8-proxy-esm2-v2"
 COMPOSITE_LOSS_OBJECTIVE_VERSION = "confidence-contact8-esm2-rosetta-v1"
 BOUNDED_LOSS_OBJECTIVE_VERSION = "bounded-fixed-grouped-v1"
 
+# Raw reported confidence metrics, distinct from the normalized structural i_pae.
+CONFIDENCE_LOSS_DIRECTIONS = {"min_ipae": "minimize", "ipsae": "maximize"}
+
 
 class MetricLossTerm(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
@@ -71,10 +74,14 @@ def normalize_metric_loss_terms(terms: Mapping[str, Any] | None) -> dict[str, di
         return {}
     if not isinstance(terms, Mapping):
         raise ValueError("metric_loss_terms must be a mapping")
-    unknown = set(terms) - set(PYROSETTA_METRICS)
+    unknown = set(terms) - (set(PYROSETTA_METRICS) | set(CONFIDENCE_LOSS_DIRECTIONS))
     if unknown:
         raise ValueError(f"Unsupported metric loss terms: {sorted(unknown)}")
-    return {name: MetricLossTerm.model_validate(term).model_dump() for name, term in terms.items()}
+    normalized = {name: MetricLossTerm.model_validate(term).model_dump() for name, term in terms.items()}
+    for name, direction in CONFIDENCE_LOSS_DIRECTIONS.items():
+        if name in normalized and normalized[name]["direction"] != direction:
+            raise ValueError(f"Metric loss term {name} requires direction: {direction}")
+    return normalized
 
 
 def _finite(value: Any, name: str) -> float:
@@ -211,6 +218,10 @@ def calculate_loss_objective(
         if isinstance(value, bool) or not isinstance(value, Real):
             raise ValueError(f"Loss metric {name!r} must be numeric")
         raw = _finite(value, name)
+        if name == "min_ipae" and raw < 0:
+            raise ValueError("Loss metric 'min_ipae' must be nonnegative")
+        if name == "ipsae" and not 0 <= raw <= 1:
+            raise ValueError("Loss metric 'ipsae' must be between 0 and 1")
         normalized = (raw - term["reference"]) / term["scale"]
         sign = -1.0 if term["direction"] == "maximize" else 1.0
         contribution = _finite(sign * term["weight"] * normalized, f"legacy {name}" if combination else name)

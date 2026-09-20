@@ -11,6 +11,7 @@ import atexit
 import hashlib
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -123,7 +124,7 @@ class FoldResult:
     ptm: float = 0.0
     plddt: float = 0.0
     ranking_score: float = 0.0
-    ipsae: float = 0.0
+    ipsae: Optional[float] = None
     loglikelihood: float = 0.0
     backend: str = "unknown"
     run_dir: Optional[Path] = None
@@ -1011,7 +1012,7 @@ class StructurePredictor:
         iptm, ptm, plddt, ranking_score = metrics
 
         sequences_only = self._extract_sequences_only(sequences_dict)
-        ipsae = 0.0
+        ipsae = None
         if self._can_compute_ipsae(sequences_only, full_data):
             ipsae = self._compute_ipsae_safely(
                 confidence_json_path=str(full_data),
@@ -1064,25 +1065,28 @@ class StructurePredictor:
         self,
         confidence_json_path: str,
         output_cif_path: str,
-    ) -> float:
+    ) -> Optional[float]:
         """Compute ipSAE without turning an optional metric failure into fold failure."""
-        from opendde_harness.plugin.protein_design.servers.backends.ipsae import compute_ipsae
-
         try:
-            return compute_ipsae(
+            from opendde_harness.plugin.protein_design.servers.backends.ipsae import compute_ipsae
+
+            value = compute_ipsae(
                 dist_cutoff=self.config.ipsae_dist_cutoff,
                 pae_cutoff=self.config.ipsae_pae_cutoff,
                 confidence_json_path=str(confidence_json_path),
                 output_cif_path=str(output_cif_path),
             )
+            if not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError("ipSAE must be finite and between 0 and 1")
+            return value
         except Exception as exc:
             logger.warning(
-                "ipSAE calculation failed for %s and %s; continuing with ipSAE=0.0: %s",
+                "ipSAE calculation failed for %s and %s; metric unavailable: %s",
                 confidence_json_path,
                 output_cif_path,
                 exc,
             )
-            return 0.0
+            return None
 
     def _failure_result(self, sequences_dict: dict, error: str, run_dir=None):
         """Return a failed FoldResult."""

@@ -487,10 +487,12 @@ class PythonProteinDesignHarness:
             normalize_execution_mode,
         )
         from opendde_harness.plugin.protein_design.servers.backends.loss_objective import (
+            CONFIDENCE_LOSS_DIRECTIONS,
             normalize_loss_combination,
             normalize_metric_loss_terms,
         )
         from opendde_harness.plugin.protein_design.servers.backends.pyrosetta_analysis import (
+            PYROSETTA_METRICS,
             PyRosettaConfig,
             analyze_batch,
             interface_chains,
@@ -513,9 +515,14 @@ class PythonProteinDesignHarness:
         )
         if loss_combination is not None and objective_key != "loss":
             raise ValueError("loss_combination requires objective_key: loss")
-        if any(term["weight"] > 0 for term in metric_terms.values()):
-            if objective_key != "loss" or not analysis_config.enabled:
-                raise ValueError("metric_loss_terms requires objective_key: loss and pyrosetta.enabled: true")
+        enabled_terms = {name for name, term in metric_terms.items() if term["weight"] > 0}
+        if enabled_terms:
+            if objective_key != "loss":
+                raise ValueError("metric_loss_terms requires objective_key: loss")
+            if enabled_terms & PYROSETTA_METRICS.keys() and not analysis_config.enabled:
+                raise ValueError("PyRosetta metric_loss_terms requires pyrosetta.enabled: true")
+            if enabled_terms & CONFIDENCE_LOSS_DIRECTIONS.keys() and options.get("need_atom_confidence") is False:
+                raise ValueError("Confidence metric_loss_terms requires need_atom_confidence: true")
         if analysis_config.enabled:
             interface_chains(list(options.get("binder_chain_ids") or []), list(options.get("target_chain_ids") or []))
         if (
@@ -595,9 +602,18 @@ class PythonProteinDesignHarness:
                 "iptm": float(result.iptm),
                 "ptm": float(result.ptm),
                 "plddt": float(result.plddt),
-                "ipsae": float(result.ipsae),
+                "ipsae": result.ipsae if result.ipsae is not None else 0.0,
                 "ranking_score": float(result.ranking_score),
             }
+            source_metadata["ipsae"] = {
+                "status": "unavailable" if result.ipsae is None else "success",
+                "value": result.ipsae,
+                "pae_cutoff": config_values.get("ipsae_pae_cutoff", FoldConfig.ipsae_pae_cutoff),
+                "dist_cutoff": config_values.get("ipsae_dist_cutoff", FoldConfig.ipsae_dist_cutoff),
+                "aggregation": "maximum_directed_chain_pair",
+            }
+            if result.ipsae is None:
+                source_metadata["ipsae"]["fallback_value"] = 0.0
             scoring_error = None
             source_metadata.pop("pyrosetta", None)
             if analysis_config.enabled:

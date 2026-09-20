@@ -196,6 +196,8 @@ def compute_ipsae(
 
     confidence_json_path = str(confidence_json_path)
     output_cif_path = str(output_cif_path)
+    if not all(np.isfinite(value) and value > 0 for value in (dist_cutoff, pae_cutoff)):
+        raise ValueError("ipSAE distance and PAE cutoffs must be finite and positive")
 
     # 1. Determine Format (AF2/AF3/Boltz1)
     af2, af3, boltz1, cif = False, False, False, False
@@ -259,6 +261,10 @@ def compute_ipsae(
     chains = np.array(chains)
     unique_chains = np.unique(chains)
     residue_types = np.array([res["res"] for res in residues])
+    if len(unique_chains) < 2:
+        raise ValueError("ipSAE requires at least two parsed chains")
+    if not np.isfinite(coordinates).all():
+        raise ValueError("ipSAE requires finite structure coordinates")
 
     distances = np.sqrt(((coordinates[:, np.newaxis, :] - coordinates[np.newaxis, :, :]) ** 2).sum(axis=2))
 
@@ -309,6 +315,8 @@ def compute_ipsae(
             atom_count=atom_count,
         )
     _validate_pae_shape(pae_matrix.shape, numres)
+    if not np.isfinite(pae_matrix).all() or (pae_matrix < 0).any():
+        raise ValueError("ipSAE requires finite, nonnegative PAE values")
 
     # 4. Compute Scores
     results = {}

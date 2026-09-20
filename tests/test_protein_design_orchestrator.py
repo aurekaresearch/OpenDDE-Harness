@@ -458,14 +458,17 @@ def test_terminal_advisory_order_never_changes_objective_top_k(monkeypatch, mini
 
 
 @pytest.mark.parametrize("metric", [None, float("nan"), float("inf")])
-def test_terminal_missing_required_metric_cannot_be_selected(monkeypatch, metric):
+@pytest.mark.parametrize(
+    "name,direction", [("rosetta_interface_dg", "minimize"), ("min_ipae", "minimize"), ("ipsae", "maximize")]
+)
+def test_terminal_missing_required_metric_cannot_be_selected(monkeypatch, metric, name, direction):
     candidate = make_candidate("unscored", -20.0)
     if metric is not None:
-        candidate.metrics["rosetta_interface_dg"] = metric
+        candidate.metrics[name] = metric
     snapshot, _, phases = run_terminal_case(
         monkeypatch,
         [candidate],
-        fold_options={"metric_loss_terms": {"rosetta_interface_dg": {"weight": 0.05, "direction": "minimize"}}},
+        fold_options={"metric_loss_terms": {name: {"weight": 0.05, "direction": direction}}},
     )
     assert snapshot.status.value == "failed"
     assert snapshot.final_selection["mode"] == "failed"

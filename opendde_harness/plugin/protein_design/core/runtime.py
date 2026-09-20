@@ -12,11 +12,16 @@ import yaml
 
 from opendde_harness.plugin.protein_design.core.contracts import Placement, WorkflowConfig
 from opendde_harness.plugin.protein_design.servers.backends.loss_objective import (
+    CONFIDENCE_LOSS_DIRECTIONS,
     normalize_loss_combination,
     normalize_loss_weights,
     normalize_metric_loss_terms,
 )
-from opendde_harness.plugin.protein_design.servers.backends.pyrosetta_analysis import PyRosettaConfig, interface_chains
+from opendde_harness.plugin.protein_design.servers.backends.pyrosetta_analysis import (
+    PYROSETTA_METRICS,
+    PyRosettaConfig,
+    interface_chains,
+)
 
 
 @dataclass(frozen=True)
@@ -590,11 +595,17 @@ class WorkflowConfigLoader:
         loss_weights = normalize_loss_weights(design.get("loss_weights"))
         if "metric_loss_terms" in design:
             terms = normalize_metric_loss_terms(design["metric_loss_terms"])
-            if any(term["weight"] > 0 for term in terms.values()):
+            enabled_terms = {name for name, term in terms.items() if term["weight"] > 0}
+            if enabled_terms:
                 if str(design.get("optimization_metric", "loss")).lower() != "loss":
                     raise ValueError("design.metric_loss_terms requires optimization_metric: loss")
-                if not fold_options.get("pyrosetta", {}).get("enabled"):
+                if enabled_terms & PYROSETTA_METRICS.keys() and not fold_options.get("pyrosetta", {}).get("enabled"):
                     raise ValueError("design.metric_loss_terms requires fold.pyrosetta.enabled: true")
+                if (
+                    enabled_terms & CONFIDENCE_LOSS_DIRECTIONS.keys()
+                    and fold_options.get("need_atom_confidence") is False
+                ):
+                    raise ValueError("Confidence metric_loss_terms requires fold.need_atom_confidence: true")
             fold_options["metric_loss_terms"] = terms
         if "loss_combination" in design:
             if str(design.get("optimization_metric", "loss")).lower() != "loss":

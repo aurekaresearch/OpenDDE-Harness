@@ -193,6 +193,131 @@ def test_missing_raw_pae_omits_metric_and_clears_stale_parent_value(harness):
     assert candidate["metadata"]["success"] is True
 
 
+@pytest.mark.parametrize("post_refold", [False, True])
+@pytest.mark.parametrize("ipsae_value", [None, 0.0, 0.75])
+def test_confidence_loss_reaches_trace_and_selection_with_explicit_ipsae_fallback(
+    harness, monkeypatch, post_refold, ipsae_value
+):
+    from opendde_harness.plugin.protein_design.core.contracts import WorkflowConfig
+    from opendde_harness.plugin.protein_design.servers.backends import interchain_pae, loss_confidence_scorer
+    from opendde_harness.plugin.protein_design.servers.backends.loss_objective import (
+        DEFAULT_LOSS_WEIGHTS,
+        calculate_loss_objective,
+    )
+
+    result_type = fold.FoldResult
+    monkeypatch.setattr(fold, "FoldResult", lambda **kwargs: result_type(ipsae=ipsae_value, **kwargs))
+    values = iter([6.0, 12.0])
+    monkeypatch.setattr(
+        interchain_pae, "measure_min_interchain_pae", lambda **kwargs: {"status": "success", "value": next(values)}
+    )
+    weights = {name: 0.0 for name in DEFAULT_LOSS_WEIGHTS}
+    weights["plddt"] = 1.0
+    terms = {"min_ipae": {"direction": "minimize"}, "ipsae": {"direction": "maximize"}}
+    combination = {
+        "mode": "bounded_grouped",
+        "calibration_id": "pipeline-test-fixture-only",
+        "groups": {"confidence": {"budget": 1.0, "terms": ["plddt", "min_ipae", "ipsae"]}},
+        "anchors": {
+            "plddt": {"good": 0.0, "bad": 1.0},
+            "min_ipae": {"good": 0.0, "bad": 20.0},
+            "ipsae": {"good": 1.0, "bad": 0.0},
+        },
+    }
+
+    def score(**kwargs):
+        return calculate_loss_objective(
+            {"plddt": 0.25},
+            -2.0,
+            weights=kwargs["loss_weights"],
+            metric_values=kwargs["metric_values"],
+            metric_terms=kwargs["metric_terms"],
+            loss_combination=kwargs["loss_combination"],
+        )
+
+    monkeypatch.setattr(loss_confidence_scorer, "score_confidence_loss", score)
+    request = payload(
+        objective_key="loss",
+        pyrosetta={"enabled": False},
+        loss_weights=weights,
+        metric_loss_terms=terms,
+        loss_combination=combination,
+        post_refold=post_refold,
+    )
+    for item in request["candidates"]:
+        item.update(objective=-999, metrics={"loss": -999, "ipsae": 1.0, "min_ipae": 0.0})
+        item["metadata"] = {"ipsae": {"status": "success", "value": 1.0}}
+    rows = harness._fold(request)["candidates"]
+    for row, min_ipae in zip(rows, [6.0, 12.0], strict=True):
+        assert row["metadata"]["success"] is True
+        raw_ipsae = ipsae_value if ipsae_value is not None else 0.0
+        assert row["metrics"]["ipsae"] == raw_ipsae
+        assert row["metrics"]["min_ipae"] == min_ipae
+        assert row["objective"] == pytest.approx((0.25 + min_ipae / 20 + (1 - raw_ipsae)) / 3)
+        assert row["metadata"]["loss"]["components"]["ipsae"]["raw"] == raw_ipsae
+        provenance = row["metadata"]["ipsae"]
+        assert provenance["status"] == ("unavailable" if ipsae_value is None else "success")
+        assert provenance["value"] == ipsae_value
+        assert ("fallback_value" in provenance) is (ipsae_value is None)
+        if ipsae_value is None:
+            assert provenance["fallback_value"] == 0.0
+    assert rows[0]["metadata"]["loss"]["base_loss"] == rows[1]["metadata"]["loss"]["base_loss"]
+    candidates = [Candidate.model_validate(row) for row in rows]
+    artifact = build_cycle_artifact(
+        task_id="test",
+        target="target",
+        cycle=1,
+        objective_key="loss",
+        minimize=True,
+        candidates=candidates,
+        cycle_best_id="first",
+        global_best_id="first",
+        known_candidate_ids={"first", "second"},
+        structure_artifacts={},
+    )
+    assert artifact["candidates"][0]["metadata"]["ipsae"] == {
+        key: value for key, value in rows[0]["metadata"]["ipsae"].items() if value is not None
+    }
+    assert artifact["candidates"][0]["metrics"]["loss"] == rows[0]["objective"]
+    config = WorkflowConfig(target="target", objective_key="loss", minimize=True, post_filter_top_k=1)
+    selected = DesignOrchestrator._objective_final_selection(
+        eligible=list(reversed(candidates)),
+        rejected=[],
+        terminal=candidates,
+        config=config,
+        strategy_summary="Composite loss test",
+    )
+    assert selected["selected_candidate_ids"] == ["first"]
+
+
+@pytest.mark.parametrize("post_refold", [False, True])
+def test_required_min_ipae_remains_unavailable_not_zero(harness, monkeypatch, post_refold):
+    from opendde_harness.plugin.protein_design.servers.backends import loss_confidence_scorer
+    from opendde_harness.plugin.protein_design.servers.backends.loss_objective import (
+        DEFAULT_LOSS_WEIGHTS,
+        calculate_loss_objective,
+    )
+
+    def score(**kwargs):
+        return calculate_loss_objective(
+            {key: 0.5 for key in DEFAULT_LOSS_WEIGHTS},
+            -2.0,
+            metric_values=kwargs["metric_values"],
+            metric_terms=kwargs["metric_terms"],
+        )
+
+    monkeypatch.setattr(loss_confidence_scorer, "score_confidence_loss", score)
+    with pytest.raises(RuntimeError, match="Missing required loss metric: min_ipae"):
+        harness._fold(
+            payload(
+                objective_key="loss",
+                pyrosetta={"enabled": False},
+                post_refold=post_refold,
+                metric_loss_terms={"min_ipae": {"direction": "minimize"}, "ipsae": {"direction": "maximize"}},
+            )
+        )
+
+
 @pytest.mark.parametrize("bounded,post_refold", [(False, False), (True, False), (True, True)])
 def test_required_metric_failure_cannot_continue_into_loss_ranking(harness, monkeypatch, bounded, post_refold):
     from opendde_harness.plugin.protein_design.servers.backends import loss_confidence_scorer

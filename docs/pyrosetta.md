@@ -191,7 +191,8 @@ use the registered aggregate metrics below for composite loss. The full list is
 persisted with the candidate and in the worker result; dashboard trace metadata
 retains its existing 64-item list limit and shows the displayed/total count.
 
-`design.metric_loss_terms` accepts only the registered metric names above. Each
+`design.metric_loss_terms` accepts the registered metric names above plus
+`min_ipae` and `ipsae` described below. Each
 term requires `direction: minimize` or `maximize`; defaults are `weight: 1.0`,
 `scale: 1.0`, and `reference: 0.0`. Weight must be finite and nonnegative, scale
 finite and positive, and reference finite. Every nonzero term contributes:
@@ -210,7 +211,8 @@ and contribution for each enabled term, plus the original `base_loss`, `metric_l
 and composite `loss`. Selection minimizes `loss`, not `base_loss`. Older artifacts
 without `base_loss` can reconstruct it as `structure_loss + esm2_contribution`.
 The formula version is unchanged because exposing the subtotal does not change
-the arithmetic. Positive terms require enabled analysis and loss optimization. At least
+the arithmetic. Positive PyRosetta terms require enabled analysis; all positive
+metric terms require loss optimization. At least
 one legacy loss coefficient must remain positive; standalone interface-only ranking
 is not supported. A zero-weight metric need not exist. Missing, null, nonnumeric,
 non-finite, or overflowing enabled terms fail scoring; no candidate-specific
@@ -224,6 +226,37 @@ With `on_failure: fail`, failed candidates have no objective and cannot enter th
 population. With `continue`, confidence-only ranking can proceed and the analysis
 error remains visible. Missing loss-required metrics still reject the candidate.
 If every candidate fails, the existing batch failure/retry policy applies.
+
+### Raw confidence metric loss terms
+
+Two optional confidence terms use the same composite objective, bounded groups,
+persisted contribution breakdown, search selection, and terminal-refolding path:
+
+| Key | Required direction | Raw value |
+| --- | --- | --- |
+| `min_ipae` | `minimize` | Minimum valid raw PAE in either directed binder–target block, in Å. This is **not** the normalized mean structural component `i_pae`. |
+| `ipsae` | `maximize` | Existing fold-backend ipSAE, dimensionless in [0, 1], taking the maximum over directed chain pairs. |
+
+Neither term is enabled by default, and neither supplies universal good/bad
+anchors. In `bounded_grouped` mode, every positive-weight term must have explicit
+`loss_combination.anchors` and exactly one group assignment. Anchor order must
+match the required direction. Choose weights/group budgets with the overlapping
+PAE and interface-confidence information in mind; adding terms should not
+implicitly increase a group's budget.
+
+These terms do not require PyRosetta, but do require `fold.need_atom_confidence`
+to remain enabled. ipSAE uses the configured `ipsae_pae_cutoff` and
+`ipsae_dist_cutoff` (both default to 10); changing these changes its meaning.
+For multichain complexes the reported maximum can involve a chain pair other
+than the intended binder–target interface; it is not a binder-specific aggregate.
+
+Missing Min ipAE rejects a candidate when the term has positive weight. As an
+explicit exception, uncomputable ipSAE uses **0** for reporting and scoring.
+`metadata.ipsae` records `status: unavailable`, `value: null`, and
+`fallback_value: 0.0`; a genuinely computed zero records `status: success`.
+The fold log records calculation errors. Refolding recomputes both metrics and
+replaces stale scores and availability metadata. Nonfinite or out-of-domain
+metric inputs are not accepted by the objective.
 
 ### Interpreting linear-objective magnitude and choosing scales
 
