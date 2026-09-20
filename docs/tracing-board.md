@@ -23,7 +23,9 @@ forward the actual viewer port with SSH; for port 4318, use
   the full sequence and structure viewer's sequence strip use matching purple CDR
   highlighting. CDR positions come from the
   task's saved, parsed YAML configuration; positions are zero-based and inclusive.
-- The 3Dmol.js viewer displays the target in `#cccccc` and binder in `#a194f3`.
+- The Mol* viewer displays the target and binder with distinct colours and
+  supports design, chain, element, pLDDT and residue-order colouring. These
+  structure colours are independent of the candidate-line colour selector.
 - **Min ipAE** is the raw minimum predicted aligned error in Å across all
   configured binder–target residue pairs with valid alignment frames, considering
   both matrix directions. The frame mask follows the model's

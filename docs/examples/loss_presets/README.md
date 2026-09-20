@@ -54,6 +54,24 @@ is available but not selected for this default. It has no assumed scoring bounds
 
 ### Applying the policy
 
+In a source checkout, the policy is at
+`docs/examples/loss_presets/default_bounded_v1.yaml`. Releases containing this
+feature also ship the YAML and this README under
+`opendde_harness/plugin/protein_design/examples/loss_presets/`. To read the installed
+copy using the Python interpreter from the environment containing the package:
+
+```python
+from importlib.resources import files
+
+preset = files("opendde_harness").joinpath(
+    "plugin/protein_design/examples/loss_presets/default_bounded_v1.yaml"
+)
+print(preset.read_text(encoding="utf-8"))
+```
+
+Older releases do not contain this resource. Check your installed revision rather
+than substituting a similarly named file from a different release.
+
 Start with a complete workflow containing the intended target, binder/scaffold,
 scientific gates, workload, provider and compute settings. Replace these four
 fields under its existing `design` section with the preset's full values:
@@ -74,6 +92,19 @@ contain these settings before normal configuration validation and submission.
 The policy enables PyRosetta and requires confidence output. It does not choose
 a compute endpoint/image, change scientific gates, or submit a run. The selected
 worker must already provide PyRosetta and the other configured model assets.
+
+Save the merged workflow to a new filename, then validate it:
+
+```bash
+ddeharness protein-design validate --config reviewed-bounded-trial.yaml --json
+```
+
+Use `--opendde-config /path/to/config.json` as well if your application uses a
+non-default provider/compute configuration. Validation checks configuration, not
+worker imports or scientific execution. Complete the
+[real-run checklist](../../pyrosetta.md#end-to-end-verification-checklist) before
+scaling up. In a wheel, consult the corresponding `opendde_harness/docs/pyrosetta.md`
+resource or the repository documentation for that same release.
 
 ### Metric semantics and missing values
 

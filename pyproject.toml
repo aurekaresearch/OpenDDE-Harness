@@ -53,6 +53,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "biotite>=1.2,<2.0",
     "pytest>=8.0,<10.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
@@ -90,6 +91,8 @@ packages = ["opendde_harness"]
 # locating a source checkout, which a pip install does not have.
 "docs/examples/crlf2_quickstart.yaml" = "opendde_harness/plugin/protein_design/examples/crlf2_quickstart.yaml"
 "docs/examples/cacng1_quickstart.yaml" = "opendde_harness/plugin/protein_design/examples/cacng1_quickstart.yaml"
+"docs/examples/loss_presets/default_bounded_v1.yaml" = "opendde_harness/plugin/protein_design/examples/loss_presets/default_bounded_v1.yaml"
+"docs/examples/loss_presets/README.md" = "opendde_harness/plugin/protein_design/examples/loss_presets/README.md"
 "docs/pyrosetta.md" = "opendde_harness/docs/pyrosetta.md"
 "docker/versions.env" = "opendde_harness/cli/source_versions.env"
 "docker/environment.json" = "opendde_harness/cli/compute_environment.json"
@@ -131,6 +134,8 @@ include = [
 [tool.hatch.build.targets.sdist]
 include = [
     "docs/examples/*.yaml",
+    "docs/examples/loss_presets/default_bounded_v1.yaml",
+    "docs/examples/loss_presets/README.md",
     "docs/pyrosetta.md",
     "docker/versions.env",
     "docker/environment.json",

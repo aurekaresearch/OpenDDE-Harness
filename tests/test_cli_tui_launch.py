@@ -285,6 +285,10 @@ def _stage_release_tree(root, uis=("ui-tui",)):
     (root / "docs" / "pyrosetta.md").write_text("# PyRosetta setup\n")
     for name in ("crlf2_quickstart.yaml", "cacng1_quickstart.yaml"):
         (root / "docs" / "examples" / name).write_text("stub: true\n")
+    presets = root / "docs" / "examples" / "loss_presets"
+    presets.mkdir()
+    for name in ("default_bounded_v1.yaml", "README.md"):
+        shutil.copy2(REPO_ROOT / "docs" / "examples" / "loss_presets" / name, presets / name)
     (root / "docker").mkdir()
     for name in ("versions.env", "environment.json", "model-checksums.sha256", "ESM-LICENSE.txt"):
         (root / "docker" / name).write_text("stub\n")
@@ -325,6 +329,8 @@ def test_the_tui_bundle_reaches_the_sdist_and_the_wheel_built_from_it(tmp_path):
     for archive in ("sdist", "wheel"):
         assert not any("node_modules" in n or any(p.startswith("._") for p in n.split("/")) for n in names[archive])
         assert any(n.endswith("/docs/pyrosetta.md") for n in names[archive])
+        for resource in ("default_bounded_v1.yaml", "README.md"):
+            assert any(n.endswith(f"/examples/loss_presets/{resource}") for n in names[archive])
         for module in ("pyrosetta_worker.py", "pyrosetta_analysis.py"):
             assert any(n.endswith(f"/plugin/protein_design/servers/backends/{module}") for n in names[archive])
     assert "pyrosetta" in names["extras"]

@@ -29,6 +29,10 @@ uv tool install --python 3.12 opendde-harness
 The wheel includes the built TUI and the manifests needed to prepare compute
 code and model assets. No source checkout or frontend build is required.
 
+Check the [changelog](../CHANGELOG.md) when evaluating unreleased features: a
+PyPI installation contains the published release, not an unmerged feature branch.
+Use the intended source revision for review and record `git rev-parse HEAD`.
+
 To update, close the TUI and run:
 
 ```bash
@@ -150,8 +154,8 @@ directory. Snapshots that earlier releases prepared under `~/.opendde_harness/ru
 are left untouched; remove that directory once no container mounts it. Updates
 create a new snapshot; snapshots that no container mounts are then removed except
 the two newest ones (all snapshots are kept when Docker is unavailable). A container
-started by an earlier release keeps its code until it exits when idle; the updated
-release starts its own container when a task needs it (see the
+started by an earlier release keeps its code while busy; replacement waits for
+an idle shutdown before the updated release starts a container (see the
 [container lifecycle](onboarding.md#container-lifecycle)). For development,
 set `OPENDDE_HARNESS_COMPUTE_SOURCE_DIR` to a prepared checkout.
 
@@ -185,9 +189,44 @@ Client installation and image builds do not replace an already running worker.
 | --- | --- |
 | Harness Python source | Restart the client and idle compute worker after editing |
 | TUI source or frontend lockfile | Run `npm --prefix ui-tui ci` when dependencies change, then `make build-tui`; restart the TUI |
+| Dashboard-only `tracing/viewer/ui/*.js` or `*.css` | Static files are read on request; update the viewer's installed assets and reload the browser. No TUI build or compute restart is required. This exception does not apply to server-side viewer modules or scientific code. |
 | Client dependencies or `uv.lock` | Run `make install` (preserve extras for a host-native service) |
 | Docker runtime dependencies, Dockerfile, or PyRosetta pin | Rebuild the custom image, then select it during onboarding after active tasks finish |
 | Design YAML | Validate a copy and start a new task; an existing task keeps its resolved configuration |
+
+### Enable PyRosetta and bounded scoring
+
+Treat the client, worker environment and workflow as three separate setup checks:
+
+1. **Install the intended client/source revision.** Use the commands above. Keep
+   Python and dashboard files from the same feature revision; do not assume a
+   successful client upgrade updates an existing worker.
+2. **Provision the worker, once.** For Docker, obtain a trusted licensed image or
+   follow the [opt-in image instructions](../docker/README.md#optional-pyrosetta-runtime).
+   Reuse an already verified compatible image; a missing import in one task is
+   not by itself a reason to rebuild. For host-native compute, use the
+   [extra-preserving installation](pyrosetta.md#host-native-compute-service).
+   Model-asset preparation does not install PyRosetta.
+3. **Select and verify the actual worker.** After active tasks finish, select the
+   custom image during onboarding and run `ddeharness doctor --compute-only`.
+   Review any worker registry and task `compute` override: these can route the
+   task away from the locally managed image. Check the actual container image,
+   mounted code and analysis interpreter using the
+   [runtime checks](pyrosetta.md#verify-the-selected-runtime), not a presumed port.
+4. **Opt in with a new complete workflow.** Copy the accepted configuration;
+   enable PyRosetta and apply the
+   [bounded policy](examples/loss_presets/README.md#applying-the-policy) if wanted.
+   Keep target, scaffold, masks, hotspots/no-hotspots and hard scientific gates.
+   Validate using the same `--opendde-config` file that will be used for `start`.
+5. **Complete a small real run.** Imports and validation are preflight checks,
+   not end-to-end evidence. Follow the
+   [verification checklist](pyrosetta.md#end-to-end-verification-checklist),
+   including terminal selection when enabled, before scaling up.
+
+The default bounded policy needs confidence output and PyRosetta with
+`on_failure: fail`. It uses explicitly chosen ranges; it does not infer ranges
+from the current candidate population or weaken contact gates. Do not install
+the licensed extra on a client-only machine just to use a remote worker.
 
 The pinned upstream sources (OpenDDE, LigandMPNN, PLIP) are downloaded as archives from `codeload.github.com` with a per-source progress display. Each archive is cached by revision under `runtime-code/sources/`, and a new snapshot reuses the cached archive or the verified sources of a previous snapshot, so a client update downloads again only when a pinned revision changes. If GitHub is slow or unreachable, set `https_proxy` (the downloader honours it) or pass `--upstream-dir DIR` to `ddeharness compute prepare`, where `DIR` holds local Git checkouts at the pinned revisions.
 

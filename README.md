@@ -14,6 +14,9 @@ Harness for agentic antibody design: prepare targets, optimize CDR sequences, pr
 - Guided setup and reviewed design plans in natural language.
 - Generate antibody sequences through LLM reasoning and structural verification.
 - Agentic evolutional discovery for antibody design.
+- Optional [PyRosetta relaxation and interface scoring](docs/pyrosetta.md), with
+  auditable per-metric loss contributions and a reusable
+  [bounded 40/40/20 loss policy](docs/examples/loss_presets/README.md).
 
 > [!NOTE]
 > OpenDDE Harness is an early preview, and you may encounter bugs. If something
@@ -50,6 +53,14 @@ uv tool install --python 3.12 opendde-harness
 ```
 
 The release wheel includes the built terminal UI.
+
+Features listed under **Unreleased** in the changelog require a source revision
+containing them until a release is published. Follow the
+[source/development installation guide](docs/installation.md#develop-from-an-editable-checkout)
+to evaluate this branch; installing the current PyPI release does not select it.
+PyRosetta is separately licensed and must be provisioned in the **compute worker**,
+not merely in the client environment. See the
+[setup checklist](docs/installation.md#enable-pyrosetta-and-bounded-scoring).
 
 To update a PyPI installation, close the TUI and run:
 
@@ -136,6 +147,13 @@ and the [CRLF2 staged example](docs/examples/crlf2_scheduled.yaml), which change
 batch size, strategy weights, population capacity, and parent temperature by cycle interval.
 The parameter reference also explains stagnation-triggered redesign, defaults, and current limitations.
 
+For balanced confidence, energy and geometry/sequence scoring, explicitly apply
+the [default bounded policy](docs/examples/loss_presets/README.md#applying-the-policy)
+to your reviewed workflow. It is not a standalone run file, a universal scientific
+calibration, or a change to existing runs. Validate and complete a
+[small real verification run](docs/pyrosetta.md#end-to-end-verification-checklist)
+before increasing the workload.
+
 ### 3. Inspect results
 
 ```bash
@@ -157,13 +175,13 @@ structures captured in the client's tracing data. See the [dashboard guide](docs
 
 ## Development & License
 
-See the [repository rules](AGENTS.md) and [compute image build instructions](docker/README.md). Ordinary users consume a prebuilt image; Dockerfiles remain available for publishers and customization. Licensed under [Apache-2.0](LICENSE); see [third-party notices](LICENSES/README.md). TUI and memory foundations are adapted from Raven, and long-term memory is served by EverOS. Models may have separate terms. Computational results require experimental validation. Model calls and compute may incur costs.
+See the [repository rules](AGENTS.md) and [compute image build instructions](docker/README.md). Ordinary users consume a prebuilt image; Dockerfiles remain available for publishers and customization. The Harness is licensed under [Apache-2.0](LICENSE); dependency and model licenses still apply, including the separate [PyRosetta terms](docs/pyrosetta.md#installation). TUI and memory foundations are adapted from Raven, and long-term memory is served by EverOS. Computational results require experimental validation. Model calls and compute may incur costs.
 
 ## Citation and Acknowledgements
 
 If you use OpenDDE Harness in your work, please cite this software and the technical report linked above. When using OpenDDE for structure prediction, also cite the [OpenDDE technical report](https://arxiv.org/abs/2607.03787) and follow its citation and acknowledgement guidance. Cite the original methods for other models and tools used in your experiments, including SolubleMPNN and ESM2 when applicable.
 
-We acknowledge Raven, EverOS, and the upstream projects listed in the [third-party notices](LICENSES/README.md). Their software and model licenses continue to apply.
+We acknowledge Raven, EverOS, and the upstream scientific tools and models used by the Harness. Their software and model licenses continue to apply; consult the dependencies' own notices when installing or redistributing them.
 
 ## Partnership and Collaboration
 

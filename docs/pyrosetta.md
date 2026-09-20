@@ -25,6 +25,40 @@ and [mount the development checkout](installation.md#use-a-development-checkout-
 Let active tasks finish before switching worker code or images. Neither building
 the image nor enabling analysis in a new YAML changes an already running task.
 
+### Verify the selected runtime
+
+First inspect the accepted task's `workflow.json`, `snapshot.json` and `worker.log`
+under its task directory. Check task `compute` overrides, the saved worker
+registry/profile, and the application configuration passed with
+`--opendde-config`. The local Docker image is irrelevant if the task selected a
+different registered/explicit service. Ports are runtime details, not identities.
+
+For managed Docker, `ddeharness doctor --compute-only` reports the current local
+container and code ID; `~/.opendde_harness/compute/local.json` records that instance.
+Match it to the task's resolved endpoint before inspecting it. On the compute host,
+replace `CONTAINER_NAME` with that verified running container:
+
+```bash
+docker inspect --format '{{.Id}} {{.Image}} {{.Config.Image}}' CONTAINER_NAME
+docker inspect --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}' CONTAINER_NAME
+docker top CONTAINER_NAME -eo pid,args
+docker exec CONTAINER_NAME /opt/runtime/bin/python -c \
+  'import sys, subprocess; print(sys.executable); subprocess.run([sys.executable, "-c", "import pyrosetta; print(pyrosetta.version())"], check=True)'
+```
+
+The standard image uses `/opt/runtime/bin/python`; for a custom service, substitute
+the interpreter actually launching its analysis children. Confirm it against the
+recorded `metadata.pyrosetta.provenance.python_executable`, worker-module path and
+runtime environment from a scored candidate. Retain the immutable image ID and
+mounted code identity, not just its mutable tag. An import in a newly created
+container or host shell is not proof that the selected worker uses that environment.
+
+If the wrong image/code is selected, preserve the failed task and fix routing or
+saved settings before submitting a new trial. Reuse a working compatible image.
+Do not install into the host to repair a container, replace a busy worker, or call
+`compute stop --force` as a readiness check. An occupied worker is a reason to wait
+for availability while performing independent checks, not to interrupt its run.
+
 ### Host-native compute service
 
 If the compute service runs directly on the host, install into its Python
@@ -429,16 +463,17 @@ units; they are available for sorting, filtering, and comparison axes through th
 existing metric selector. The analysis status beside each candidate has a tooltip
 with errors, duration, and interface-loss contributions. Key interface scores are
 accompanied by a contact-residue REU preview in the status tooltip. They are
-prioritized in the eight-chart trend view. Post-filter results use fresh refold
+included in the metric trend view. Post-filter results use fresh refold
 metrics and status, never an earlier design's analysis. The structure viewer still
 shows the original fold; the relaxed artifact resides on compute.
 
-Run the offline unit tests and the real-process smoke tests:
+Run the offline unit tests and process smoke tests from a development checkout.
+These checks do **not** require the licensed PyRosetta extra:
 
 ```bash
-uv run --extra pyrosetta pytest tests/test_pyrosetta_analysis.py tests/test_loss_objective.py tests/test_bounded_loss.py tests/test_loss_confidence_scorer.py tests/test_protein_design_pyrosetta_metrics.py -q
-uv run --extra pyrosetta pytest tests/integration/test_pyrosetta_process_smoke.py -m integration -q
-node --test opendde_harness/tracing/viewer/test/*.test.js
+uv run --extra dev pytest tests/test_pyrosetta_analysis.py tests/test_loss_objective.py tests/test_bounded_loss.py tests/test_loss_presets.py tests/test_confidence_metric_loss.py tests/test_loss_confidence_scorer.py tests/test_protein_design_pyrosetta_metrics.py -q
+uv run --extra dev pytest tests/integration/test_pyrosetta_process_smoke.py -m integration -q
+make test-dashboard
 ```
 
 To validate scientific execution on a provisioned compute host, set
@@ -448,7 +483,7 @@ To validate scientific execution on a provisioned compute host, set
 then run:
 
 ```bash
-uv run --extra pyrosetta pytest tests/integration/test_pyrosetta_real_backend.py -m integration -q
+uv run --extra dev --extra protein-design --extra pyrosetta pytest tests/integration/test_pyrosetta_real_backend.py -m integration -q
 ```
 
 This test deliberately skips when the licensed backend or the supplied complex is
@@ -456,3 +491,62 @@ absent. It runs two copies in separate workers with one relaxation repeat each,
 checks deterministic scores and residue-energy arithmetic, and preserves the
 source. Production defaults use five repeats. A passing process test alone does
 not validate scientific scores.
+
+If running tests from a host-native service environment that already uses optional
+extras, retain them on every `uv run`/`uv sync` invocation, or use a separate test
+environment. Do not synchronize the Python environment of an active service.
+
+### End-to-end verification checklist
+
+An image build, successful import, valid YAML, accepted submission or skipped
+integration test does not verify the complete workflow. Use a separately named
+copy of an accepted target/scaffold configuration; preserve the original and its
+logs. Do not weaken gates to make a trial pass.
+
+1. **Review the reduced workload.** For example, set `design.n_cycles: 1`,
+   `design.num_sequences: 2` and `design.population_size: 2`. Review/remove
+   workload-only `cycle_schedule` overrides in the copy, since they can override
+   those counts or extend beyond the new cycle limit. Initial binder scoring,
+   bootstrap/redesign behavior and retries also consume work. For bounded terminal
+   verification, use `design.post_refold_filter` with `enabled: true`,
+   `max_parents: 1`, `samples_per_parent: 8`, `survivors_per_parent: 2`, and
+   `top_k: 1`. These are workload examples, not scientific defaults or a runtime
+   guarantee; hard gates may leave fewer than two eligible competitors.
+2. **Keep the intended science.** Preserve target, scaffold, fixed/CDR masks,
+   hotspots/no-hotspots, MSA settings, contact/quality gates and production
+   relaxation settings. Keep PyRosetta enabled, `on_failure: fail`, loss
+   optimization and at least one nonzero Rosetta loss term. For bounded scoring,
+   review every active anchor and group budget, or explicitly apply the reusable
+   preset. Do not add dummy measurements for missing required terms.
+3. **Validate, then actually launch.** Use the same application config for both
+   commands. The following `start` authorizes compute and provider usage, without
+   another interactive confirmation:
+
+   ```bash
+   ddeharness protein-design validate --config reviewed-bounded-trial.yaml --json
+   ddeharness protein-design start --config reviewed-bounded-trial.yaml --json
+   ```
+
+4. **Record the task ID and follow it to terminal status.** Use the task-status
+   tool/TUI and the tracing dashboard, plus `snapshot.json` and `worker.log` in
+   the task directory. Confirm that the newly submitted task reached the intended
+   worker. On failure, inspect the actual traceback and artifacts, correct the
+   cause, and submit a new uniquely named trial when necessary. Never overwrite
+   the failed run to disguise the failure.
+5. **Audit real scores and selection.** Retain candidate IDs, raw Rosetta metrics,
+   original loss, every configured metric contribution and composite loss. For
+   bounded scoring, independently recompute penalties and effective weights from
+   raw values/anchors; include the separately stored `esm2_component`. Check the
+   sum against `metrics.loss` and `candidate.objective`. Check population and
+   terminal ordering use that objective after hard gates, not an LLM advisory
+   rank, fold ranking score, or original loss. A competing-candidate example is
+   stronger evidence than selecting the only eligible candidate.
+6. **Check display and artifacts.** Compare dashboard raw values, loss details and
+   selected candidates with persisted results. Retain the trial/resolved workflow,
+   worker identity, log, confidence files, original folds, relaxed PDBs, analysis
+   JSON and terminal decisions. Report a failed enabled terminal stage as failure,
+   not success based only on completed search cycles.
+
+These checks establish execution and arithmetic correctness, not experimental
+binding affinity or biological suitability. Calibrate the policy on representative
+data before making biological claims; a small passing trial is not calibration.

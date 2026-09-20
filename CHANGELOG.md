@@ -4,6 +4,50 @@ User-facing changes to OpenDDE Harness are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in PyRosetta FastRelax and InterfaceAnalyzer in isolated, bounded CPU
+  subprocesses, with eight interface/energy metrics, relaxed structures, residue
+  evidence, and runtime provenance. Requires a separately licensed installation
+  in the compute service; the default image remains unchanged.
+- Fixed-anchor, bounded grouped loss with explicit ranges, budgets and an audited
+  breakdown. The reusable `default-bounded-v1` policy is opt-in and bundled with
+  source and wheel distributions; existing linear scoring remains available.
+- Raw Min ipAE and ipSAE loss terms, with validated preference directions and
+  explicit availability metadata. Uncomputable ipSAE uses a recorded zero fallback;
+  other missing required metrics still fail scoring.
+- Configurable terminal-refolding parent/sample/survivor limits, and independent
+  Age/Cycle colouring in the dashboard with a remembered browser preference.
+
+### Changed
+
+- Terminal selection now enforces hard contact/quality eligibility and the same
+  objective ordering as search. LLM ranking is advisory; terminal-stage failure
+  cannot be reported as a successfully completed workflow. This is an intentional
+  behavior change for newly executed terminal stages, including linear-loss runs.
+- Quality assessment uses current candidate sequences and configured masks;
+  contradictory High Risk passing verdicts are rejected.
+- Dashboard scales, filters and loss details preserve signed values, precision,
+  missing data and configured objective semantics. Dashboard tests run in CI.
+
+### Fixed
+
+- Detached workers load the explicitly selected application configuration.
+  Managed compute verifies the requested image before reuse and refuses to
+  replace a busy worker when code/image settings change.
+- Raw interchain PAE mapping, nested loss trace preservation, non-interactive
+  Node discovery, and memory tool-call serialization.
+- Clean development installs include Biotite for structural-scoring unit tests;
+  the licensed PyRosetta dependency remains optional.
+
+### Upgrade notes
+
+Follow [installation](docs/installation.md#enable-pyrosetta-and-bounded-scoring).
+Preserve accepted YAML and existing results; use a new configuration/task to opt
+into bounded scoring. Let active work finish before changing worker code, images
+or dependencies. A dashboard-only static asset update needs a browser reload,
+not a compute restart. No scientific results are migrated or rescored on upgrade.
+
 ## [0.0.4] - 2026-09-13
 
 OpenDDE Harness 0.0.4 introduces a pi-tui terminal interface, a shared pi-ai

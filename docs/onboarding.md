@@ -114,6 +114,13 @@ Unless an external compute service is already configured, Protein Design setup m
 
 The default tool environment is `aurekaresearch/opendde-harness:v1`. You can select another trusted tag or digest with the matching environment ID and contract hash. Missing images are pulled for `linux/amd64`; no source build is attempted. Harness releases do not automatically rebuild this image.
 
+The default image does not include PyRosetta. For optional relaxation/interface
+scoring, provision a [licensed custom image](../docker/README.md#optional-pyrosetta-runtime)
+and set `OPENDDE_HARNESS_COMPUTE_IMAGE` before each onboarding invocation. Confirm
+the displayed image; rerunning the wizard without that override selects the
+default. Subsequent automatic worker starts use the saved image. A task YAML
+enabling analysis does not install dependencies or select a different image.
+
 The runtime image includes neither project code nor model weights. Onboarding automatically prepares the installed release's code plus pinned upstream archives in a versioned host directory. Both folding modes use host-side SolubleMPNN and ESM2 650M weights; local folding also needs OpenDDE checkpoint/common data. Missing model assets are downloaded and verified after confirmation. No manual Git checkout is needed for a PyPI installation.
 
 In API mode the wizard does not prompt for the upstream OpenDDE API URL: it prints the configured `fold_defaults.api_url`, or the official default `https://api.aurekabio.cloud`. To use another service, set `fold_defaults.api_url` under `plugins.config.protein-design` in `config.json` before running the wizard. This endpoint is separate from the Harness compute URL. The official folding gateway, ProTrek, and Target MSA service domains are included in the container's default `NO_PROXY` list so these services connect directly even when the host uses a loopback proxy. Explicit task YAML can override folding defaults; see [API configuration](protein-design.md#use-the-hosted-opendde-folding-api).
@@ -129,13 +136,14 @@ Onboarding stops an idle container of the installed release so the confirmed set
 | Situation | Behavior |
 | --- | --- |
 | A task starts and no container for the installed release is running | Started automatically (image pulled if missing, code and weights verified), readiness checked, then the task proceeds |
-| A container for the installed release is running and answers `/health` | Reused without a restart |
+| A container for the installed release is healthy and its actual image matches the requested image | Reused without a restart |
 | A design task is running, even between compute calls | The worker refreshes a task lease every 60 s (TTL 180 s); the container counts as busy until the task ends and releases it |
 | Idle for `compute_docker.idle_seconds` (default 600) with no job and no task lease | Exits and removes itself (`docker run --rm`, no restart policy) |
 | A running task's compute request is refused | The worker resolves the endpoint again once (starting the container when needed, following a new port) and retries |
 | The TUI exits | Asked to stop if idle; a busy container keeps running |
 | `ddeharness compute stop` | Stops an idle container; otherwise prints the running/queued job and task-lease counts and exits 1. `--force` stops it regardless and waits |
-| Client upgrade | The new release starts its own container when needed. The old release's container is left alone and exits when idle |
+| Code release or configured image changes while the previous worker is busy | New startup is refused with a retry-after-completion message; the existing task and recorded service state are preserved |
+| Code release or configured image changes after the previous worker is idle | The previous service must confirm idle shutdown and exit before a replacement starts |
 
 The running instance is recorded in `~/.opendde_harness/compute/local.json` (container, image, code id, port, URL, start time); `ddeharness doctor` reads it and reports the container, port, code id, running/queued jobs, idle countdown and GPU leases. `config.json` keeps only the placement (`compute_docker`), image, folding mode, GPU selection, idle timeout and the two data roots; `compute_url` records the URL of the last start. Old configurations that still carry `container_name` are read and the field ignored.
 
@@ -171,6 +179,11 @@ The Harness compute token authenticates the Harness compute service. The current
 Settings live in `~/.opendde_harness/config.json`. `OPENDDE_HARNESS_HOME` changes some runtime directories, but does not change the CLI configuration-file location. No root `.env` is needed.
 
 All `compute_docker` and `fold_defaults` fields belong under `plugins.config["protein-design"]`. Protein Design settings include the compute connection and local deployment metadata when applicable. Explicit task YAML overrides folding defaults. Running tasks retain their frozen configuration.
+
+`protein-design validate` and `protein-design start` accept `--opendde-config`
+for a non-default application configuration. The detached worker receives that
+same resolved path; use the same file for both commands. Its provider/compute
+settings are distinct from the design YAML passed with `--config`.
 
 If a worker registry exists, onboarding asks before replacing it for new tasks with the selected service. Declining preserves the registry and does not start a container. Cancelling before final confirmation preserves the previous Protein Design configuration.
 

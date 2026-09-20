@@ -1,4 +1,4 @@
-.PHONY: help install install-deps lint lint-python lint-tui test test-python test-tui build build-tui ci clean
+.PHONY: help install install-deps lint lint-python lint-tui test test-python test-tui test-dashboard build build-tui ci clean
 
 PYTHON_LINT_TARGETS ?= opendde_harness scripts tests
 
@@ -9,7 +9,8 @@ help:
 	@echo "  lint           Run Python and TUI lint gates"
 	@echo "  lint-python    Ruff-check the current lint target set"
 	@echo "  lint-tui       TypeScript lint + RPC drift check"
-	@echo "  test           Run Python and TUI tests"
+	@echo "  test           Run Python, TUI, and dashboard tests"
+	@echo "  test-dashboard Run dependency-free dashboard tests"
 	@echo "  ci             Run the local CI gate"
 	@echo "  clean          Remove generated caches and build output"
 
@@ -30,13 +31,16 @@ lint-tui:
 	npm run lint:rpc --prefix ui-tui
 	npm run type-check --prefix ui-tui
 
-test: test-python test-tui
+test: test-python test-tui test-dashboard
 
 test-python:
 	uv run pytest -q
 
 test-tui:
 	npm test --prefix ui-tui
+
+test-dashboard:
+	node --test opendde_harness/tracing/viewer/test/*.test.js
 
 build: build-tui
 

@@ -31,6 +31,37 @@ until you have checked whether the previous request is still running.
 | Missing dashboard structure or I/O | Check task artifacts and recorded events. Historical payloads cannot be recovered merely by refreshing the UI. |
 | Dashboard port unavailable | Use the URL printed by `ddeharness tracing`, or choose another port with `--port`. Do not terminate an unidentified listener. |
 
+## PyRosetta and bounded-loss setup
+
+- **Import succeeds on the host but fails in a task:** trace the task's resolved
+  worker and its actual Python subprocess. A registry entry or YAML compute
+  override may select a different service. Inspect image ID and mounted source;
+  follow [runtime verification](pyrosetta.md#verify-the-selected-runtime). Do not
+  assume rebuilding an already working image will correct placement.
+- **Worker is busy after changing image/code:** the service refuses replacement
+  to preserve active tasks. Wait for completion; do not force-stop it or start a
+  competing GPU container as a workaround. Correct settings apply to a later start.
+- **Preset file is missing after installation:** older published releases may not
+  contain this feature. Use the intended revision and the
+  [installed resource location](examples/loss_presets/README.md#applying-the-policy).
+  The preset is a fragment, not a complete workflow accepted by `start`.
+- **Anchor/group validation fails:** replace all four loss-policy fields together.
+  Partial `loss_weights` mappings retain omitted built-in coefficients. Every
+  positive term needs one anchor and one group; zero-weight terms need neither.
+  Budgets must sum to one, and good/bad order must match preference direction.
+- **Small or negative linear loss:** inspect signed contributions; cancellation
+  can be valid. Opt into [fixed bounded scoring](pyrosetta.md#opt-in-bounded-objective-with-fixed-group-budgets)
+  in a new configuration rather than silently rescaling existing results.
+- **Min ipAE unavailable:** inspect `metadata.min_ipae` and the matching confidence
+  artifact/chain mapping. It is not mean `i_pae` or ipSAE; old runs without the raw
+  metric are not backfilled. A positive Min ipAE loss term requires the measurement.
+- **ipSAE is zero:** distinguish `metadata.ipsae.status: unavailable` with an
+  explicit fallback from `status: success` with a measured zero. Under the default
+  bounded policy, either raw zero incurs the full configured ipSAE penalty.
+- **Lines coloured by Contacts instead of age:** choose **Color by → Age / cycle**
+  above the properties chart. Reload after a static-asset update; do not restart
+  compute. The selector is independent of the 3D structure colour controls.
+
 ## Delay before the first reply
 
 Skill selection makes no model call. A catalogue of at most 40 advertisable

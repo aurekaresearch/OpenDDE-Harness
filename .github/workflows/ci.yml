@@ -177,3 +177,6 @@ jobs:
           npm test
           npm run build
         working-directory: ui-tui
+
+      - name: Dashboard regression tests
+        run: make test-dashboard

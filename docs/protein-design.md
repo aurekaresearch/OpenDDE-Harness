@@ -23,7 +23,7 @@ container, reuse a running one of the installed release, or connect to an existi
 service. For a local container it pulls a missing prebuilt image after confirmation,
 prepares SolubleMPNN and ESM2 650M in both modes, and adds the OpenDDE
 checkpoint/common data in local mode. See the
-[onboarding guide](onboarding.md) for the three-step workflow and local/API modes.
+[onboarding guide](onboarding.md) for the setup workflow and local/API modes.
 
 The following JSON is an advanced configuration reference, not a required setup
 step. If editing `~/.opendde_harness/config.json` manually, merge only the fields
@@ -96,6 +96,13 @@ candidate downloads remain bound to that URL. The task status and Dashboard
 show the resolved worker. If `compute` is omitted, the configured worker pool is
 load-balanced; if no registry exists, the plugin-level `compute_url` (default
 `http://127.0.0.1:8080`) is used.
+
+For PyRosetta-enabled tasks, every worker eligible for that placement must provide
+the analysis dependency. Worker profiles/backends do not certify PyRosetta
+availability. Pin a prepared worker explicitly when the pool is heterogeneous;
+do not assume a saved local custom image controls an explicit remote URL. Managed
+local compute resolves its current port at runtime. See
+[selected-runtime verification](pyrosetta.md#verify-the-selected-runtime).
 
 ### Place jobs on GPUs inside one worker
 
