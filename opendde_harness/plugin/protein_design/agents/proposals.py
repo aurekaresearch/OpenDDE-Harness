@@ -6,10 +6,12 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
-from opendde_harness.plugin.protein_design.agents.router import (
+from opendde_harness.plugin.protein_design.agents.policy import (
     ESM2_GUIDED_MUTATION_SKILL,
     FULL_REDESIGN_SKILL,
     INVERSE_FOLDING_SKILL,
+    MINIBINDER_INVERSE_SKILL,
+    MINIBINDER_POINT_SKILL,
     POINT_MUTATION_SKILL,
     DesignSkillRoute,
 )
@@ -43,6 +45,7 @@ class ProposalContext:
     candidate_count: int
     cycle: int = 0
     placement: Placement | None = None
+    mutation_count_bounds: tuple[int, int] | None = None
 
 
 class ProposalExecutor:
@@ -72,6 +75,9 @@ class ProposalExecutor:
     ) -> list[CandidateProposal]:
         self.last_errors = []
         skill_id = route.require_selected(agent_output.skill_id)
+        skill_id = {MINIBINDER_POINT_SKILL: POINT_MUTATION_SKILL, MINIBINDER_INVERSE_SKILL: INVERSE_FOLDING_SKILL}.get(
+            skill_id, skill_id
+        )
         if skill_id in {POINT_MUTATION_SKILL, FULL_REDESIGN_SKILL}:
             proposals = []
             for index, item in enumerate(agent_output.candidates):
@@ -116,6 +122,13 @@ class ProposalExecutor:
             if actual != expected or len(actual) != len(mutations):
                 raise ProposalValidationError("full redesign requires complete mutable CDR coverage exactly once")
         chains = self._apply_mutations(context.parent_sequences, mutations, context)
+        if skill_id == POINT_MUTATION_SKILL and context.mutation_count_bounds is not None:
+            count = len(self._derive_substitutions(context.parent_sequences, chains))
+            low, high = context.mutation_count_bounds
+            if not low <= count <= high:
+                raise ProposalValidationError(
+                    f"point mutation count {count} is outside the required budget {low}-{high}"
+                )
         return CandidateProposal(
             candidate_id=str(raw.get("candidate_id") or raw.get("id") or "").strip(),
             parent_id=context.parent_id,

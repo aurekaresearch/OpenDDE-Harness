@@ -8,7 +8,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from opendde_harness.memory_engine.skill_forge.documents import (
+    SkillDocument as SkillDocument,
+)
+from opendde_harness.memory_engine.skill_forge.documents import (
+    SkillDocumentCatalog,
+)
+from opendde_harness.memory_engine.skill_forge.documents import (
+    SkillNotFoundError as MissingBuiltinSkillError,
+)
+
 BUILTIN_PROTEIN_DESIGN_SKILLS = (
+    "minibinder-point-mutation",
+    "minibinder-inverse-folding",
     "cdr-point-mutation",
     "cdr-full-redesign",
     "antibody-inverse-folding",
@@ -24,6 +36,8 @@ BUILTIN_PROTEIN_DESIGN_SKILLS = (
 )
 
 _REQUIRED_FILES: dict[str, tuple[str, ...]] = {
+    "minibinder-point-mutation": ("SKILL.md",),
+    "minibinder-inverse-folding": ("SKILL.md",),
     "cdr-point-mutation": ("SKILL.md", "agents/openai.yaml"),
     "cdr-full-redesign": ("SKILL.md", "agents/openai.yaml"),
     "antibody-inverse-folding": ("SKILL.md", "agents/openai.yaml"),
@@ -39,10 +53,6 @@ _REQUIRED_FILES: dict[str, tuple[str, ...]] = {
 }
 
 
-class MissingBuiltinSkillError(RuntimeError):
-    pass
-
-
 @dataclass(frozen=True)
 class LearnedSkill:
     name: str
@@ -52,18 +62,7 @@ class LearnedSkill:
     score: float = 0.0
 
 
-@dataclass(frozen=True)
-class SkillDocument:
-    name: str
-    path: Path
-    content: str
-    missing_references: tuple[str, ...]
-    source: str = "builtin"
-    roles: tuple[str, ...] = ()
-    native_id: str | None = None
-
-
-class ProteinDesignSkillCatalog:
+class ProteinDesignSkillCatalog(SkillDocumentCatalog):
     def __init__(self, root: Path) -> None:
         self._root = root
         self._documents: dict[str, SkillDocument] = {}
@@ -87,21 +86,6 @@ class ProteinDesignSkillCatalog:
             details = "; ".join(f"{name}: {', '.join(paths)}" for name, paths in incomplete.items())
             raise MissingBuiltinSkillError(f"incomplete built-in protein-design skills: {details}")
         return catalog
-
-    def names(self) -> tuple[str, ...]:
-        return tuple(self._documents)
-
-    def documents(self) -> tuple[SkillDocument, ...]:
-        return tuple(self._documents.values())
-
-    def require(self, name: str) -> SkillDocument:
-        try:
-            return self._documents[name]
-        except KeyError as exc:
-            raise MissingBuiltinSkillError(f"unknown protein-design skill: {name}") from exc
-
-    def select(self, names: Iterable[str]) -> tuple[SkillDocument, ...]:
-        return tuple(self.require(name) for name in dict.fromkeys(names))
 
     def overlay_learned(
         self,
@@ -140,11 +124,3 @@ class ProteinDesignSkillCatalog:
         slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "memory"
         digest = hashlib.sha256(f"{native_id}\0{name}".encode()).hexdigest()[:10]
         return f"{slug[:48].rstrip('-')}-{digest}"
-
-    def for_role(self, role: str, names: Iterable[str]) -> tuple[SkillDocument, ...]:
-        selected: list[SkillDocument] = []
-        for name in dict.fromkeys(names):
-            document = self.require(name)
-            if document.source == "builtin" or not document.roles or role in document.roles:
-                selected.append(document)
-        return tuple(selected)

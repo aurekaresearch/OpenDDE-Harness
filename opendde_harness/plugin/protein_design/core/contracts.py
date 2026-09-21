@@ -33,13 +33,6 @@ class Placement(ContractModel):
     mpnn: int | None = Field(default=None, ge=0)
     cp_degree: int = Field(default=1, ge=1)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _default_cp_degree(cls, data: Any) -> Any:
-        if isinstance(data, Mapping) and data.get("fold") and data.get("cp_degree") is None:
-            return {**data, "cp_degree": len(data["fold"])}
-        return data
-
     @model_validator(mode="after")
     def _check_fold_devices(self) -> "Placement":
         if self.fold is None:
@@ -50,9 +43,9 @@ class Placement(ContractModel):
             raise ValueError("compute.placement.fold GPU indices must be zero or greater")
         if len(set(self.fold)) != len(self.fold):
             raise ValueError("compute.placement.fold must not repeat a GPU index")
-        if len(self.fold) != self.cp_degree:
+        if len(self.fold) < self.cp_degree:
             raise ValueError(
-                "compute.placement.fold must list exactly cp_degree GPUs; "
+                "compute.placement.fold must list at least cp_degree GPUs; "
                 f"got {len(self.fold)} for cp_degree {self.cp_degree}"
             )
         return self
@@ -219,7 +212,14 @@ class CycleDesignStage(ContractModel):
             raise ValueError("a cycle_schedule stage must override at least one design parameter")
         weights = self.router_skill_probabilities
         if weights is not None:
-            supported = {"cdr-point-mutation", "cdr-full-redesign", "antibody-inverse-folding", "esm2-guided-mutation"}
+            supported = {
+                "cdr-point-mutation",
+                "cdr-full-redesign",
+                "antibody-inverse-folding",
+                "esm2-guided-mutation",
+                "minibinder-point-mutation",
+                "minibinder-inverse-folding",
+            }
             unknown = sorted(set(weights) - supported)
             if unknown:
                 raise ValueError("unknown design skill weight(s): " + ", ".join(unknown))
@@ -234,6 +234,8 @@ class WorkflowConfig(ContractModel):
     model_config = ConfigDict(extra="forbid")
 
     target: str
+    design_type: Literal["antibody", "minibinder"] = "antibody"
+    mutation_count_bounds: tuple[int, int] | None = None
     # Compute placement is resolved once, when the task starts.  Keeping the
     # resolved endpoint in the immutable run config makes every later cycle,
     # trace, and population read use the same worker.
@@ -290,6 +292,13 @@ class WorkflowConfig(ContractModel):
 
     @model_validator(mode="after")
     def validate_cycle_schedule(self) -> "WorkflowConfig":
+        mini_skills = {"minibinder-point-mutation", "minibinder-inverse-folding"}
+        for weights in [self.skill_weights, *(stage.router_skill_probabilities for stage in self.cycle_schedule)]:
+            if weights and (
+                (self.design_type == "minibinder" and set(weights) - mini_skills)
+                or (self.design_type == "antibody" and set(weights) & mini_skills)
+            ):
+                raise ValueError("design skills must match design.type")
         previous_end = -1
         for stage in self.cycle_schedule:
             if stage.start_cycle <= previous_end:

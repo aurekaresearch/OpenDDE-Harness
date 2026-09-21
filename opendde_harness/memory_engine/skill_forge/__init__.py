@@ -20,13 +20,27 @@ the agent loads one through ``use_skill``.
 
 from __future__ import annotations
 
-from opendde_harness.memory_engine.skill_forge.catalog import LocalSkillCatalog
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from opendde_harness.memory_engine.skill_forge.catalog import LocalSkillCatalog
 from opendde_harness.memory_engine.skill_forge.fusion import RRF_K, rrf_merge_weighted
 from opendde_harness.memory_engine.skill_forge.local_source import LocalSkillSource
 from opendde_harness.memory_engine.skill_forge.memory_source import MemorySkillSource
 from opendde_harness.memory_engine.skill_forge.refs import resolve_refs
 from opendde_harness.memory_engine.skill_forge.router import SkillForgeRouter
 from opendde_harness.memory_engine.skill_forge.types import RouterHit, SkillSource
+
+
+def __getattr__(name: str):
+    # Lightweight skill documents are also used by compute-only installations.
+    # Do not import the host's BM25/tokenizer stack until a local pool is needed.
+    if name == "LocalSkillCatalog":
+        from opendde_harness.memory_engine.skill_forge.catalog import LocalSkillCatalog
+
+        return LocalSkillCatalog
+    raise AttributeError(name)
+
 
 __all__ = [
     "MemorySkillSource",

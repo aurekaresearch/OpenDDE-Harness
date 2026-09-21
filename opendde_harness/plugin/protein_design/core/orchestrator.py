@@ -1783,7 +1783,11 @@ class DesignOrchestrator:
                 "population_size": len(population),
                 "population_best": (population[0].model_dump(mode="json") if population else None),
                 "candidate_gate_evidence": {
-                    candidate.candidate_id: candidate.metadata.get("gate_evidence", {}) for candidate in candidates
+                    candidate.candidate_id: {
+                        **(candidate.metadata.get("gate_evidence") or {}),
+                        "gate_passed": candidate.metadata.get("gate_passed", candidate.metrics.get("gate_passed")),
+                    }
+                    for candidate in candidates
                 },
                 "candidate_changes": candidate_changes,
                 "recurring_offenders": recurring_offenders,

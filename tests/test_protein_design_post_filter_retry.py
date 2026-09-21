@@ -47,6 +47,7 @@ def run(provider):
         catalog=SimpleNamespace(select=lambda _: []),
     )
     config = SimpleNamespace(
+        design_type="antibody",
         metadata={},
         target="test",
         objective_key="loss",

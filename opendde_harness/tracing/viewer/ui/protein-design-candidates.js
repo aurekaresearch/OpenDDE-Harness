@@ -181,6 +181,7 @@
   }
 
   function candidateCdrRegions(candidate, run) {
+    if (isMiniBinder(run, candidate)) return []
     const source =
       run?.cdrRegionGroups ||
       candidate?.cdrRegionGroups ||
@@ -338,17 +339,19 @@
   }
 
   function renderCandidateFilters(run) {
-    const filters = TABLE_FILTER_DEFINITIONS.map(definition => {
-      const domain = tableFilterDomain(run, definition)
-      return `<label class="protein-filter-range" data-filter-row="${escapeHtml(definition.key)}"><span><strong>${escapeHtml(definition.label)}</strong><output>${escapeHtml(formatNumber(domain.min))} – ${escapeHtml(formatNumber(domain.max))}</output></span><div><input type="range" min="${domain.min}" max="${domain.max}" step="${domain.step}" value="${domain.min}" data-candidate-filter="${escapeHtml(definition.key)}" data-filter-bound="min" data-domain-min="${domain.min}" data-domain-max="${domain.max}"><input type="range" min="${domain.min}" max="${domain.max}" step="${domain.step}" value="${domain.max}" data-candidate-filter="${escapeHtml(definition.key)}" data-filter-bound="max" data-domain-min="${domain.min}" data-domain-max="${domain.max}"></div><small><span>${escapeHtml(formatNumber(domain.min))}</span><span>${escapeHtml(formatNumber(domain.max))}</span></small></label>`
-    }).join('')
+    const filters = typedDefinitions(TABLE_FILTER_DEFINITIONS, run)
+      .map(definition => {
+        const domain = tableFilterDomain(run, definition)
+        return `<label class="protein-filter-range" data-filter-row="${escapeHtml(definition.key)}"><span><strong>${escapeHtml(definition.label)}</strong><output>${escapeHtml(formatNumber(domain.min))} – ${escapeHtml(formatNumber(domain.max))}</output></span><div><input type="range" min="${domain.min}" max="${domain.max}" step="${domain.step}" value="${domain.min}" data-candidate-filter="${escapeHtml(definition.key)}" data-filter-bound="min" data-domain-min="${domain.min}" data-domain-max="${domain.max}"><input type="range" min="${domain.min}" max="${domain.max}" step="${domain.step}" value="${domain.max}" data-candidate-filter="${escapeHtml(definition.key)}" data-filter-bound="max" data-domain-min="${domain.min}" data-domain-max="${domain.max}"></div><small><span>${escapeHtml(formatNumber(domain.min))}</span><span>${escapeHtml(formatNumber(domain.max))}</span></small></label>`
+      })
+      .join('')
     return `<details class="protein-candidate-filters"><summary><span aria-hidden="true">≡</span> Filters <b hidden>0</b></summary><div class="protein-filter-menu"><header><strong>Filter candidates</strong><button type="button" data-filter-reset>Reset</button></header><input type="search" data-candidate-search placeholder="Search sequence, ID, or target"><p><span data-filter-result-count>${escapeHtml(allCandidates(run).length)}</span> / ${escapeHtml(allCandidates(run).length)} candidates</p>${filters}</div></details>`
   }
 
   function renderCandidateControls(run) {
     const definitions = [
       ...(run.resultView === 'post-filter' ? [{ key: 'filter_rank', label: 'Post-filter rank' }] : []),
-      ...TABLE_SORT_DEFINITIONS,
+      ...typedDefinitions(TABLE_SORT_DEFINITIONS, run),
       ...availableProperties(run).filter(
         definition => !['ranking_score', 'contacts', 'min_ipa'].includes(definition.key)
       )
@@ -489,9 +492,9 @@
           .filter(Boolean)
           .join('\n')
       : ''
-    const missingProperties = PROPERTY_DEFINITIONS.filter(
-      definition => propertyValue(candidate, definition) === null
-    ).map(definition => definition.label)
+    const missingProperties = typedDefinitions(PROPERTY_DEFINITIONS, run, candidate)
+      .filter(definition => propertyValue(candidate, definition) === null)
+      .map(definition => definition.label)
     return `<div class="protein-candidate-row${isLeader ? ' is-cycle-leader' : ''}${missingProperties.length ? ' has-missing-properties' : ''}" data-candidate-key="${escapeHtml(key)}" data-candidate-id="${escapeHtml(candidate.candidateId)}" ${candidateTableAttributes(candidate, run)} tabindex="0">
       <label class="protein-candidate-check" title="Compare this sequence">
         <input type="checkbox" data-candidate-select="${escapeHtml(key)}"${checked ? ' checked' : ''}>
@@ -528,7 +531,7 @@
       })
       .join('')
     return `<div class="protein-candidate-table" style="--candidate-columns:28px 42px 180px 105px 450px repeat(${3 + extraMetrics.length}, 105px);--candidate-table-width:${825 + (3 + extraMetrics.length) * 105}px">
-      <div class="protein-candidate-head"><span></span><span>Cycle</span><span>ID</span><span>Target</span><span>Sequence</span><span>Ranking score</span><span>CDR contacts</span><span>Min ipAE</span>${extraMetrics.map(definition => `<span>${escapeHtml(definition.label)}</span>`).join('')}</div>
+      <div class="protein-candidate-head"><span></span><span>Cycle</span><span>ID</span><span>Target</span><span>Sequence</span><span>Ranking score</span><span>${isMiniBinder(run) ? 'Binder contacts' : 'CDR contacts'}</span><span>Min ipAE</span>${extraMetrics.map(definition => `<span>${escapeHtml(definition.label)}</span>`).join('')}</div>
       <div class="protein-candidate-body">${rows}</div>
     </div>`
   }
@@ -693,8 +696,25 @@
       .join(' ')
   }
 
+  function isMiniBinder(run, candidate) {
+    return (
+      run?.designType === 'minibinder' ||
+      candidate?.metadata?.design_type === 'minibinder' ||
+      (run && allCandidates(run).some(item => item.metadata?.design_type === 'minibinder'))
+    )
+  }
+
+  function typedDefinitions(definitions, run, candidate) {
+    if (!isMiniBinder(run, candidate)) return [...definitions]
+    return definitions
+      .filter(item => item.key !== 'frame_contacts')
+      .map(item =>
+        item.key === 'cdr_contacts' || item.key === 'contacts' ? { ...item, label: 'Binder contacts' } : item
+      )
+  }
+
   function availableProperties(run) {
-    const definitions = [...PROPERTY_DEFINITIONS]
+    const definitions = typedDefinitions(PROPERTY_DEFINITIONS, run)
     const known = new Set(definitions.map(definition => definition.paths[0]))
     for (const candidate of run ? allCandidates(run) : []) {
       for (const [key, value] of Object.entries(candidate.metrics || {})) {

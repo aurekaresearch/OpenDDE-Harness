@@ -910,6 +910,8 @@ function buildProteinDesignData(selectedRunId = null) {
       if (file.startsWith(root + path.sep)) {
         const config = JSON.parse(fs.readFileSync(file, 'utf8'))
         result.run.cdrRegionGroups = config.cdr_region_groups || config.cdr_regions || {}
+        result.run.designType = config.design_type || 'antibody'
+        result.run.mutablePositions = config.mutable_positions || {}
       }
     } catch (error) {
       if (error.code !== 'ENOENT') console.warn('Unable to read design CDR configuration:', error.message)

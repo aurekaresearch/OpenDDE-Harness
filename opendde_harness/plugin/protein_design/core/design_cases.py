@@ -337,6 +337,8 @@ def _design_scope(
         position = mutation.get("position")
         if chain is not None and isinstance(position, int):
             selected.append((str(chain), position))
+    if config.design_type == "minibinder":
+        return [f"{chain}:designable" for chain in config.mutable_positions]
     selected_regions = {
         (chain, group_index)
         for chain, position in selected
@@ -492,7 +494,7 @@ def _lesson(
             ", ".join(
                 f"{item.get('chain')}{item.get('position')} {item.get('from')}>{item.get('to')}" for item in mutations
             )
-            or "the proposed CDR design"
+            or "the proposed sequence design"
         )
         summary = (
             f"{skill} applied {mutation_text}; candidate {best_child.candidate_id} "

@@ -82,7 +82,10 @@ async def prepare_post_mpnn(
                         metadata={
                             "chains": proposed,
                             "parent_id": parent.candidate_id,
-                            "skill_id": "antibody-inverse-folding",
+                            "skill_id": "minibinder-inverse-folding"
+                            if config.design_type == "minibinder"
+                            else "antibody-inverse-folding",
+                            "design_type": config.design_type,
                             "post_mpnn_selected": True,
                             "post_refold_success": False,
                             "mpnn_sample_index": index,

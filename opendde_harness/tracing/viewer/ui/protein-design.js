@@ -360,7 +360,31 @@
     const error = event.error
       ? `<section class="protein-activity-error"><h4>Error</h4>${renderPayloadValue(event.error)}</section>`
       : ''
-    return `<div class="protein-activity-summary">${escapeHtml(event.summary || '')}</div>
+    const usage = event.token_usage
+    const tokens = usage
+      ? `<section class="protein-activity-tokens" aria-label="LLM token usage">
+      <div class="protein-token-caption">LLM tokens · ${escapeHtml(usage.calls)} calls · reported usage only</div>
+      <div class="protein-token-grid">${[
+        ['input', 'Input (total)'],
+        ['output', 'Output'],
+        ['cached', 'Cached read'],
+        ['written', 'Cache write']
+      ]
+        .map(([key, label]) => {
+          const field = usage.fields?.[key]
+          const value =
+            field?.value == null
+              ? 'Unknown'
+              : `${field.reported < usage.calls ? '≥ ' : ''}${Number(field.value).toLocaleString('en-US')}`
+          return `<div title="${escapeHtml(`${field?.reported || 0}/${usage.calls} calls reported this field`)}"><span>${label}</span><strong>${escapeHtml(value)}</strong><small>${field?.reported || 0}/${usage.calls} reported</small></div>`
+        })
+        .join(
+          ''
+        )}<div><span>Cache hit</span><strong>${usage.hitRate == null ? 'Unknown' : `${(usage.hitRate * 100).toFixed(1)}%`}</strong><small>cached read / total input</small></div></div>
+      <small>Input includes cache reads and writes. Output includes reasoning when reported. ≥ means a partial total; missing usage is not zero.</small>
+      </section>`
+      : ''
+    return `<div class="protein-activity-summary">${escapeHtml(event.summary || '')}</div>${tokens}
       <div class="protein-activity-io-grid">
         ${renderPayloadPanel('Input', event.input_payload, eventId, 'No input captured')}
         ${renderPayloadPanel('Output', event.output_payload, eventId, outputEmptyLabel)}

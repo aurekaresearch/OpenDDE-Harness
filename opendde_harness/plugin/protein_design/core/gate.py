@@ -106,11 +106,14 @@ def evaluate_hotspot_contact_map(
     cdr3_positions: dict[str, Set[int]] | None = None,
     all_cdr_positions: dict[str, Set[int]] | None = None,
     cdr_contact_fraction_threshold: float = DEFAULT_CDR_CONTACT_FRACTION_THRESHOLD,
+    design_type: str = "antibody",
 ) -> tuple[bool, dict[str, Any]]:
     """Evaluate OpenDDE Harness's CDR/hotspot admission policy."""
     import biotite.structure as struc
     import numpy as np
 
+    if design_type not in {"antibody", "minibinder"}:
+        raise ValueError("unsupported design_type")
     if not 0.0 <= cdr_contact_fraction_threshold <= 1.0:
         raise ValueError("cdr_contact_fraction_threshold must be between 0 and 1")
     hotspot_map = _hotspot_map(hotspots)
@@ -126,11 +129,24 @@ def evaluate_hotspot_contact_map(
         "num_off_target": 0,
     }
     model = _load_structure_model(structure_path)
+    if design_type == "minibinder":
+        target_indices = _sequence_indices(model, list(target_chains or hotspot_map))
+        by_position = {(chain, index): (chain, residue) for (chain, residue), index in target_indices.items()}
+        missing = epitope_set - set(by_position)
+        if missing:
+            raise ValueError(f"configured target hotspots missing from structure: {sorted(missing)}")
+        epitope_set = {by_position[item] for item in epitope_set}
+        coverage["missed_hotspots"] = set(epitope_set)
+        coverage["hotspot_position_semantics"] = (
+            "structure_residue_id; configured hotspots use zero-based sequence order"
+        )
     binder_chain_set = {str(chain) for chain in binder_chains}
     binder_mask = _protein_atom_mask(model, binder_chain_set) & _heavy_atom_mask(model)
     binder_atoms = model[binder_mask]
     sequence_indices = _sequence_indices(model, binder_chains)
     if binder_atoms.array_length() == 0:
+        if design_type == "minibinder":
+            return False, {**coverage, "design_type": design_type, "reason": "missing_binder_chains"}
         coverage.update(
             {
                 "missing_binder_chains": sorted(binder_chain_set),
@@ -264,6 +280,23 @@ def evaluate_hotspot_contact_map(
             "cdr_contact_fraction_gate_passed": cdr_fraction_passed,
         }
     )
+    if design_type == "minibinder":
+        coverage = {
+            key: value for key, value in coverage.items() if not key.startswith(("cdr", "framework", "n_contact_"))
+        }
+        passed = bool(all_contact_pairs) and (not epitope_set or bool(contacted_hotspots))
+        coverage.update(
+            {
+                "design_type": "minibinder",
+                "reason": "interface_contacts_passed"
+                if passed
+                else "no_hotspot_contact"
+                if epitope_set
+                else "no_interface_contact",
+                "not_applicable": ["cdr_contact_fraction", "framework_contact_fraction", "cdr3_gate_passed"],
+            }
+        )
+        return passed, coverage
     return cdr3_gate_passed and cdr_fraction_passed, coverage
 
 

@@ -3526,6 +3526,12 @@ mark.content-hit-mark {
 .protein-activity-io span { padding: 2px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-size: var(--fs-xs); }
 .protein-activity-io span.is-captured { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .protein-activity-summary { padding: 0 12px 8px; color: var(--text-muted); }
+.protein-activity-tokens { padding: 12px; border-top: 1px solid var(--border); }
+.protein-token-caption { margin-bottom: 8px; color: var(--text-muted); }
+.protein-token-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 8px; }
+.protein-token-grid > div { display: flex; flex-direction: column; gap: 4px; }
+.protein-token-grid strong { font-variant-numeric: tabular-nums; }
+.protein-activity-tokens small { color: var(--text-muted); }
 .protein-activity-lazy { padding: 12px; color: var(--text-muted); font-size: var(--fs-sm); text-align: center; }
 .protein-activity-io-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border-top: 1px solid var(--border); }
 .protein-activity-payload { min-width: 0; }

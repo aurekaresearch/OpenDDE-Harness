@@ -8,6 +8,8 @@ import re
 from typing import Any
 
 from opendde_harness.memory_engine.backend import MemoryBackend
+from opendde_harness.memory_engine.skill_forge.memory_source import MemorySkillSource
+from opendde_harness.memory_engine.skill_forge.router import SkillForgeRouter
 from opendde_harness.plugin.protein_design.agents.skills import LearnedSkill
 from opendde_harness.providers import messages as msg
 
@@ -41,27 +43,37 @@ class DesignMemory:
         *,
         top_k: int = 8,
     ) -> list[LearnedSkill]:
-        hits = await self._recall(target, query, top_k=top_k)
+        if self._backend is None:
+            return []
+        source = MemorySkillSource(
+            self._backend,
+            self._agent_id,
+            app_id=self._app_id,
+            project_id=self._project_id or target,
+            memory_type="skill",
+        )
+        router = SkillForgeRouter([source], dedup_by="qualified_id")
+        hits = await router.select(f"target={target}; {query}", [], k=top_k)
         learned: list[LearnedSkill] = []
         for hit in hits:
-            metadata = hit.metadata or {}
-            if metadata.get("type") != "skill" or not hit.text.strip():
+            metadata = hit.meta or {}
+            if not hit.content.strip():
                 continue
-            if self._has_collapsed_english_prose(hit.text):
+            if self._has_collapsed_english_prose(hit.content):
                 logger.warning(
                     "Ignoring malformed learned skill %r: English word boundaries were removed during generation",
                     metadata.get("name") or metadata.get("id"),
                 )
                 continue
-            name = str(metadata.get("name") or self._frontmatter_value(hit.text, "name") or "")
-            roles_value = metadata.get("roles") or self._frontmatter_value(hit.text, "role") or "design"
+            name = str(metadata.get("name") or self._frontmatter_value(hit.content, "name") or "")
+            roles_value = metadata.get("roles") or self._frontmatter_value(hit.content, "role") or "design"
             roles = tuple(part.strip() for part in re.split(r"[,|]", str(roles_value)) if part.strip())
             learned.append(
                 LearnedSkill(
                     name=name,
-                    content=hit.text,
+                    content=hit.content,
                     roles=roles,
-                    native_id=str(metadata.get("id") or name),
+                    native_id=hit.qualified_id.split("/", 1)[1],
                     score=float(hit.score),
                 )
             )

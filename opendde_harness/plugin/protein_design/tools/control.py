@@ -102,9 +102,9 @@ class StartTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Start an antigen-antibody design task from a validated YAML path only after "
-            "the user explicitly confirms the final target, antibody binder, design, and "
-            "compute review. Refuse non-antibody binder-design requests."
+            "Start antibody design or existing mini binder optimization from a validated YAML path only after "
+            "the user explicitly confirms the final target, binder, design, and compute review. "
+            "De novo non-antibody backbone generation is not supported."
         )
 
     @property

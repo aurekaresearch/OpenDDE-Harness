@@ -489,6 +489,12 @@ class PythonProteinDesignHarness:
 
         options = dict(payload.get("options") or {})
         options["execution_mode"] = normalize_execution_mode(options.get("execution_mode"))
+        if options.get("design_type") == "minibinder":
+            checkpoint = str(options.get("checkpoint_path") or "")
+            if options["execution_mode"] == "api" or not checkpoint or "abag" in Path(checkpoint).name.lower():
+                raise ValueError("minibinder folding requires an explicit general checkpoint in local/docker mode")
+            if not Path(checkpoint).expanduser().is_file():
+                raise FileNotFoundError("minibinder checkpoint_path must exist on the compute host")
         task_output = self._task_output_path(payload)
         options["backend"] = payload.get("backend", "opendde")
         if str(options["backend"]).strip().lower() != "opendde":
@@ -543,6 +549,7 @@ class PythonProteinDesignHarness:
             source = raw_candidates[index]
             result_data = self._jsonable(result.to_dict())
             source_metadata = dict(source.get("metadata") or {})
+            source_metadata["design_type"] = options.get("design_type", "antibody")
             for key in ("parent_id", "skill_id", "status"):
                 if source.get(key) is not None:
                     source_metadata.setdefault(key, source[key])
@@ -578,17 +585,20 @@ class PythonProteinDesignHarness:
                 options,
             )
             metrics["gate_passed"] = 1.0 if gate_passed else 0.0
-            for key in (
-                "cdr_contact_fraction",
-                "framework_contact_fraction",
-            ):
+            gate_metric_names = (
+                ("total_binder_contacts", "binder_interface_residues", "coverage_ratio")
+                if options.get("design_type") == "minibinder"
+                else ("cdr_contact_fraction", "framework_contact_fraction")
+            )
+            for key in gate_metric_names:
                 value = gate_evidence.get(key)
                 if isinstance(value, (int, float)):
                     metrics[key] = float(value)
-            metrics["cdr3_gate_passed"] = 1.0 if gate_evidence.get("cdr3_gate_passed") else 0.0
-            metrics["cdr_contact_fraction_gate_passed"] = (
-                1.0 if gate_evidence.get("cdr_contact_fraction_gate_passed") else 0.0
-            )
+            if options.get("design_type") != "minibinder":
+                metrics["cdr3_gate_passed"] = 1.0 if gate_evidence.get("cdr3_gate_passed") else 0.0
+                metrics["cdr_contact_fraction_gate_passed"] = (
+                    1.0 if gate_evidence.get("cdr_contact_fraction_gate_passed") else 0.0
+                )
             source_metadata.update(
                 {
                     "gate_passed": gate_passed,
@@ -708,8 +718,11 @@ class PythonProteinDesignHarness:
                 cdr3_positions=cdr3_positions,
                 all_cdr_positions=all_cdr_positions,
                 cdr_contact_fraction_threshold=float(options.get("cdr_contact_fraction_threshold", 0.5)),
+                design_type=str(options.get("design_type", "antibody")),
             )
             coverage = self._jsonable(coverage)
+            if options.get("design_type") == "minibinder":
+                return bool(passed), coverage
             if passed:
                 coverage["reason"] = (
                     "cdr_contact_fraction_passed" if coverage.get("epitope_gate_skipped") else "contacted_hotspot"

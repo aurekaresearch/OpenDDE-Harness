@@ -12,6 +12,13 @@ from json_repair import repair_json
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
+from opendde_harness.agent.tools.use_skill import UseSkillTool
+from opendde_harness.context_engine.assembler import ContextAssembler
+from opendde_harness.context_engine.base import TurnContext
+from opendde_harness.context_engine.history_trimmer import HistoryTrimmer
+from opendde_harness.context_engine.segments.render import render_router_skills
+from opendde_harness.memory_engine.skill_forge.loader import SkillLoader
+from opendde_harness.plugin.protein_design.agents.context import WorkflowInstructions
 from opendde_harness.plugin.protein_design.agents.profiles import AgentProfile
 from opendde_harness.plugin.protein_design.agents.skills import SkillDocument
 from opendde_harness.plugin.protein_design.core.progress import (
@@ -55,27 +62,7 @@ def _assistant_message(response: Any, content: Any, tool_calls: list[dict[str, A
 _MAX_TRUNCATION_RETRIES = 2
 _MAX_OUTPUT_TOKENS = 32768
 
-_USE_SKILL_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "use_skill",
-        "description": (
-            "Load one Router-approved protein-design skill before applying its "
-            "instructions. Pass an exact skill id from the available-skill catalog."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "skill_id": {
-                    "type": "string",
-                    "description": "Exact skill id shown in the available-skill catalog.",
-                }
-            },
-            "required": ["skill_id"],
-            "additionalProperties": False,
-        },
-    },
-}
+_USE_SKILL_TOOL = UseSkillTool().to_schema()
 
 
 class StructuredSession(Protocol):
@@ -124,14 +111,14 @@ class OpenDDEHarnessStructuredSession:
         context = tool_context or ToolContext()
         started = time.perf_counter()
         input_payload = {
-            "system_prompt": self._system_message(profile, skills),
-            "prompt": prompt,
+            "system_prompt": self._system_message(profile),
+            "prompt": self._user_message(prompt, skills),
             "skills": [skill.name for skill in skills],
             "tools": self._definitions(profile, bool(skills)),
         }
         self._emit_agent(profile, input_payload, context, ProgressStatus.STARTED)
         try:
-            result = await self._run_profile(profile, prompt, skills, context, output_validator)
+            result = await self._run_profile(profile, input_payload, skills, context, output_validator)
         except Exception as exc:
             self._emit_agent(
                 profile,
@@ -155,18 +142,15 @@ class OpenDDEHarnessStructuredSession:
     async def _run_profile(
         self,
         profile: AgentProfile[T],
-        prompt: str,
+        input_payload: dict[str, Any],
         skills: Collection[SkillDocument],
         tool_context: ToolContext,
         output_validator: Callable[[T], None] | None = None,
     ) -> T:
         schema = profile.output_schema
-        messages: list[dict] = [
-            msg.system_message(self._system_message(profile, skills)),
-            msg.user_message(prompt),
-        ]
         skill_by_name = {skill.name: skill for skill in skills}
-        definitions = self._definitions(profile, bool(skill_by_name))
+        skill_loader = SkillLoader(documents=skills)
+        definitions = input_payload["tools"]
         seen_calls: set[str] = set()
         loaded_skill_ids: set[str] = set()
         tool_call_counts: dict[str, int] = {}
@@ -179,8 +163,27 @@ class OpenDDEHarnessStructuredSession:
         attempts = 0
         last_error = "empty response"
         max_tokens = int(tool_context.metadata.get("llm_max_tokens", profile.max_tokens))
+        model = str(tool_context.metadata.get("llm_model") or self._model)
+        window_getter = getattr(self._provider, "context_window", None)
+        window = window_getter() if callable(window_getter) and not inspect.iscoroutinefunction(window_getter) else None
+        window = window if type(window) is int and window > 0 else None
+        # Per invocation: concurrent speculative phases must not share mutable
+        # tool definitions, selected skills or message histories.
+        engine = ContextAssembler(
+            [WorkflowInstructions(input_payload["system_prompt"])],
+            lambda: definitions,
+            HistoryTrimmer(self._provider, model, lambda: definitions, window),
+            include_runtime_context=False,
+        )
+        assembled = await engine.assemble(
+            str(tool_context.metadata.get("task_id") or "protein-design"),
+            [],
+            turn=TurnContext(current_message=input_payload["prompt"], reserved_output=max_tokens),
+        )
+        messages = assembled.messages
         truncation_retries = 0
         while attempts < self._max_attempts:
+            await engine.validate_continuation(messages, reserved_output=max_tokens)
             # Transport failures (HTTP 429/5xx, timeouts, endpoint rotation and
             # model fallback) belong to the provider retry ladder.  Calling
             # ``chat()`` directly here used the structured-output repair budget
@@ -195,7 +198,7 @@ class OpenDDEHarnessStructuredSession:
             response = await self._provider.chat_with_retry(
                 messages=messages,
                 tools=definitions or None,
-                model=str(tool_context.metadata.get("llm_model") or self._model),
+                model=model,
                 max_tokens=max_tokens,
             )
             content = response.content or ""
@@ -253,26 +256,20 @@ class OpenDDEHarnessStructuredSession:
                             ProgressStatus.STARTED,
                         )
                         skill_id = call.arguments.get("skill_id")
-                        skill = skill_by_name.get(skill_id) if isinstance(skill_id, str) else None
-                        if key in seen_calls:
-                            result = {"ok": False, "error": f"skill {skill_id!r} was already loaded"}
-                        elif skill is None:
-                            result = {
-                                "ok": False,
-                                "error": (
-                                    f"unknown or Router-disallowed skill {skill_id!r}; "
-                                    f"choose one of {sorted(skill_by_name)}"
-                                ),
-                            }
-                        else:
-                            seen_calls.add(key)
+                        try:
+                            skill = skill_loader.load(skill_id)
+                            if skill.name in loaded_skill_ids:
+                                raise ValueError(f"skill {skill_id!r} was already loaded")
                             loaded_skill_ids.add(skill.name)
                             result = {
                                 "ok": True,
                                 "skill_id": skill.name,
-                                "skill_dir": str(skill.path),
+                                "qualified_id": skill.qualified_id,
+                                "skill_dir": str(skill.skill_dir) if skill.skill_dir else None,
                                 "instructions": skill.content,
                             }
+                        except ValueError as exc:
+                            result = {"ok": False, "error": str(exc)}
                         self._emit_tool(
                             profile,
                             call.name,
@@ -364,6 +361,9 @@ class OpenDDEHarnessStructuredSession:
                 value = json.loads(repair_json(content))
                 validated = cast(T, schema.model_validate(value))
                 selected_skill = getattr(validated, "skill_id", None)
+                if isinstance(selected_skill, str) and skill_by_name:
+                    if selected_skill not in skill_by_name or skill_by_name[selected_skill].source != "builtin":
+                        raise ValueError(f"primary skill {selected_skill!r} is not an allowed built-in skill")
                 missing_skill = (
                     selected_skill
                     if isinstance(selected_skill, str)
@@ -371,6 +371,12 @@ class OpenDDEHarnessStructuredSession:
                     and selected_skill not in loaded_skill_ids
                     else None
                 )
+                for advisory_id in getattr(validated, "applied_learned_skill_ids", ()):
+                    if advisory_id not in skill_by_name:
+                        raise ValueError(f"unknown advisory skill {advisory_id!r}")
+                    if advisory_id not in loaded_skill_ids:
+                        missing_skill = advisory_id
+                        break
                 if skill_by_name and (not loaded_skill_ids or missing_skill):
                     attempts += 1
                     last_error = (
@@ -468,47 +474,34 @@ class OpenDDEHarnessStructuredSession:
     def _system_message(
         self,
         profile: AgentProfile[T],
-        skills: Collection[SkillDocument],
     ) -> str:
-        skill_block = "\n".join(self._skill_catalog_line(skill) for skill in skills) or "(none)"
-        tool_block = json.dumps(
-            self._tool_registry.definitions(profile.allowed_tools),
-            ensure_ascii=False,
-            indent=2,
-        )
         schema_block = json.dumps(
             profile.output_schema.model_json_schema(),
             ensure_ascii=False,
+            sort_keys=True,
         )
         return (
             f"{profile.system_prompt.rstrip()}\n\n"
-            "# Available skills\n"
-            "Skill bodies are not preloaded. Before applying a skill, call "
-            "`use_skill` once with its exact id below and follow the returned "
-            "instructions. Do not claim to have used an unloaded skill.\n"
-            f"{skill_block}\n\n"
-            f"# Available tools\n{tool_block}\n\n"
             "# Output schema\nReturn one JSON object only. "
-            f"It must satisfy this JSON schema: {schema_block}"
+            f"It must satisfy this JSON schema: {schema_block}\n\n"
+            "# Skill handling\n"
+            "Skills are advertised by name and description only. Call use_skill with an exact "
+            "catalog id before applying that skill, including built-in and advisory skills. "
+            "Choose only a primary built-in skill allowed by the current Router. "
+            "Use qualified IDs for loading; final skill_id and applied_learned_skill_ids use catalog names. "
+            "Load only skills needed for this request; do not load the entire catalog."
         )
+
+    def _user_message(self, prompt: str, skills: Collection[SkillDocument]) -> str:
+        catalog = render_router_skills(
+            [skill.as_hit() for skill in sorted(skills, key=lambda skill: skill.qualified_id)]
+        )
+        if not catalog:
+            return prompt
+        return f"{prompt}\n\n# Available skill catalog\n{catalog}"
 
     def _definitions(self, profile: AgentProfile[T], has_skills: bool) -> list[dict[str, Any]]:
         definitions = self._tool_registry.definitions(profile.allowed_tools)
         if has_skills:
             definitions.append(_USE_SKILL_TOOL)
         return definitions
-
-    @staticmethod
-    def _skill_catalog_line(skill: SkillDocument) -> str:
-        description = ""
-        lines = skill.content.splitlines()
-        if lines and lines[0].strip() == "---":
-            for line in lines[1:]:
-                stripped = line.strip()
-                if stripped == "---":
-                    break
-                if stripped.startswith("description:"):
-                    description = stripped.split(":", 1)[1].strip().strip("'\"")
-                    break
-        suffix = f" — {description}" if description else ""
-        return f"- `{skill.name}`{suffix}"

@@ -29,7 +29,7 @@ from opendde_harness.context_engine.base import (
     SegmentBuilder,
     TurnContext,
 )
-from opendde_harness.context_engine.history_trimmer import HistoryTrimmer
+from opendde_harness.context_engine.history_trimmer import ContextBudgetError, HistoryTrimmer
 from opendde_harness.context_engine.segments import render
 from opendde_harness.context_engine.types import AssembledContext, TokenBudget
 from opendde_harness.providers import messages as msg
@@ -49,6 +49,8 @@ class ContextAssembler:
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         history: HistoryTrimmer,
         now_fn: Callable[[], datetime] | None = None,
+        *,
+        include_runtime_context: bool = True,
     ) -> None:
         self._builders = sorted(builders, key=lambda b: b.order)
         self.get_tool_definitions = get_tool_definitions
@@ -56,6 +58,7 @@ class ContextAssembler:
         #: that decides which session messages reach the model.
         self.history = history
         self._now_fn = now_fn or datetime.now
+        self._include_runtime_context = include_runtime_context
         # Windows already reported as holding no history, so the warning is
         # logged once per window rather than once per turn.
         self._budget_warned_for: int | None = None
@@ -184,18 +187,42 @@ class ContextAssembler:
 
     def _build_user(self, ctx: AssemblyContext) -> dict[str, Any]:
         """The single structural user message: runtime context + content."""
-        runtime_ctx = render.build_runtime_context(self._now_fn, ctx.channel, ctx.chat_id)
         user_content = render.build_user_content(
             ctx.current_message,
             ctx.media,
             can_see_images=ctx.can_see_images,
             describe_tool=ctx.describe_tool,
         )
+        if not self._include_runtime_context:
+            return msg.user_message(user_content)
+        runtime_ctx = render.build_runtime_context(self._now_fn, ctx.channel, ctx.chat_id)
         if isinstance(user_content, str):
             merged: Any = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [msg.text_block(runtime_ctx), *user_content]
         return msg.user_message(merged)
+
+    async def validate_continuation(self, messages: list[dict[str, Any]], *, reserved_output: int) -> None:
+        """Budget an in-flight tool/repair exchange without discarding its evidence.
+
+        Unlike completed conversation history, loaded instructions and intermediate
+        tool results may be prerequisites for the pending structured output. Treat
+        the complete exchange as mandatory rather than silently excerpting it.
+        """
+        window = self.history.context_window_tokens
+        if window is not None and reserved_output >= window:
+            raise ContextBudgetError("Output reservation leaves no room for the in-flight context")
+        _, outcome = await asyncio.to_thread(
+            self.history.select,
+            session_messages=[],
+            reserved_output=reserved_output,
+            build_messages=lambda _: messages,
+        )
+        if not outcome.ok:
+            raise ContextBudgetError(
+                f"In-flight context needs {outcome.estimated_tokens} tokens; "
+                f"only {outcome.max_prompt_tokens} are available after reserving output"
+            )
 
     def _budget(self, prefix: AssembledPrefix, reserved_output: int) -> TokenBudget:
         """This turn's budget, measured on the prompt this turn actually sends."""

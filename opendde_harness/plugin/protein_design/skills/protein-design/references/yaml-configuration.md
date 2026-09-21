@@ -24,7 +24,9 @@ API mode uses service-managed MSA: do not offer disabling MSA or search for loca
 
 Do not call the search tool until the user explicitly chooses option 3. The tool accepts one target chain at a time and must never receive a binder/antibody sequence. Do not ask the user to supply compute placement before search. Omit the tool's optional `compute_url` to use the configured worker pool or default endpoint; pass it only when the reviewed design already has an explicit `compute.url`. Worker ID and profile are internal placement concerns and are not MSA-tool arguments. The tool uses Protenix's public MMseqs2 service by default on the selected compute worker and returns `unpaired_msa_path`, `paired_msa_path`, `alignment_depth`, `cached`, `compute_url`, and `compute_worker_id`. Put the two paths under `target.chains.<chain_id>` and bind `compute.url` or `compute.worker_id` to the returned worker. This keeps the generated files visible to Fold. For a multichain antigen, repeat only for target chains for which the user requested MSA search. The public service is shared and rate-limited; set `MMSEQS_SERVICE_HOST_URL`, `OPENDDE_HARNESS_MSA_SERVER_MODE`, and `OPENDDE_HARNESS_MSA_SEARCH_TIMEOUT` on the compute service for a compatible private endpoint and bounded wait.
 
-### 2. Binder / antibody
+### 2. Binder type
+
+Choose `design.type: antibody` (default) or `design.type: minibinder` from the user's intent. For mini binders, follow [minibinder.md](minibinder.md): require one complete canonical chain, `chain_type: minibinder`, explicit `designable_residues`, optional `fixed_residues`, and no CDR annotations or masked residues. Research public starting sequences/structures when needed; do not replace the requested mini binder with an antibody. The antibody-specific requirements below apply only to antibody mode.
 
 - binder format (single `VHH`, single-chain `scFv`, or paired `VH/VL`) and binder chain IDs;
 - complete initial binder sequences and seed provenance;
@@ -36,7 +38,7 @@ If neither the user nor an explicitly selected example supplies a scaffold, read
 
 Framework and CDR regions belong to the binder/antibody section. Fixed residues always override every design permission.
 
-This schema is antibody-only. Every binder chain must declare `chain_type` and provide either explicit `cdr_regions` or an explicit immutable framework in `fixed_residues`. A runnable topology must be one VHH chain, one scFv chain, or exactly one VH plus one VL chain. General protein, peptide, enzyme, receptor, and other non-antibody binder configurations are rejected during validation.
+In antibody mode, every binder chain must declare `chain_type` and provide either explicit `cdr_regions` or an explicit immutable framework in `fixed_residues`. A runnable antibody topology is one VHH chain, one scFv chain, or exactly one VH plus one VL chain. Mini binder optimization is a separate supported mode; arbitrary protein design and de novo backbone generation are not implemented.
 
 ### 3. Design, scoring, and compute
 
@@ -61,7 +63,9 @@ Use `design.cycle_schedule` for ordered, inclusive, zero-based intervals overrid
 the original baseline. Use `weighted` routing for probability-based cycle selection;
 the default `agent` mode treats weights as priors. A stage map replaces all skill weights.
 
-## Schema template (not directly executable)
+## Antibody schema template (not directly executable)
+
+This template uses antibody-specific fields and skills. For mini binder configuration, use [minibinder.md](minibinder.md), not the CDR/router settings below.
 
 The following placeholders illustrate the schema; replace them with verified sequences and real paths before validation. Runnable examples are `docs/examples/crlf2_quickstart.yaml` and `docs/examples/cacng1_quickstart.yaml`; obtain their absolute paths from the context tool without requiring an example README. To inherit configured placement and folding mode, omit `compute` and `fold.execution_mode`/`fold.api_url` overrides. Explicit YAML settings override defaults. Omit `design.loss_weights` to use the built-in weights; never copy redacted display URLs into YAML.
 
@@ -240,18 +244,21 @@ mode because invalid agent ranking can fall back to objective ordering. See the
 complete reference for the current selection policy. Only `enabled` and `top_k`
 are accepted in this block.
 
-Supported router keys are exactly:
+Supported antibody router keys are:
 
 - `cdr-point-mutation`
 - `cdr-full-redesign`
 - `antibody-inverse-folding`
 - `esm2-guided-mutation`
 
+Mini binder router keys are `minibinder-point-mutation` and `minibinder-inverse-folding`; do not mix proposal skills from different design types.
+
 ## Primary fold fields
 
 | Field | Meaning |
 |---|---|
 | `fold.model` | Primary design-loop fold backend. Generated configs must use `opendde`. |
+| `fold.checkpoint_path` | Mini binder mode requires an explicit general protein checkpoint readable on the compute host and local/docker execution; antibody-specific weights and API mode are not supported for mini binders. |
 | `fold.gpus` | GPU IDs visible to the backend, usually a comma-separated string. |
 | `fold.enable_batch_inference` | Allow backend batch folding. |
 | `fold.seeds` | Structure-prediction seeds. |
@@ -321,9 +328,9 @@ If only a target name is provided, search the Web to resolve species and isoform
 | `cdr_regions` | CDR permission regions. Quoted string ranges are zero-based and inclusive, for example `"25:34,49:58,98:114"`. |
 | `designable_residues` | Optional narrower explicit mutation permission. When present, it takes precedence over `cdr_regions`. |
 | `fixed_residues` | Immutable residues. This always overrides both `cdr_regions` and `designable_residues`; quote range strings. |
-| `chain_type` | Required antibody-chain type: `VHH`, `scFv`, `VH`, or `VL`. `VK`, `VL-kappa`, and `VL-lambda` normalize to `VL`. Other values are rejected. |
+| `chain_type` | Antibody mode: `VHH`, `scFv`, `VH`, or `VL` (`VK`, `VL-kappa`, and `VL-lambda` normalize to `VL`). Mini binder mode: `minibinder`. |
 
-For VH/VL designs, provide exactly one chain of each type and keep their IDs consistent with every supplied structure. Single-chain designs must be explicitly typed as VHH or scFv. Never concatenate separate VH/VL chains into one sequence for configuration purposes.
+For VH/VL designs, provide exactly one chain of each type and keep their IDs consistent with every supplied structure. Single-chain antibody designs must be explicitly typed as VHH or scFv. Never concatenate separate VH/VL chains into one sequence for configuration purposes. Mini binders require a single chain typed as `minibinder`, explicit designable positions and no `cdr_regions` or `X` residues.
 
 ## Validation checklist
 
@@ -333,10 +340,10 @@ Before final launch review, verify:
 2. Every MSA and structure path is absolute and readable on the compute worker.
 3. Target, binder, and structure chain IDs agree.
 4. The main `fold.model` is `opendde`.
-5. Every designed binder is explicitly identified as a supported antibody topology, and each chain defines CDR regions or an immutable framework.
-6. CDR and fixed ranges are zero-based, inclusive, in bounds, and non-overlapping in effect; fixed always wins.
-7. Framework positions are not mutable.
-8. `X` occurs only in mutable bootstrap residues; generated children containing `X` cannot enter the population.
+5. Binder topology and annotations match `design.type`: antibody CDR/framework constraints or a single mini binder chain with explicit designable positions.
+6. Designable, CDR (antibody only) and fixed ranges are zero-based, inclusive and in bounds; fixed always wins.
+7. Fixed positions (including antibody frameworks) are not mutable. Mini binders use a general checkpoint in local/docker mode.
+8. Mini binder seeds contain only canonical amino acids. Antibody `X` occurs only in mutable bootstrap residues; generated children containing `X` cannot enter the population.
 9. Objective direction is correct: minimize `loss`, maximize `iptm`.
 10. Compute placement resolves to a worker advertising OpenDDE.
 11. `ddeharness protein-design validate --config <path>` succeeds.

@@ -13,16 +13,6 @@ readiness = "opendde_harness.plugin.protein_design.readiness:compute_configured"
 [plugin.contributes.tool_description_notes]
 bash = "Protein Design models run through their configured compute service; this shell does not enter that container. Use protein_design_context and the Protein Design tools for model execution."
 
-[[plugin.contributes.prompt_segments]]
-name = "identity"
-slot = "identity"
-factory = "opendde_harness.plugin.protein_design.prompts.identity:identity_line"
-
-[[plugin.contributes.prompt_segments]]
-name = "antibody_scope"
-slot = "scope"
-factory = "opendde_harness.plugin.protein_design.prompts.identity:antibody_scope"
-
 [[plugin.contributes.tools]]
 name = "protein_design_context"
 factory = "opendde_harness.plugin.protein_design.tools.control:make_context_tool"

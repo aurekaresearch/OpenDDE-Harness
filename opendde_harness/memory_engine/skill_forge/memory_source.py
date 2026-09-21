@@ -70,9 +70,16 @@ class MemorySkillSource:
         self,
         backend: "MemoryBackend",
         agent_id: str,
+        *,
+        app_id: str | None = None,
+        project_id: str | None = None,
+        memory_type: str | None = None,
     ) -> None:
         self._backend = backend
         self._agent_id = agent_id
+        self._app_id = app_id
+        self._project_id = project_id
+        self._memory_type = memory_type
 
     async def search(
         self,
@@ -87,14 +94,18 @@ class MemorySkillSource:
         # backends can ignore.
         del history
 
-        hits = await self._backend.recall(
-            query,
-            agent_id=self._agent_id,
-            top_k=k,
-        )
+        scoped = getattr(self._backend, "recall_scoped", None)
+        if self._app_id is not None and callable(scoped):
+            hits = await scoped(
+                query, agent_id=self._agent_id, top_k=k, app_id=self._app_id, project_id=self._project_id
+            )
+        else:
+            hits = await self._backend.recall(query, agent_id=self._agent_id, top_k=k)
 
         out: list[RouterHit] = []
         for m in hits:
+            if self._memory_type is not None and (m.metadata or {}).get("type") != self._memory_type:
+                continue
             native_id = (m.metadata.get("id") if m.metadata else None) or _stable_id_for(m.text)
             name = (m.metadata.get("name") if m.metadata else None) or _short_name_for(m.text)
             out.append(

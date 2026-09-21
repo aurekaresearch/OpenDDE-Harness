@@ -40,6 +40,7 @@ def fold_summary(fold: Mapping[str, Any]) -> dict[str, Any]:
     mode = fold.get("execution_mode") or "service_default"
     return {
         "execution_mode": mode,
+        "checkpoint_path": fold.get("checkpoint_path"),
         "api_url": display_url(fold.get("api_url")),
         "msa_policy": "service_managed" if mode == "api" else "task_configured",
         "use_msa": fold.get("use_msa"),
@@ -159,6 +160,12 @@ def preparation_context(
         )
     return {
         "repository_root": str(root) if root else None,
+        "design_types": ["antibody", "minibinder"],
+        "minibinder_requirements": {
+            "scope": "existing single-chain binder optimization; no de novo backbone generation",
+            "mutable_mask": "explicit designable_residues; zero-based sequence positions",
+            "fold": "local/docker with explicit general checkpoint_path on compute host; not API",
+        },
         "checked_roots": checked,
         "examples": examples,
         "compute": {**compute_summary(config), "gpus": gpu_inventory(config)},

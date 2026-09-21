@@ -314,7 +314,93 @@ function objectiveOnlyCandidate(candidateId, objectiveKey, objective) {
   }
 }
 
-function projectSelectedRun(summary, cycleSpans, progressSpans, readArtifact, limits) {
+function attachActivityUsage(events, modelSpans, readArtifact) {
+  const calls = modelSpans.map(span => {
+    const a = attributesOf(span)
+    let usage
+    if (a['llm.output.artifact_path']) {
+      try {
+        usage = parseArtifact(readArtifact(a['llm.output.artifact_path']))?.usage
+      } catch {}
+    }
+    // Normalized Harness prompt_tokens / input_tokens are fresh-only, unlike
+    // the upstream OpenAI prompt_tokens total. Add cache reads and writes once.
+    const source =
+      usage && typeof usage === 'object'
+        ? {
+            fresh: usage.prompt_tokens,
+            output: usage.completion_tokens,
+            cached: usage.cache_read_input_tokens,
+            written: usage.cache_creation_input_tokens
+          }
+        : {
+            fresh: a['llm.usage.input_tokens'],
+            output: a['llm.usage.output_tokens'],
+            cached: a['llm.usage.cache_read_tokens'],
+            written: a['llm.usage.cache_write_tokens']
+          }
+    const values = Object.fromEntries(
+      Object.entries(source).map(([key, value]) => [key, finiteNumber(value) != null && value >= 0 ? value : null])
+    )
+    // A zero-filled SDK default is not evidence that a real call used no tokens.
+    if (!Object.values(values).some(value => value > 0)) {
+      for (const key of Object.keys(values)) values[key] = null
+    }
+    values.input = [values.fresh, values.cached, values.written].every(value => value != null)
+      ? values.fresh + values.cached + values.written
+      : null
+    return {
+      start: parseTime(span.startTime),
+      end: parseTime(span.endTime),
+      values,
+      inputPath: a['llm.input.artifact_path'],
+      input: undefined
+    }
+  })
+  const starts = new Map()
+  return events.map(event => {
+    if (event.event_type !== 'agent') return event
+    const key = activityEventKey(event)
+    const end = parseTime(event.timestamp)
+    if (event.status === 'started') {
+      starts.set(key, end)
+      return event
+    }
+    if (!['completed', 'failed'].includes(event.status)) return event
+    const start = starts.get(key) ?? (finiteNumber(event.duration_ms) != null ? end - event.duration_ms : null)
+    starts.delete(key)
+    if (start == null) return event
+    const matched = calls.filter(call => {
+      if (!(call.start >= start - 1 && call.start < end && call.end > 0 && call.end <= end + 1)) return false
+      // Speculative design can overlap another agent's time window. Match the
+      // captured initial prompt too; tool history / repair messages may grow.
+      if (call.inputPath && typeof event.input_payload?.prompt === 'string') {
+        if (call.input === undefined) {
+          try {
+            call.input = parseArtifact(readArtifact(call.inputPath))
+          } catch {
+            call.input = null
+          }
+        }
+        if (!call.input) return false
+        if (call.input.prompt !== event.input_payload.prompt) return false
+        if (event.input_payload.system_prompt && call.input.systemPrompt !== event.input_payload.system_prompt)
+          return false
+      }
+      return true
+    })
+    const fields = {}
+    for (const field of ['input', 'output', 'cached', 'written']) {
+      const known = matched.map(call => call.values[field]).filter(value => value != null)
+      fields[field] = { value: known.length ? known.reduce((a, b) => a + b, 0) : null, reported: known.length }
+    }
+    const complete = matched.length > 0 && ['input', 'cached'].every(field => fields[field].reported === matched.length)
+    const hitRate = complete && fields.input.value > 0 ? fields.cached.value / fields.input.value : null
+    return { ...event, token_usage: { calls: matched.length, fields, hitRate } }
+  })
+}
+
+function projectSelectedRun(summary, cycleSpans, progressSpans, readArtifact, limits, modelSpans = []) {
   const sortedCycleSpans = cycleSpans
     .slice()
     .sort((left, right) => {
@@ -454,7 +540,7 @@ function projectSelectedRun(summary, cycleSpans, progressSpans, readArtifact, li
     .map(span => readProgressArtifact(span, readArtifact))
     .filter(Boolean)
     .sort((left, right) => parseTime(left.timestamp) - parseTime(right.timestamp))
-  const events = projectActivityEvents(allEvents, limits.events)
+  const events = projectActivityEvents(attachActivityUsage(allEvents, modelSpans, readArtifact), limits.events)
   const eventCount = events.length
 
   const structures = [...structuresByPath.values()].map(structure => ({
@@ -538,7 +624,14 @@ function projectProteinDesignRuns({
   return {
     runs,
     selectedRunId: selected.taskId,
-    run: projectSelectedRun(selected, cycleSpans, progressSpans, readArtifact, resolvedLimits)
+    run: projectSelectedRun(
+      selected,
+      cycleSpans,
+      progressSpans,
+      readArtifact,
+      resolvedLimits,
+      deduped.filter(span => span.traceId === selected.traceId && span.name === 'llm.call')
+    )
   }
 }
 

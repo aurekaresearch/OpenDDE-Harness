@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Generic, TypeVar
 
@@ -45,7 +45,7 @@ class AgentProfile(Generic[T]):
     default_skills: tuple[str, ...]
     allowed_tools: tuple[str, ...]
     max_tool_turns: int
-    max_tokens: int = 16384
+    max_tokens: int = 24576
     tool_errors_are_fatal: bool = True
     tool_call_limits: tuple[tuple[str, int], ...] = ()
 
@@ -118,3 +118,22 @@ AGENT_PROFILES: dict[AgentRole, AgentProfile[BaseModel]] = {
         max_tool_turns=1,
     ),
 }
+
+
+def profile_for(role: AgentRole, design_type: str) -> AgentProfile:
+    profile = AGENT_PROFILES[role]
+    if design_type != "minibinder":
+        return profile
+    from opendde_harness.plugin.protein_design.agents.reflection import MiniBinderReflection
+    from opendde_harness.plugin.protein_design.prompts.minibinder import COMMON, INSTRUCTIONS
+
+    # Mini binder phases consume the deterministic evidence already computed by
+    # the workflow; antibody-only QC/epitope tools are not exposed here.
+    return replace(
+        profile,
+        system_prompt=COMMON + INSTRUCTIONS[role.value],
+        output_schema=MiniBinderReflection if role == AgentRole.REFLECTION else profile.output_schema,
+        default_skills=(),
+        allowed_tools=(),
+        tool_call_limits=(),
+    )

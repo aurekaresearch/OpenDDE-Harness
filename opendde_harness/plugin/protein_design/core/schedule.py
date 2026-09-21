@@ -42,7 +42,11 @@ def apply_cycle_schedule(config: WorkflowConfig, cycle: int, defaults: dict[str,
     if index is not None and config.cycle_schedule[index].router_skill_probabilities is not None:
         weights = {
             key: weights.get(key, 0.0)
-            for key in ("cdr-point-mutation", "cdr-full-redesign", "antibody-inverse-folding", "esm2-guided-mutation")
+            for key in (
+                ("minibinder-point-mutation", "minibinder-inverse-folding")
+                if config.design_type == "minibinder"
+                else ("cdr-point-mutation", "cdr-full-redesign", "antibody-inverse-folding", "esm2-guided-mutation")
+            )
         }
     config.skill_weights = weights
     config.router_selection_strategy = values["router_selection_strategy"]

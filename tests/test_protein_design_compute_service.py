@@ -144,9 +144,13 @@ async def test_a_cpu_worker_still_runs_one_job_at_a_time() -> None:
         (None, {}, (1, None)),
         (None, {"gpus": "none"}, (0, None)),
         (None, {"device": "cpu"}, (0, None)),
-        (None, {"gpus": "1,2"}, (2, [1, 2])),
+        (None, {"gpus": "1,2"}, (1, [1])),
+        ({}, {"gpus": "0,1,2,3"}, (1, [0])),
+        ({"cp_degree": 2}, {"gpus": "1,2"}, (2, [1, 2])),
+        (None, {"gpus": "1,2", "cp_degree": 2}, (2, [1, 2])),
         ({"cp_degree": 2}, {}, (2, None)),
-        ({"fold": [2, 3]}, {"gpus": "all"}, (2, [2, 3])),
+        ({"fold": [2, 3]}, {"gpus": "all"}, (1, [2])),
+        ({"fold": [2, 3], "cp_degree": 2}, {"gpus": "all"}, (2, [2, 3])),
     ],
 )
 def test_fold_gpu_requests_follow_the_placement_then_the_fold_options(placement, options, expected) -> None:
@@ -160,6 +164,7 @@ def test_fold_gpu_requests_follow_the_placement_then_the_fold_options(placement,
 def test_leased_devices_reach_the_fold_esm_and_mpnn_payloads() -> None:
     fold = api_module.with_leased_devices("fold", {"options": {}}, [2, 3])
     assert fold["options"]["gpus"] == "2,3"
+    assert fold["options"]["cp_degree"] == 2
     assert fold["options"]["esm2_options"]["device"] == "cuda:2"
 
     pinned = api_module.with_leased_devices("fold", {"options": {"esm2_options": {"device": "cuda:0"}}}, [2])

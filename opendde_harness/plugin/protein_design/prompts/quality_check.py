@@ -16,6 +16,9 @@ reasoning concise and use normal English spacing."""
 
 QUALITY_CHECK_BATCH_PROMPT = """Assess the supplied antibody candidates.
 
+Use the configured structured output schema. Include every supplied candidate
+ID exactly once. Do not alter or recompute the objective evidence.
+
 <antibody_identification>
 {phase_analyze_summary}
 </antibody_identification>
@@ -30,5 +33,4 @@ QUALITY_CHECK_BATCH_PROMPT = """Assess the supplied antibody candidates.
 {candidates}
 </candidates>
 
-Use the configured structured output schema. Include every supplied candidate
-ID exactly once. Do not alter or recompute the objective evidence."""
+"""
