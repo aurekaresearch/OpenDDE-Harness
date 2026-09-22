@@ -1710,7 +1710,7 @@ class DesignOrchestrator:
     def _needs_quality_check(candidate: Candidate, config: WorkflowConfig) -> bool:
         if not config.quality_check_enabled:
             return False
-        if candidate.metadata.get("skill_id") == "cdr-full-redesign":
+        if candidate.metadata.get("skill_id") in {"cdr-full-redesign", "minibinder-full-redesign"}:
             return False
         iptm = candidate.metrics.get("iptm", candidate.metrics.get("i_ptm", 0.0))
         return float(iptm) >= config.quality_check_threshold
@@ -1870,8 +1870,8 @@ class DesignOrchestrator:
             triggers.append("workflow_transition")
         if (
             no_improvement_streak
-            and selected_skill_id == "cdr-full-redesign"
-            and previous_skill_id != "cdr-full-redesign"
+            and selected_skill_id in {"cdr-full-redesign", "minibinder-full-redesign"}
+            and previous_skill_id != selected_skill_id
         ):
             triggers.append("stagnation_redesign")
         passed = sum(DesignOrchestrator._passes_gate(item) for item in candidates)

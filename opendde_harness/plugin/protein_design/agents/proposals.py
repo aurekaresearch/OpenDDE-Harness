@@ -10,6 +10,7 @@ from opendde_harness.plugin.protein_design.agents.policy import (
     ESM2_GUIDED_MUTATION_SKILL,
     FULL_REDESIGN_SKILL,
     INVERSE_FOLDING_SKILL,
+    MINIBINDER_FULL_SKILL,
     MINIBINDER_INVERSE_SKILL,
     MINIBINDER_POINT_SKILL,
     POINT_MUTATION_SKILL,
@@ -75,9 +76,11 @@ class ProposalExecutor:
     ) -> list[CandidateProposal]:
         self.last_errors = []
         skill_id = route.require_selected(agent_output.skill_id)
-        skill_id = {MINIBINDER_POINT_SKILL: POINT_MUTATION_SKILL, MINIBINDER_INVERSE_SKILL: INVERSE_FOLDING_SKILL}.get(
-            skill_id, skill_id
-        )
+        skill_id = {
+            MINIBINDER_POINT_SKILL: POINT_MUTATION_SKILL,
+            MINIBINDER_INVERSE_SKILL: INVERSE_FOLDING_SKILL,
+            MINIBINDER_FULL_SKILL: FULL_REDESIGN_SKILL,
+        }.get(skill_id, skill_id)
         if skill_id in {POINT_MUTATION_SKILL, FULL_REDESIGN_SKILL}:
             proposals = []
             for index, item in enumerate(agent_output.candidates):
@@ -120,7 +123,7 @@ class ProposalExecutor:
                 for position in positions
             }
             if actual != expected or len(actual) != len(mutations):
-                raise ProposalValidationError("full redesign requires complete mutable CDR coverage exactly once")
+                raise ProposalValidationError("full redesign requires complete mutable position coverage exactly once")
         chains = self._apply_mutations(context.parent_sequences, mutations, context)
         if skill_id == POINT_MUTATION_SKILL and context.mutation_count_bounds is not None:
             count = len(self._derive_substitutions(context.parent_sequences, chains))

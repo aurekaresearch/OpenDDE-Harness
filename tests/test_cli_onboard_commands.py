@@ -743,13 +743,26 @@ def wizard_run(monkeypatch):
     monkeypatch.setattr(update, "set_plugin_config_fields", lambda name, fields: outcome["saved"].update(fields))
     monkeypatch.delenv("OPENDDE_HARNESS_COMPUTE_IMAGE", raising=False)
 
-    def run(config):
+    def run(config, scripted_answers=None):
+        if scripted_answers is not None:
+            answers[:] = scripted_answers
         monkeypatch.setattr(wizard, "_load_raw_config", lambda: config)
         step.configure_protein_design()
         assert answers == []
         return buffer.getvalue(), outcome
 
     return run
+
+
+@pytest.mark.parametrize(
+    "mode,expected", [("antibody", ["antibody"]), ("minibinder", ["minibinder"]), ("both", ["antibody", "minibinder"])]
+)
+def test_local_wizard_selects_checkpoint_modes(wizard_run, mode, expected):
+    transcript, outcome = wizard_run({}, ["local", "local", mode, True])
+    assert outcome["prepared"].design_modes == expected
+    assert outcome["saved"]["compute_docker"]["design_modes"] == expected
+    assert "opendde_abag.pt" in transcript and "opendde.pt" in transcript
+    assert outcome["prepared"].opendde_checkpoint.endswith("opendde.pt" if mode == "minibinder" else "opendde_abag.pt")
 
 
 def test_local_docker_step_prints_lifecycle_then_folding_then_weights(wizard_run):

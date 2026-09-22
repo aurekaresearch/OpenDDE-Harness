@@ -175,8 +175,6 @@ class WorkflowConfigLoader:
         if design_type not in {"antibody", "minibinder"}:
             raise ValueError("design.type must be antibody or minibinder")
         if design_type == "minibinder":
-            if design.get("bootstrap_full_redesign_cycles") or design.get("stagnation_full_redesign_threshold"):
-                raise ValueError("minibinder optimization does not support antibody full-redesign resets")
             if "cdr_contact_fraction_threshold" in design:
                 raise ValueError("CDR contact thresholds do not apply to minibinders")
         target = WorkflowConfigLoader._parse_target(data)
@@ -419,8 +417,8 @@ class WorkflowConfigLoader:
                         raise ValueError("minibinder chains must use chain_type: minibinder")
                     if item.get("cdr_regions") is not None:
                         raise ValueError("minibinders have no CDRs; use designable_residues and fixed_residues")
-                    if set(sequence) - set("ACDEFGHIKLMNPQRSTVWY"):
-                        raise ValueError("minibinder optimization requires a complete canonical amino-acid sequence")
+                    if set(sequence) - set("ACDEFGHIKLMNPQRSTVWYX"):
+                        raise ValueError("minibinder sequences require canonical amino acids or mutable X placeholders")
                     if item.get("designable_residues") is None:
                         raise ValueError("minibinder optimization requires explicit designable_residues")
                 elif item.get("cdr_regions") is None and item.get("fixed_residues") is None:
@@ -461,6 +459,10 @@ class WorkflowConfigLoader:
                 else:
                     mutable = set(range(len(sequence)))
                 mutable.difference_update(explicit)
+                if minibinder and any(
+                    residue == "X" and index not in mutable for index, residue in enumerate(sequence)
+                ):
+                    raise ValueError("minibinder X placeholders must be mutable, never fixed")
                 # Legacy antibody configs often define the immutable framework
                 # and leave the complementary CDR positions implicit.  Keep the
                 # structural CDR annotation aligned with those design permissions
@@ -539,7 +541,7 @@ class WorkflowConfigLoader:
             "esm2-guided-mutation",
         }
         if design.get("type") == "minibinder":
-            supported = {"minibinder-point-mutation", "minibinder-inverse-folding"}
+            supported = {"minibinder-point-mutation", "minibinder-full-redesign", "minibinder-inverse-folding"}
         if raw_weights is None:
             skill_weights = None
         elif isinstance(raw_weights, dict):
@@ -588,10 +590,10 @@ class WorkflowConfigLoader:
         if design.get("type") == "minibinder":
             if fold_execution_mode == "api":
                 raise ValueError(
-                    "minibinder optimization currently requires local/docker folding with an explicit general checkpoint; API model selection is not supported"
+                    "minibinder optimization requires local/docker folding with a general checkpoint; API model selection is not supported"
                 )
             checkpoint = str(fold.get("checkpoint_path") or "").strip()
-            if not checkpoint or "abag" in Path(checkpoint).name.lower():
+            if checkpoint and "abag" in Path(checkpoint).name.lower():
                 raise ValueError(
                     "minibinder optimization requires fold.checkpoint_path pointing to a general protein checkpoint, not opendde_abag.pt"
                 )

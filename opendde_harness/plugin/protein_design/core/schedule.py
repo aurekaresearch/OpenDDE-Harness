@@ -43,7 +43,7 @@ def apply_cycle_schedule(config: WorkflowConfig, cycle: int, defaults: dict[str,
         weights = {
             key: weights.get(key, 0.0)
             for key in (
-                ("minibinder-point-mutation", "minibinder-inverse-folding")
+                ("minibinder-point-mutation", "minibinder-full-redesign", "minibinder-inverse-folding")
                 if config.design_type == "minibinder"
                 else ("cdr-point-mutation", "cdr-full-redesign", "antibody-inverse-folding", "esm2-guided-mutation")
             )

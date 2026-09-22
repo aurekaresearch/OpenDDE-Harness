@@ -18,29 +18,57 @@ Omit `--task-id` to list local tasks. Status uses saved task state and the same
 worker-liveness reconciliation as the Agent's `protein_design_status` tool;
 it does not start a new computation. `--json` includes the full snapshot.
 
-## Existing mini binder optimization
+## Mini binder sequence design and optimization
 
-`design.type` (`type`) defaults to `antibody`; set it to `minibinder` to optimize
-an existing single-chain non-antibody binder. This mode does not generate new
-backbones or insert/delete residues. Supply a complete canonical sequence,
+`design.type` (`type`) defaults to `antibody`; set it to `minibinder` to design or
+optimize a fixed-length single-chain non-antibody binder. This mode does not generate
+backbone coordinates or insert/delete residues. Supply a complete or X-masked sequence,
 `chain_type: minibinder`, and explicit zero-based `designable_residues`.
 `fixed_residues` overrides the mutable mask. Do not supply `cdr_regions` or
 `cdr_contact_fraction_threshold` in this mode.
 
-Select `minibinder-point-mutation` and/or `minibinder-inverse-folding` in
+Every X must be mutable, never fixed. An all-X seed needs no initial structure:
+`minibinder-full-redesign` assigns every mutable position before the first fold.
+For example, a 6-residue test seed uses `sequence: XXXXXX` and
+`designable_residues: "0:5"`; choose a suitable actual design length for your task.
+
+With `objective: loss`, minibinders use a separate scoring formula, not the
+antibody CDR/framework objective. Fixed residues only constrain sequence edits.
+`plddt`, intra-binder `pae`, `con`, `rg`, and `dgram_cce` cover the whole binder;
+`i_pae` and `i_con` measure its target interface (restricted to configured
+hotspots when present). `i_plddt` weights binder confidence by each residue's
+maximum target-contact probability, falling back to whole-binder confidence
+when all those probabilities are zero. The existing `i_ptm` and ESM-2 terms
+remain. There is no framework-contact penalty or CDR/framework contact ratio.
+The reported formula version is `minibinder-confidence-contact8-proxy-esm2-v1`;
+its loss values should not be compared directly with antibody-mode losses.
+
+Select `minibinder-full-redesign`, `minibinder-point-mutation` and/or `minibinder-inverse-folding` in
 `router_skill_probabilities`, including schedule overrides. The default is point
 mutation. `num_mutations` is a positive integer or an inclusive range (`"1-3"`),
 defaults to 1, and must fit the mutable mask. Python enforces that budget for point
-mutation; inverse folding and terminal MPNN redesign obey the mutable mask instead.
-Inverse folding requires a successful parent structure. Antibody full-redesign
-reset settings are not supported.
+mutation; full redesign, inverse folding and terminal MPNN redesign obey the mutable mask instead.
+Inverse folding requires a successful parent structure. `bootstrap_full_redesign_cycles`
+and `stagnation_full_redesign_threshold` enable minibinder full-design resets.
 
-For mini binders, `fold.checkpoint_path` (`checkpoint_path`) must explicitly name
-a compatible general protein checkpoint on the compute host, not antibody weights
-such as `opendde_abag.pt`. It overrides the compute service's default checkpoint
-for this task and its refolds only. Local/docker execution is supported; API model
-selection is not yet supported for mini binders. YAML validation checks configuration,
-not checkpoint contents, existence on a remote worker, or scientific accuracy.
+The compute host selects `opendde_abag.pt` for antibodies and `opendde.pt` for
+mini binders. An explicit `fold.checkpoint_path` (`checkpoint_path`) overrides this selection for the
+task and its refolds; custom compute-service checkpoint paths are also preserved.
+Mini binders reject antibody (`abag`) checkpoints and require local/docker folding;
+API model selection is not supported. Worker selection checks the actual checkpoint
+on the compute host before design starts, including existence, readability and a
+nonzero size. These checks do not establish scientific suitability.
+
+Local onboarding offers antibody, minibinder, or both checkpoints and reports each
+mode separately. Shared `common/` assets are reused. To prepare both on a compute host:
+
+```bash
+ddeharness compute prepare --mode local --design-mode both
+```
+
+Use `--design-mode antibody` or `--design-mode minibinder` to prepare only that mode.
+Downloads verify published sizes and SHA256; routine readiness checks do not rehash
+multi-gigabyte weights. API mode does not require local OpenDDE checkpoints.
 
 The mini binder structure gate requires target interface contacts and contact with
 at least one configured hotspot when hotspots are present. Hotspots use zero-based
@@ -66,10 +94,10 @@ design:
 fold:
   model: opendde
   execution_mode: local
-  checkpoint_path: /replace/with/compute-host/checkpoint/opendde.pt
+  # Optional: checkpoint_path: /custom/compute-host/checkpoint/model.pt
 ```
 
-Replace the checkpoint placeholder and review MSA policy before validation.
+Prepare the general checkpoint on the compute host and review MSA policy before validation.
 This is not a runnable design or launch authorization. Start with a small
 user-approved smoke run and validate scientifically before a large campaign.
 

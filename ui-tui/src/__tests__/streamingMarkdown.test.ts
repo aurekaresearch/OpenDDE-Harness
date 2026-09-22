@@ -5,6 +5,7 @@
 import type { MarkdownTheme } from '@earendil-works/pi-tui'
 
 import { Markdown } from '@earendil-works/pi-tui'
+import { stripVTControlCharacters as stripAnsi } from 'node:util'
 import { describe, expect, it } from 'vitest'
 
 import { StreamingMarkdown } from '../components/streamingMarkdown.js'
@@ -14,6 +15,27 @@ import { buildStream, streamText } from './streams.js'
 const THEME = new Theme('dark', 3).markdownTheme()
 const WIDTH = 120
 const PAD = 1
+
+describe('code block presentation', () => {
+  it.each(['bash', 'text', ''])('hides fences and keeps indentation and the %s label', language => {
+    const text = `\`\`\`${language}\nddeharness tracing\n\`\`\`\n`
+    const lines = whole(text).map(line => stripAnsi(line).trimEnd())
+    expect(lines.some(line => line.includes('```'))).toBe(false)
+    expect(lines).toContain('   ddeharness tracing')
+    if (language) {
+      expect(lines.some(line => line.trim() === language)).toBe(true)
+    }
+    expect(mismatchesByCharacter(text)).toEqual([])
+    const streaming = new StreamingMarkdown(text, PAD, THEME)
+    streaming.finish()
+    expect(streaming.render(WIDTH)).toEqual(whole(text))
+  })
+
+  it('preserves backticks inside code content', () => {
+    const text = '~~~~text\n```literal\n~~~~\n'
+    expect(whole(text).map(line => stripAnsi(line).trimEnd())).toContain('   ```literal')
+  })
+})
 
 function whole(text: string, theme: MarkdownTheme = THEME): string[] {
   return new Markdown(text, PAD, 0, theme).render(WIDTH)

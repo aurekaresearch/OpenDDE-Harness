@@ -609,7 +609,8 @@ export class Theme {
       linkUrl: text => this.fg('dim', text),
       code: text => this.fg('label', text),
       codeBlock: text => this.fg('text', text),
-      codeBlockBorder: text => this.fg('border', text),
+      // pi-tui supplies fence markers here; retain only the language label.
+      codeBlockBorder: text => this.fg('border', text.replace(/^`{3,}/, '')),
       quote: text => this.fg('muted', text),
       quoteBorder: text => this.fg('border', text),
       hr: text => this.fg('border', text),

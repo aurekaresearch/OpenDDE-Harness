@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from opendde_harness.plugin.protein_design.agents.policy import (
     DESIGN_SKILLS,
     FULL_REDESIGN_SKILL,
+    MINIBINDER_FULL_SKILL,
     MINIBINDER_POINT_SKILL,
     MINIBINDER_SKILLS,
     POINT_MUTATION_SKILL,
@@ -54,14 +55,15 @@ from opendde_harness.plugin.protein_design.tools.agent import ToolContext
 
 def _forced_design_skill(config: WorkflowConfig, cycle: int) -> str | None:
     """Return an explicitly configured basin-reset skill, if one is due."""
+    full_skill = MINIBINDER_FULL_SKILL if config.design_type == "minibinder" else FULL_REDESIGN_SKILL
     if cycle < config.bootstrap_full_redesign_cycles:
-        return FULL_REDESIGN_SKILL
+        return full_skill
     threshold = config.stagnation_full_redesign_threshold
     streak = int(config.metadata.get("no_improvement_streak", 0))
     last_cycle = int(config.metadata.get("last_stagnation_redesign_cycle", -threshold))
     if threshold and streak >= threshold and cycle - last_cycle >= threshold:
         config.metadata["last_stagnation_redesign_cycle"] = cycle
-        return FULL_REDESIGN_SKILL
+        return full_skill
     return None
 
 
@@ -327,7 +329,12 @@ class ProteinDesignPhases:
                 existing_sequences.add(fingerprint)
             if len(proposals) >= config.candidates_per_cycle:
                 break
-            if selected_skill_id not in {POINT_MUTATION_SKILL, FULL_REDESIGN_SKILL, MINIBINDER_POINT_SKILL}:
+            if selected_skill_id not in {
+                POINT_MUTATION_SKILL,
+                FULL_REDESIGN_SKILL,
+                MINIBINDER_POINT_SKILL,
+                MINIBINDER_FULL_SKILL,
+            }:
                 break
             if attempt == 2:
                 break

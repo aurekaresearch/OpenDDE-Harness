@@ -12,7 +12,8 @@ INVERSE_FOLDING_SKILL = "antibody-inverse-folding"
 ESM2_GUIDED_MUTATION_SKILL = "esm2-guided-mutation"
 MINIBINDER_POINT_SKILL = "minibinder-point-mutation"
 MINIBINDER_INVERSE_SKILL = "minibinder-inverse-folding"
-MINIBINDER_SKILLS = (MINIBINDER_POINT_SKILL, MINIBINDER_INVERSE_SKILL)
+MINIBINDER_FULL_SKILL = "minibinder-full-redesign"
+MINIBINDER_SKILLS = (MINIBINDER_POINT_SKILL, MINIBINDER_FULL_SKILL, MINIBINDER_INVERSE_SKILL)
 
 DESIGN_SKILLS = (
     POINT_MUTATION_SKILL,
@@ -123,23 +124,34 @@ def _normalized_weights(
 
 def route_design_skills(context: DesignRouteContext) -> DesignSkillRoute:
     if context.design_type == "minibinder":
-        configured = {MINIBINDER_POINT_SKILL: 1.0, MINIBINDER_INVERSE_SKILL: 0.0}
+        configured = {MINIBINDER_POINT_SKILL: 1.0, MINIBINDER_FULL_SKILL: 0.0, MINIBINDER_INVERSE_SKILL: 0.0}
         if context.skill_weights is not None:
             unknown = set(context.skill_weights) - set(MINIBINDER_SKILLS)
             if unknown:
                 raise ValueError("unsupported minibinder skill: " + ", ".join(sorted(unknown)))
             configured.update(context.skill_weights)
-        capable = {MINIBINDER_POINT_SKILL}
+        capable = {MINIBINDER_POINT_SKILL, MINIBINDER_FULL_SKILL}
         if context.inverse_folding_available:
             capable.add(MINIBINDER_INVERSE_SKILL)
-        allowed = tuple(skill for skill in MINIBINDER_SKILLS if skill in capable and configured[skill] > 0)
-        if context.force_skill_id or not allowed:
+        bootstrap, reason = _requires_bootstrap(context)
+        masked = any("X" in sequence.upper() for sequence in context.parent_sequences.values())
+        if context.force_skill_id and context.force_skill_id not in capable:
+            raise ValueError("forced minibinder skill is unavailable")
+        if masked or (bootstrap and context.force_skill_id is None):
+            allowed = (MINIBINDER_FULL_SKILL,)
+        elif context.force_skill_id:
+            allowed = (context.force_skill_id,)
+            reason = "configured_forced_skill"
+        else:
+            allowed = tuple(skill for skill in MINIBINDER_SKILLS if skill in capable and configured[skill] > 0)
+            reason = "existing_minibinder_optimization"
+        if not allowed:
             raise ValueError("no legal minibinder optimization skill; inverse folding requires a parent structure")
         return DesignSkillRoute(
             allowed,
             _normalized_weights(allowed, configured),
-            "existing_minibinder_optimization",
-            backends={skill: "llm" if skill == MINIBINDER_POINT_SKILL else "inverse_folding" for skill in allowed},
+            reason,
+            backends={skill: "inverse_folding" if skill == MINIBINDER_INVERSE_SKILL else "llm" for skill in allowed},
         )
     configured = dict(DEFAULT_SKILL_WEIGHTS)
     if context.skill_weights is not None:

@@ -196,6 +196,16 @@ def configure_protein_design() -> None:
         default=defaults.get("execution_mode", "local"),
     )
     fold = {"execution_mode": mode}
+    design_modes = []
+    if mode == "local" and local:
+        selected_mode = ask_row(
+            t("Prepare checkpoints for:", "准备哪些设计模式的权重？"),
+            [(t("Antibody", "抗体"), "antibody"), ("Minibinder", "minibinder"), (t("Both", "两者"), "both")],
+            default="both"
+            if len(saved.get("design_modes", [])) == 2
+            else (saved.get("design_modes") or ["antibody"])[0],
+        )
+        design_modes = ["antibody", "minibinder"] if selected_mode == "both" else [selected_mode]
     if mode == "api":
         fold["api_url"] = str(defaults.get("api_url") or DEFAULT_OPENDDE_API_URL).strip().rstrip("/")
         note = (
@@ -224,6 +234,20 @@ def configure_protein_design() -> None:
                 if value and (key not in legacy or Path(value).expanduser().absolute() != legacy[key]):
                     assets[key] = str(Path(value).expanduser().absolute())
             data = Path(assets["opendde_data"]).expanduser().resolve()
+            if design_modes:
+                from opendde_harness.plugin.protein_design.core.asset_paths import DESIGN_CHECKPOINTS, checkpoint_status
+
+                selected_path = Path(assets["opendde_checkpoint"])
+                if selected_path.name in DESIGN_CHECKPOINTS.values():
+                    assets["opendde_checkpoint"] = str(data / "checkpoint" / DESIGN_CHECKPOINTS[design_modes[0]])
+                for kind, filename in DESIGN_CHECKPOINTS.items():
+                    status = checkpoint_status(data / "checkpoint" / filename, kind)
+                    chrome.caption(
+                        wizard.console,
+                        f"{kind}: {filename} — "
+                        + (t("ready", "就绪") if status["ready"] else str(status["error"]))
+                        + ("" if kind in design_modes else t(" (optional)", "（可选）")),
+                    )
             chrome.heading(wizard.console, t("Weights and code", "权重与代码"))
             for line in weights_layout(
                 root,
@@ -253,6 +277,7 @@ def configure_protein_design() -> None:
                 code_mode="checkout" if package_root else "managed",
                 port=int(saved.get("port") or 0),
                 idle_seconds=idle_seconds,
+                design_modes=design_modes,
             )
             if mode == "local":
                 settings.opendde_data = str(data)

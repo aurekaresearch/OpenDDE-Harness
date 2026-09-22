@@ -26,7 +26,7 @@ Do not call the search tool until the user explicitly chooses option 3. The tool
 
 ### 2. Binder type
 
-Choose `design.type: antibody` (default) or `design.type: minibinder` from the user's intent. For mini binders, follow [minibinder.md](minibinder.md): require one complete canonical chain, `chain_type: minibinder`, explicit `designable_residues`, optional `fixed_residues`, and no CDR annotations or masked residues. Research public starting sequences/structures when needed; do not replace the requested mini binder with an antibody. The antibody-specific requirements below apply only to antibody mode.
+Choose `design.type: antibody` (default) or `design.type: minibinder` from the user's intent. For mini binders, follow [minibinder.md](minibinder.md): require one canonical or X-masked chain of a confirmed length, `chain_type: minibinder`, explicit `designable_residues`, optional `fixed_residues`, and no CDR annotations; every X must be mutable. Research public starting sequences/structures when needed; do not replace the requested mini binder with an antibody. The antibody-specific requirements below apply only to antibody mode.
 
 - binder format (single `VHH`, single-chain `scFv`, or paired `VH/VL`) and binder chain IDs;
 - complete initial binder sequences and seed provenance;
@@ -251,7 +251,7 @@ Supported antibody router keys are:
 - `antibody-inverse-folding`
 - `esm2-guided-mutation`
 
-Mini binder router keys are `minibinder-point-mutation` and `minibinder-inverse-folding`; do not mix proposal skills from different design types.
+Mini binder router keys are `minibinder-full-redesign`, `minibinder-point-mutation` and `minibinder-inverse-folding`; do not mix proposal skills from different design types.
 
 ## Primary fold fields
 

@@ -254,7 +254,14 @@ class ComputePool:
             execution_mode=str(config.fold_options.get("execution_mode") or "") or None,
             image=str(config.fold_options.get("image") or "") or None,
             api_url=str(config.fold_options.get("api_url") or "") or None,
+            design_type=str(config.fold_options.get("design_type") or "antibody"),
+            checkpoint_path=str(config.fold_options.get("checkpoint_path") or "") or None,
         )
+        evidence = health.workers.get("backend") or {}
+        if evidence.get("checkpoint_ready") is False:
+            raise RuntimeError(
+                f"Checkpoint unavailable on compute worker: {evidence.get('checkpoint_path')}: {evidence.get('checkpoint_error') or 'missing or unreadable'}. Run ddeharness compute prepare on that host."
+            )
         return ComputeSelection(worker=worker, client=client, health=health)
 
     @staticmethod

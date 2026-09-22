@@ -453,10 +453,19 @@ def create_app(
         image: str | None = None,
         api_url: str | None = None,
         probe_external: bool = False,
+        design_type: str | None = None,
+        checkpoint_path: str | None = None,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        checkpoint_options = {
+            key: value
+            for key, value in {"design_type": design_type, "checkpoint_path": checkpoint_path}.items()
+            if value
+        }
         payload = dict(
-            await active_harness.health(backend, execution_mode, image, api_url, probe_external=probe_external)
+            await active_harness.health(
+                backend, execution_mode, image, api_url, probe_external=probe_external, **checkpoint_options
+            )
         )
         queue = jobs.queue_stats()
         if configured_token and authorization != f"Bearer {configured_token}":

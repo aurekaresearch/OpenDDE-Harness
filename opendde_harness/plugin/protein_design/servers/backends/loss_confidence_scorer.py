@@ -239,6 +239,87 @@ def _geometry_components(
     }
 
 
+def _score_minibinder_loss(
+    *,
+    full_data: Mapping[str, Any],
+    structure_path: str | Path,
+    sequences: Mapping[str, str],
+    binder_chains: Sequence[str],
+    chain_token_indices: Mapping[str, Sequence[int]],
+    iptm: float,
+    esm2_pll: float,
+    loss_weights: Mapping[str, float] | None,
+    target_hotspots: Mapping[str, Sequence[int]] | None,
+    confidence_backend: str,
+    backend_label: str,
+) -> dict[str, Any]:
+    """Score the whole binder and its target interface, independent of edit masks."""
+    binder_tokens = [token for chain in binder_chains for token in chain_token_indices[chain]]
+    target_chains = [chain for chain in sequences if chain not in binder_chains]
+    target_tokens, hotspots, scope = _resolve_hotspot_tokens(chain_token_indices, target_chains, target_hotspots)
+    if not binder_tokens or not target_tokens:
+        raise ValueError("Minibinder loss requires both binder and target residues")
+    count = sum(map(len, sequences.values()))
+    plddt = _token_plddt(full_data, count)
+    pae = np.asarray(full_data["token_pair_pae"], dtype=float).squeeze()
+    contacts = np.asarray(full_data["contact_probs"], dtype=float).squeeze()
+    if pae.shape != (count, count) or contacts.shape != pae.shape:
+        raise ValueError("PAE/contact matrices do not match token count")
+    if not np.isfinite(contacts).all() or np.any((contacts < 0) | (contacts > 1)):
+        raise ValueError("Contact probabilities must be finite and within [0, 1]")
+    symmetric_pae = (pae + pae.T) / 2.0 / 31.0
+    # A soft interface mask avoids calling mutable residues CDRs. With no
+    # predicted contact support, explicitly fall back to whole-binder confidence.
+    interface_weights = contacts[np.ix_(binder_tokens, target_tokens)].max(axis=1)
+    if interface_weights.sum() > 0:
+        interface_plddt = float(np.average(plddt[binder_tokens], weights=interface_weights))
+        confidence_scope = "contact_probability_weighted_binder"
+    else:
+        interface_plddt = _mean(plddt[binder_tokens])
+        confidence_scope = "whole_binder_no_predicted_contacts"
+    rows, columns = (target_tokens, binder_tokens) if hotspots else (binder_tokens, target_tokens)
+    geometry_positions = {chain: list(range(len(sequences[chain]))) for chain in binder_chains}
+    raw = {
+        "plddt": 1.0 - _mean(plddt[binder_tokens]),
+        "i_plddt": 1.0 - interface_plddt,
+        "pae": _mean(symmetric_pae[np.ix_(binder_tokens, binder_tokens)]),
+        "i_pae": _mean(symmetric_pae[np.ix_(binder_tokens, target_tokens)]),
+        "i_ptm": 1.0 - float(iptm),
+        "con": _binder_contact_loss(contacts, {chain: chain_token_indices[chain] for chain in binder_chains}),
+        "i_con": _top_contact_loss(contacts, rows, columns, top_k=10),
+        **_geometry_components(
+            structure_path, sequences, binder_chains, geometry_positions, contacts, chain_token_indices
+        ),
+    }
+    objective = calculate_loss_objective(raw, esm2_pll, weights=loss_weights)
+    objective.update(
+        {
+            "formula_version": "minibinder-confidence-contact8-proxy-esm2-v1",
+            "design_type": "minibinder",
+            "confidence_backend": confidence_backend,
+            "confidence_backend_label": backend_label,
+            "contact_probability_cutoff_angstrom": CONTACT_PROBABILITY_CUTOFF_ANGSTROM,
+            "contact_probability_semantics": "P(distance < 8 angstrom)",
+            "contact_loss_proxy": CONTACT_LOSS_PROXY,
+            "target_contact_scope": scope,
+            "target_hotspot_position_semantics": "one_based_sequence_position",
+            "target_hotspots_used": hotspots,
+            "target_hotspot_token_count": sum(map(len, hotspots.values())),
+            "target_objective_token_count": len(target_tokens),
+            "interface_confidence_scope": confidence_scope,
+            "geometry_scope": "whole_binder",
+            "gradient_free": True,
+        }
+    )
+    return {
+        **objective,
+        "loss_objective": objective,
+        "loss_components": raw,
+        "loss_confidence_backend": confidence_backend,
+        "loss_confidence_backend_label": backend_label,
+    }
+
+
 def score_confidence_loss(
     *,
     backend: str,
@@ -251,6 +332,7 @@ def score_confidence_loss(
     esm2_pll: float,
     loss_weights: Mapping[str, float] | None = None,
     target_hotspots: Mapping[str, Sequence[int]] | None = None,
+    design_type: str = "antibody",
 ) -> dict[str, Any]:
     """Calculate the configured loss from one fold backend's confidence data.
 
@@ -258,6 +340,8 @@ def score_confidence_loss(
     atom pLDDT, token PAE, and contact probabilities. The backend is explicit
     so metadata cannot claim that an OpenDDE score came from Protenix.
     """
+    if design_type not in {"antibody", "minibinder"}:
+        raise ValueError(f"Unsupported loss design_type: {design_type!r}")
     confidence_backend, backend_label = _resolve_confidence_backend(backend)
     full_data = _load_first_json_object(confidence_path)
     asym_id = np.asarray(full_data["token_asym_id"], dtype=int).reshape(-1)
@@ -277,6 +361,20 @@ def score_confidence_loss(
             raise ValueError(f"Confidence chain {chain} has {len(indices)} tokens; expected {len(sequences[chain])}")
 
     binder_chains = [str(chain) for chain in binder_chains]
+    if design_type == "minibinder":
+        return _score_minibinder_loss(
+            full_data=full_data,
+            structure_path=structure_path,
+            sequences=sequences,
+            binder_chains=binder_chains,
+            chain_token_indices=chain_token_indices,
+            iptm=iptm,
+            esm2_pll=esm2_pll,
+            loss_weights=loss_weights,
+            target_hotspots=target_hotspots,
+            confidence_backend=confidence_backend,
+            backend_label=backend_label,
+        )
     binder_tokens = [token for chain in binder_chains for token in chain_token_indices[chain]]
     target_chains = [chain for chain in chain_ids if chain not in binder_chains]
     target_tokens = [token for chain in target_chains for token in chain_token_indices[chain]]

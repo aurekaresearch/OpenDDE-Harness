@@ -19,6 +19,7 @@ from opendde_harness.memory_engine.skill_forge.documents import (
 )
 
 BUILTIN_PROTEIN_DESIGN_SKILLS = (
+    "minibinder-full-redesign",
     "minibinder-point-mutation",
     "minibinder-inverse-folding",
     "cdr-point-mutation",
@@ -36,6 +37,7 @@ BUILTIN_PROTEIN_DESIGN_SKILLS = (
 )
 
 _REQUIRED_FILES: dict[str, tuple[str, ...]] = {
+    "minibinder-full-redesign": ("SKILL.md",),
     "minibinder-point-mutation": ("SKILL.md",),
     "minibinder-inverse-folding": ("SKILL.md",),
     "cdr-point-mutation": ("SKILL.md", "agents/openai.yaml"),

@@ -1,6 +1,6 @@
 ---
 name: protein-design
-description: Prepare, validate, run and interpret antibody design or existing mini binder optimization tasks from YAML or user intent.
+description: Prepare, validate, run and interpret antibody design or mini binder sequence design and optimization tasks from YAML or user intent.
 metadata:
   opendde:
     always: false
@@ -10,9 +10,9 @@ metadata:
 
 ## Design scope
 
-Choose between antibody design (the default: VHH, scFv or paired VH/VL) and optimization of an existing single-chain mini binder (`design.type: minibinder`). De novo non-antibody backbone generation, enzymes and arbitrary protein design are not supported. Never relabel a mini binder as an antibody.
+Choose between antibody design (the default: VHH, scFv or paired VH/VL) and fixed-length single-chain mini binder design and optimization (`design.type: minibinder`). De novo non-antibody backbone generation, enzymes and arbitrary protein design are not supported. Never relabel a mini binder as an antibody.
 
-For mini binders, read [references/minibinder.md](references/minibinder.md) instead of antibody-framework guidance. Require a complete starting sequence and explicit mutable positions; do not invent CDR annotations. Apply the shared target preparation and launch approval steps below, substituting mini binder design/fixed regions for antibody format/CDR/framework questions. If identity is ambiguous, resolve the designed binder's type before preparing the configuration.
+For mini binders, read [references/minibinder.md](references/minibinder.md) instead of antibody-framework guidance. Accept a complete or X-masked starting sequence of a confirmed length and explicit mutable positions; every X must be mutable. Full redesign resolves X before folding; do not invent CDR annotations. Apply the shared target preparation and launch approval steps below, substituting mini binder design/fixed regions for antibody format/CDR/framework questions. If identity is ambiguous, resolve the designed binder's type before preparing the configuration.
 
 ## Read preparation context first
 

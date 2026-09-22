@@ -218,6 +218,7 @@ class CycleDesignStage(ContractModel):
                 "antibody-inverse-folding",
                 "esm2-guided-mutation",
                 "minibinder-point-mutation",
+                "minibinder-full-redesign",
                 "minibinder-inverse-folding",
             }
             unknown = sorted(set(weights) - supported)
@@ -292,7 +293,7 @@ class WorkflowConfig(ContractModel):
 
     @model_validator(mode="after")
     def validate_cycle_schedule(self) -> "WorkflowConfig":
-        mini_skills = {"minibinder-point-mutation", "minibinder-inverse-folding"}
+        mini_skills = {"minibinder-point-mutation", "minibinder-full-redesign", "minibinder-inverse-folding"}
         for weights in [self.skill_weights, *(stage.router_skill_probabilities for stage in self.cycle_schedule)]:
             if weights and (
                 (self.design_type == "minibinder" and set(weights) - mini_skills)

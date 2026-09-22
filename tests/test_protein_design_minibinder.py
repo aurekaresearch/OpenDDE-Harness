@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from opendde_harness.plugin.protein_design.agents.phases import ProteinDesignPhases
+from opendde_harness.plugin.protein_design.agents.phases import ProteinDesignPhases, _forced_design_skill
 from opendde_harness.plugin.protein_design.agents.policy import DesignRouteContext, route_design_skills
 from opendde_harness.plugin.protein_design.agents.profiles import AgentRole, profile_for
 from opendde_harness.plugin.protein_design.agents.proposals import (
@@ -57,6 +57,151 @@ def test_minibinder_permissions_are_not_cdr_annotations():
     assert config.model_validate_json(config.model_dump_json()).design_type == "minibinder"
 
 
+def masked_configuration(sequence="XXXXXX"):
+    data = configuration()
+    data["initial_binders"][0]["chains"]["B"].update(sequence=sequence, designable_residues="0:5", fixed_residues=[])
+    return data
+
+
+@pytest.mark.parametrize("sequence", ["XXXXXX", "ACXXFG"])
+def test_masked_minibinder_requires_full_redesign_even_with_inverse_structure(sequence):
+    config = WorkflowConfigLoader._normalize_config(masked_configuration(sequence))
+    selected = route_design_skills(
+        DesignRouteContext(
+            parent_sequences=config.binder_chains,
+            mutable_positions=config.mutable_positions,
+            population_size=1,
+            design_type="minibinder",
+            inverse_folding_available=True,
+            skill_weights={"minibinder-inverse-folding": 1, "minibinder-point-mutation": 0},
+        )
+    )
+    assert selected.allowed_skill_ids == ("minibinder-full-redesign",)
+    assert selected.backends == {"minibinder-full-redesign": "llm"}
+
+
+@pytest.mark.parametrize("fixed", [True, False])
+def test_masked_minibinder_rejects_immutable_x(fixed):
+    data = masked_configuration()
+    chain = data["initial_binders"][0]["chains"]["B"]
+    chain.update({"fixed_residues": [0]} if fixed else {"designable_residues": "1:5"})
+    with pytest.raises(ValueError, match="X placeholders must be mutable"):
+        WorkflowConfigLoader._normalize_config(data)
+
+
+def test_minibinder_full_redesign_resets_and_schedule():
+    data = masked_configuration()
+    data["design"].update(n_cycles=8, bootstrap_full_redesign_cycles=2, stagnation_full_redesign_threshold=3)
+    data["design"]["cycle_schedule"] = [
+        {"start_cycle": 0, "end_cycle": 0, "router_skill_probabilities": {"minibinder-full-redesign": 1}}
+    ]
+    config = WorkflowConfigLoader._normalize_config(data)
+    assert _forced_design_skill(config, 0) == "minibinder-full-redesign"
+    assert _forced_design_skill(config, 2) is None
+    config.metadata["no_improvement_streak"] = 3
+    assert _forced_design_skill(config, 3) == "minibinder-full-redesign"
+    assert _forced_design_skill(config, 4) is None
+    defaults = cycle_parameters(config)
+    apply_cycle_schedule(config, 0, defaults)
+    assert config.skill_weights["minibinder-full-redesign"] == 1
+    assert route(force_skill_id="minibinder-full-redesign").allowed_skill_ids == ("minibinder-full-redesign",)
+
+
+@pytest.mark.parametrize("invalid", ["missing", "duplicate", "fixed", "unknown", "length"])
+def test_minibinder_full_redesign_rejects_invalid_assignments(invalid):
+    context = ProposalContext("seed", {"B": "AXXXXG"}, {"B": [1, 2, 3, 4]}, None, 1)
+    mutations = [["B", i, aa] for i, aa in zip(range(1, 5), "CDEF")]
+    if invalid == "missing":
+        mutations.pop()
+    elif invalid == "duplicate":
+        mutations.append(mutations[0])
+    elif invalid == "fixed":
+        mutations.append(["B", 0, "W"])
+    elif invalid == "unknown":
+        mutations[0][2] = "X"
+    else:
+        mutations[0][2] = "+A"
+    output = DesignAgentOutput(
+        skill_id="minibinder-full-redesign", candidates=[{"candidate_id": "child", "mutations": mutations}]
+    )
+    with pytest.raises(ProposalValidationError):
+        asyncio.run(ProposalExecutor(None).execute(output, route(force_skill_id="minibinder-full-redesign"), context))
+
+
+def test_minibinder_full_design_materializes_seed_and_repairs_missing_positions():
+    async def run():
+        from opendde_harness.plugin.protein_design.core.constants import is_materialized
+        from opendde_harness.plugin.protein_design.core.orchestrator import DesignOrchestrator
+
+        config = WorkflowConfigLoader._normalize_config(masked_configuration())
+        assert not is_materialized(config.initial_candidates[0])
+        orchestrator = object.__new__(DesignOrchestrator)
+        orchestrator._fold_cycle = AsyncMock(side_effect=AssertionError("masked seed must not fold"))
+        await orchestrator._bootstrap_initial_fold(
+            None, "test", config, stop_event=asyncio.Event(), population=None, working_parent=None
+        )
+        orchestrator._fold_cycle.assert_not_awaited()
+        partial = DesignAgentOutput(
+            skill_id="minibinder-full-redesign", candidates=[{"candidate_id": "bad", "mutations": [["B", 0, "A"]]}]
+        )
+        complete = DesignAgentOutput(
+            skill_id="minibinder-full-redesign",
+            candidates=[{"candidate_id": "good", "mutations": [["B", i, aa] for i, aa in enumerate("ACDEFG")]}],
+        )
+        session = SimpleNamespace(run=AsyncMock(side_effect=[partial, complete]))
+        phases = ProteinDesignPhases(session, SimpleNamespace(), DesignMemory(None, agent_id="test"))
+        result = await phases.design_cycle(
+            config,
+            0,
+            AnalyzeAgentOutput(downstream_header="Masked seed; no structure"),
+            config.initial_candidates,
+            None,
+        )
+        assert session.run.await_count == 2
+        assert result.fold_candidates[0]["sequence"] == "ACDEFG"
+        assert is_materialized({"sequence": result.fold_candidates[0]["sequence"]})
+        assert result.fold_candidates[0]["chains"]["A"] == config.target_chains["A"]
+        advertised = session.run.call_args_list[0].kwargs["skills"]
+        assert any(skill.name == "minibinder-full-redesign" for skill in advertised)
+        assert route().allowed_skill_ids == ("minibinder-point-mutation",)
+
+    asyncio.run(run())
+
+
+def test_full_minibinder_design_preserves_fixed_residues_and_ignores_point_budget():
+    context = ProposalContext("seed", {"B": "AXXXXG"}, {"B": [1, 2, 3, 4]}, None, 1, mutation_count_bounds=(1, 1))
+    output = DesignAgentOutput(
+        skill_id="minibinder-full-redesign",
+        candidates=[{"candidate_id": "child", "mutations": [["B", i, aa] for i, aa in zip(range(1, 5), "CDEF")]}],
+    )
+    result = asyncio.run(
+        ProposalExecutor(None).execute(output, route(force_skill_id="minibinder-full-redesign"), context)
+    )
+    assert result[0].chains == {"B": "ACDEFG"}
+
+
+def test_minibinder_redesign_uses_shared_qc_and_memory_transition_policy():
+    from opendde_harness.plugin.protein_design.core.orchestrator import DesignOrchestrator
+
+    config = WorkflowConfigLoader._normalize_config(masked_configuration())
+    candidate = Candidate(
+        candidate_id="child",
+        sequence="ACDEFG",
+        metrics={"iptm": 0.99},
+        metadata={"skill_id": "minibinder-full-redesign"},
+    )
+    assert not DesignOrchestrator._needs_quality_check(candidate, config)
+    triggers = DesignOrchestrator._case_triggers(
+        should_reflect=False,
+        global_best_improved=False,
+        previous_skill_id="minibinder-point-mutation",
+        selected_skill_id="minibinder-full-redesign",
+        no_improvement_streak=3,
+        candidates=[],
+    )
+    assert "stagnation_redesign" in triggers
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -75,14 +220,20 @@ def test_invalid_minibinder_input_is_rejected(field, value):
         WorkflowConfigLoader._normalize_config(data)
 
 
-@pytest.mark.parametrize(
-    "fold", [{"execution_mode": "api"}, {"checkpoint_path": "opendde_abag.pt"}, {"execution_mode": "local"}]
-)
-def test_minibinder_requires_explicit_general_checkpoint(fold):
+@pytest.mark.parametrize("fold", [{"execution_mode": "api"}, {"checkpoint_path": "opendde_abag.pt"}])
+def test_minibinder_rejects_api_and_antibody_checkpoint(fold):
     data = configuration()
     data["fold"] = fold
     with pytest.raises(ValueError, match="checkpoint"):
         WorkflowConfigLoader._normalize_config(data)
+
+
+def test_minibinder_checkpoint_default_is_resolved_on_compute_host():
+    data = configuration()
+    data["fold"] = {"execution_mode": "local"}
+    config = WorkflowConfigLoader._normalize_config(data)
+    assert not config.fold_options.get("checkpoint_path")
+    assert config.fold_options["design_type"] == "minibinder"
 
 
 def test_antibody_default_and_minibinder_schedule_are_isolated():
@@ -95,7 +246,11 @@ def test_antibody_default_and_minibinder_schedule_are_isolated():
     config = WorkflowConfigLoader._normalize_config(data)
     defaults = cycle_parameters(config)
     apply_cycle_schedule(config, 0, defaults)
-    assert set(config.skill_weights) == {"minibinder-point-mutation", "minibinder-inverse-folding"}
+    assert set(config.skill_weights) == {
+        "minibinder-point-mutation",
+        "minibinder-full-redesign",
+        "minibinder-inverse-folding",
+    }
     data["design"]["cycle_schedule"][0]["router_skill_probabilities"] = {"cdr-point-mutation": 1}
     with pytest.raises(ValueError, match="design.type"):
         WorkflowConfigLoader._normalize_config(data)

@@ -162,7 +162,7 @@ def preparation_context(
         "repository_root": str(root) if root else None,
         "design_types": ["antibody", "minibinder"],
         "minibinder_requirements": {
-            "scope": "existing single-chain binder optimization; no de novo backbone generation",
+            "scope": "fixed-length single-chain sequence design from mutable X placeholders or existing sequences; no de novo backbone generation",
             "mutable_mask": "explicit designable_residues; zero-based sequence positions",
             "fold": "local/docker with explicit general checkpoint_path on compute host; not API",
         },
