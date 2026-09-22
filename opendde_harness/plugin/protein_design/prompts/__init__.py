@@ -1,7 +1,7 @@
 """Prompt templates for OpenDDE Harness protein-design agents."""
 
 from opendde_harness.plugin.protein_design.prompts.analyze import ANALYZE_REPORT_PROMPT, ANALYZE_SYSTEM_PROMPT
-from opendde_harness.plugin.protein_design.prompts.design import DESIGN_PROMPT, DESIGN_SYSTEM_PROMPT
+from opendde_harness.plugin.protein_design.prompts.antibody_design import DESIGN_PROMPT, DESIGN_SYSTEM_PROMPT
 from opendde_harness.plugin.protein_design.prompts.parent_selection import (
     PARENT_SELECTION_PROMPT,
     PARENT_SELECTION_SYSTEM_PROMPT,

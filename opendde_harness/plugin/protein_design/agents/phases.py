@@ -4,20 +4,32 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
-from opendde_harness.plugin.protein_design.agents.profiles import AGENT_PROFILES, AgentRole
-from opendde_harness.plugin.protein_design.agents.proposals import ProposalContext, ProposalExecutor
-from opendde_harness.plugin.protein_design.agents.reflection import ReflectOutput
-from opendde_harness.plugin.protein_design.agents.router import (
+from opendde_harness.plugin.protein_design.agents.policy import (
     DESIGN_SKILLS,
     FULL_REDESIGN_SKILL,
+    MINIBINDER_FULL_SKILL,
+    MINIBINDER_POINT_SKILL,
+    MINIBINDER_SKILLS,
     POINT_MUTATION_SKILL,
     DesignRouteContext,
     route_design_skills,
     sample_design_skill,
 )
+from opendde_harness.plugin.protein_design.agents.profiles import AgentRole, profile_for
+from opendde_harness.plugin.protein_design.agents.prompt_context import (
+    bounded_design_memories,
+    compact_gate_feedback,
+    context_json,
+    design_population,
+    minibinder_prompt,
+    quality_candidates,
+    reflection_candidates,
+)
+from opendde_harness.plugin.protein_design.agents.proposals import ProposalContext, ProposalExecutor
+from opendde_harness.plugin.protein_design.agents.reflection import ReflectOutput
 from opendde_harness.plugin.protein_design.agents.session import StructuredSession
 from opendde_harness.plugin.protein_design.agents.skills import ProteinDesignSkillCatalog
 from opendde_harness.plugin.protein_design.core.contracts import (
@@ -37,19 +49,21 @@ from opendde_harness.plugin.protein_design.prompts import (
     QUALITY_CHECK_BATCH_PROMPT,
     REFLECT_ANALYSIS_PROMPT,
 )
+from opendde_harness.plugin.protein_design.prompts.antibody_design import DESIGN_TASK_CONTEXT
 from opendde_harness.plugin.protein_design.tools.agent import ToolContext
 
 
 def _forced_design_skill(config: WorkflowConfig, cycle: int) -> str | None:
     """Return an explicitly configured basin-reset skill, if one is due."""
+    full_skill = MINIBINDER_FULL_SKILL if config.design_type == "minibinder" else FULL_REDESIGN_SKILL
     if cycle < config.bootstrap_full_redesign_cycles:
-        return FULL_REDESIGN_SKILL
+        return full_skill
     threshold = config.stagnation_full_redesign_threshold
     streak = int(config.metadata.get("no_improvement_streak", 0))
     last_cycle = int(config.metadata.get("last_stagnation_redesign_cycle", -threshold))
     if threshold and streak >= threshold and cycle - last_cycle >= threshold:
         config.metadata["last_stagnation_redesign_cycle"] = cycle
-        return FULL_REDESIGN_SKILL
+        return full_skill
     return None
 
 
@@ -80,7 +94,7 @@ class ProteinDesignPhases:
     async def analyze_once(self, config: WorkflowConfig) -> AnalyzeAgentOutput:
         prompt = ANALYZE_REPORT_PROMPT.format(
             target_name=config.target,
-            target_sequence=config.target_chains,
+            target_sequence=context_json(config.target_chains),
             target_length=len(config.target_sequence),
             hotspots=config.fold_options.get("target_hotspots", config.hotspots),
             binder_name=self._initial_parent(config).get("candidate_id", "initial_binder"),
@@ -89,7 +103,9 @@ class ProteinDesignPhases:
             binder_fixed_residues=config.fixed_residues,
             binder_cdr_regions=config.cdr_regions,
         )
-        profile = AGENT_PROFILES[AgentRole.ANALYZE]
+        if config.design_type == "minibinder":
+            prompt = minibinder_prompt(config, parent=self._initial_parent(config))
+        profile = profile_for(AgentRole.ANALYZE, config.design_type)
         output = await self._session.run(
             profile,
             prompt,
@@ -139,7 +155,13 @@ class ProteinDesignPhases:
                 "No reflection feedback is available yet.",
             ),
         )
-        profile = AGENT_PROFILES[AgentRole.PARENT_SELECTION]
+        if config.design_type == "minibinder":
+            prompt = minibinder_prompt(
+                config,
+                candidates=[item.model_dump(mode="json") for item in ordered],
+                reflection=config.metadata.get("reflection"),
+            )
+        profile = profile_for(AgentRole.PARENT_SELECTION, config.design_type)
         try:
             output = await self._session.run(
                 profile,
@@ -178,8 +200,11 @@ class ProteinDesignPhases:
     ) -> DesignCycleResult:
         parent = parents[0] if parents else self._initial_parent(config)
         chains = self._parent_chains(parent)
-        query = f"cycle={cycle}; best={best.model_dump() if best else None}"
-        memories = await self._memory.retrieve(config.target, query)
+        # Keyword recall needs reusable design concepts, not a serialized fold
+        # result (sequences, paths and contact arrays can overwhelm the index).
+        region = "binder interface" if config.design_type == "minibinder" else "antibody CDR"
+        query = f"{region} optimization {config.objective_key[:64]} hotspot contact gate mutation lessons"
+        memories = bounded_design_memories(await self._memory.retrieve(config.target, query))
         learned = await self._memory.retrieve_skills(config.target, query)
         catalog = self._catalog.overlay_learned(learned)
         learned_names = tuple(
@@ -189,13 +214,17 @@ class ProteinDesignPhases:
         )
         route = route_design_skills(
             DesignRouteContext(
+                design_type=config.design_type,
                 parent_sequences=chains,
                 mutable_positions=config.mutable_positions,
                 population_size=int(config.metadata.get("population_size", len(parents))),
                 inverse_folding_available=(bool(parent.get("structure_path") or config.initial_structure_path)),
                 esm2_available=config.esm2_available,
                 skill_weights=(
-                    {key: config.skill_weights.get(key, 0.0) for key in DESIGN_SKILLS}
+                    {
+                        key: config.skill_weights.get(key, 0.0)
+                        for key in (MINIBINDER_SKILLS if config.design_type == "minibinder" else DESIGN_SKILLS)
+                    }
                     if config.router_selection_strategy == "weighted" and config.skill_weights is not None
                     else config.skill_weights
                 ),
@@ -204,42 +233,53 @@ class ProteinDesignPhases:
         )
         if config.router_selection_strategy == "weighted":
             route = sample_design_skill(route, seed=config.seed, cycle=cycle)
+        gate_feedback = compact_gate_feedback(config.metadata.get("gate_feedback", "not available"))
         prompt = DESIGN_PROMPT.format(
             target_name=config.target,
-            target_sequence=config.target_chains,
+            target_sequence=context_json(config.target_chains),
             target_length=len(config.target_sequence),
-            hotspots=config.fold_options.get("target_hotspots", config.hotspots),
-            binder_chain_ids=list(chains),
-            parent_binder_sequence=chains,
+            hotspots=context_json(config.fold_options.get("target_hotspots", config.hotspots)),
+            binder_chain_ids=context_json(sorted(chains)),
+            parent_binder_sequence=context_json(chains),
             parent_binder_length=sum(len(value) for value in chains.values()),
             parent_structure_path=parent.get("structure_path") or config.initial_structure_path,
             parent_iptm=self._metric(best, "iptm"),
             parent_plddt=self._metric(best, "plddt"),
             parent_ipsae=self._metric(best, "ipsae"),
             parent_ranking_score=best.objective if best else None,
-            metric_context=best.metrics if best else {},
-            mutable_positions_formatted=dict(config.mutable_positions),
-            antibody_population_info=parents,
+            metric_context=context_json(best.metrics if best else {}),
+            mutable_positions_formatted=context_json(config.mutable_positions),
+            antibody_population_info=context_json(design_population(parents, parent, gate_feedback)),
             parent_selection_mode="python_deterministic",
             parent_selection_guidance="Python selected the parent; do not replace it.",
             phase_analyze_summary=analysis.downstream_header,
-            cdr_contact_gate_feedback=config.metadata.get("gate_feedback", "not available"),
+            cdr_contact_gate_feedback=context_json(gate_feedback),
             design_skill_route=route.prompt_block(),
             no_improvement_streak=config.metadata.get("no_improvement_streak", 0),
             stagnation_guidance=config.metadata.get("stagnation_guidance", "Use current evidence."),
             long_term_memory_context="\n".join(memories) or "none",
-            learned_skill_context=(
-                "Retrieved advisory skills: " + ", ".join(learned_names)
-                if learned_names
-                else "No relevant learned design skills were retrieved."
-            ),
-            feedback_summary=config.metadata.get("reflection", "none"),
-            quality_check_summary=config.metadata.get("quality", "none"),
+            feedback_summary=context_json(config.metadata.get("reflection", "none")),
+            quality_check_summary=context_json(config.metadata.get("quality", "none")),
             num_sequences=config.candidates_per_cycle,
             cycle_num=cycle,
             num_mutations_instruction=config.mutation_count_instruction,
         )
-        profile = AGENT_PROFILES[AgentRole.DESIGN]
+        if config.design_type == "minibinder":
+            prompt = minibinder_prompt(
+                config,
+                parent=parent,
+                analysis=analysis.downstream_header,
+                structure_path=parent.get("structure_path") or config.initial_structure_path,
+                route=route.prompt_block(),
+                candidate_count=config.candidates_per_cycle,
+                mutation_budget=config.mutation_count_bounds,
+                cycle=cycle,
+                population=parents,
+                reflection=config.metadata.get("reflection"),
+                gate_feedback=config.metadata.get("gate_feedback"),
+                memories=memories,
+            )
+        profile = self._design_profile(config)
         skill_names = route.allowed_skill_ids
         output = await self._session.run(
             profile,
@@ -267,6 +307,7 @@ class ProteinDesignPhases:
             candidate_count=config.candidates_per_cycle,
             cycle=cycle,
             placement=config.placement,
+            mutation_count_bounds=config.mutation_count_bounds,
         )
         selected_skill_id = output.skill_id
         proposals = []
@@ -288,7 +329,12 @@ class ProteinDesignPhases:
                 existing_sequences.add(fingerprint)
             if len(proposals) >= config.candidates_per_cycle:
                 break
-            if selected_skill_id not in {POINT_MUTATION_SKILL, FULL_REDESIGN_SKILL}:
+            if selected_skill_id not in {
+                POINT_MUTATION_SKILL,
+                FULL_REDESIGN_SKILL,
+                MINIBINDER_POINT_SKILL,
+                MINIBINDER_FULL_SKILL,
+            }:
                 break
             if attempt == 2:
                 break
@@ -335,6 +381,7 @@ class ProteinDesignPhases:
                     "chains": {**config.target_chains, **proposal.chains},
                     "metadata": {
                         **proposal.metadata,
+                        "design_type": config.design_type,
                         "parent_id": proposal.parent_id,
                         "skill_id": selected_skill_id,
                         "applied_learned_skill_ids": list(applied_learned),
@@ -375,15 +422,38 @@ class ProteinDesignPhases:
             "output_dir": config.fold_options.get("output_dir"),
         }
         try:
-            objective = await self._compute.developability(payload)
+            objective = (
+                {
+                    "available": False,
+                    "reason": "antibody developability tools are not applicable to minibinders",
+                    "results": {},
+                }
+                if config.design_type == "minibinder"
+                else await self._compute.developability(payload)
+            )
         except Exception as exc:
             objective = {"available": False, "error": str(exc), "results": []}
+        summaries = quality_candidates(payload["candidates"], minibinder=config.design_type == "minibinder")
         prompt = QUALITY_CHECK_BATCH_PROMPT.format(
             phase_analyze_summary=analysis.downstream_header,
-            objective_tool_results=json.dumps(objective, ensure_ascii=False, default=str),
-            candidates=json.dumps(payload["candidates"], ensure_ascii=False, default=str),
+            objective_tool_results=context_json(objective),
+            candidates=context_json(summaries),
         )
-        profile = AGENT_PROFILES[AgentRole.QUALITY]
+        if config.design_type == "minibinder":
+            prompt = json.dumps(
+                {
+                    "instruction": "Assess every supplied candidate ID exactly once. Missing evidence is unknown; "
+                    "omitted execution records are not evidence of failure.",
+                    "design_type": "minibinder",
+                    "objective_key": config.objective_key,
+                    "minimize": config.minimize,
+                    "developability": json.loads(context_json(objective)),
+                    "candidates": json.loads(context_json(summaries)),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        profile = profile_for(AgentRole.QUALITY, config.design_type)
         output = await self._session.run(
             profile,
             prompt,
@@ -407,6 +477,8 @@ class ProteinDesignPhases:
         # Agent decision so post-filter never has to infer or recompute it.
         for candidate in candidates:
             candidate.metadata["developability_evidence"] = dict(objective_results.get(candidate.candidate_id) or {})
+            if config.design_type == "minibinder":
+                candidate.metadata["developability_evidence"] = {"available": False, "reason": objective["reason"]}
             decision = output.results.get(candidate.candidate_id)
             if decision is not None:
                 candidate.metadata["quality_check"] = decision.model_dump(mode="json")
@@ -423,13 +495,16 @@ class ProteinDesignPhases:
     ) -> ReflectOutput:
         parent = best or (candidates[0] if candidates else None)
         structure_paths = [item.structure_path for item in candidates if item.structure_path]
+        summaries = reflection_candidates(
+            [item.model_dump(mode="json") for item in candidates], minibinder=config.design_type == "minibinder"
+        )
         prompt = REFLECT_ANALYSIS_PROMPT.format(
             target_name=config.target,
             target_sequence=config.target_sequence,
             target_length=len(config.target_sequence),
-            hotspots=config.hotspots,
-            quality_check_summary=quality.model_dump() if quality else "unavailable",
-            trajectory_summary=config.metadata.get("trajectory_summary", "unavailable"),
+            hotspots=context_json(config.hotspots),
+            quality_check_summary=context_json(quality.model_dump() if quality else "unavailable"),
+            trajectory_summary=context_json(config.metadata.get("trajectory_summary", "unavailable")),
             cycle_num=cycle,
             parent_name=parent.candidate_id if parent else "none",
             parent_backend=config.fold_backend,
@@ -438,18 +513,27 @@ class ProteinDesignPhases:
             parent_plddt=self._metric(parent, "plddt"),
             parent_ranking_score=parent.objective if parent else None,
             parent_loglikelihood=self._metric(parent, "loglikelihood"),
-            parent_metric_context=parent.metrics if parent else {},
-            fold_results_table=json.dumps([item.model_dump() for item in candidates], default=str),
+            parent_metric_context=context_json(parent.metrics if parent else {}),
+            fold_results_table=context_json(summaries),
             phase_analyze_summary=analysis.downstream_header,
             candidates_json_path=config.metadata.get("candidates_json_path", "in-memory"),
             objective_key=config.objective_key,
             minimize=config.minimize,
-            binder_chain_ids=list(config.binder_chains),
-            target_chain_ids=config.target_chain_ids,
-            structure_path_catalog=structure_paths,
-            epitope_analysis=config.metadata.get("epitope_analysis", "unavailable"),
+            binder_chain_ids=context_json(sorted(config.binder_chains)),
+            target_chain_ids=context_json(config.target_chain_ids),
+            structure_path_catalog=context_json(structure_paths),
+            epitope_analysis=context_json(config.metadata.get("epitope_analysis", "unavailable")),
         )
-        profile = AGENT_PROFILES[AgentRole.REFLECTION]
+        if config.design_type == "minibinder":
+            prompt = minibinder_prompt(
+                config,
+                cycle=cycle,
+                candidates=summaries,
+                analysis=analysis.model_dump(),
+                quality=quality.model_dump() if quality else None,
+                trajectory=config.metadata.get("trajectory_summary"),
+            )
+        profile = profile_for(AgentRole.REFLECTION, config.design_type)
         return await self._session.run(
             profile,
             prompt,
@@ -476,10 +560,8 @@ class ProteinDesignPhases:
                 "target": config.target,
                 "objective_key": config.objective_key,
                 "minimize": config.minimize,
-                "top_k": min(config.post_filter_top_k, len(candidates)),
                 "analysis": analysis.model_dump(mode="json"),
                 "cdr_regions": config.cdr_regions,
-                "rank_count": len(candidates),
                 "metric_definitions": {
                     "iptm": "Interface confidence, 0-1; higher is generally better, not measured affinity.",
                     "ptm": "Global fold confidence, 0-1; higher is generally better.",
@@ -492,11 +574,24 @@ class ProteinDesignPhases:
                     "loglikelihood": "Sequence-model compatibility; higher is generally better for comparable sequences.",
                     "objective": "Search objective only; direction is given by minimize. Do not let it dictate final order.",
                 },
+                "top_k": min(config.post_filter_top_k, len(candidates)),
+                "rank_count": len(candidates),
                 "candidate_evidence": [self._post_filter_evidence(item, recurring_offenders) for item in candidates],
             },
             ensure_ascii=False,
+            separators=(",", ":"),
         )
-        profile = AGENT_PROFILES[AgentRole.POST_FILTER]
+        if config.design_type == "minibinder":
+            prompt = minibinder_prompt(
+                config,
+                top_k=min(config.post_filter_top_k, len(candidates)),
+                rank_count=len(candidates),
+                candidate_evidence=[
+                    self._post_filter_evidence(item, recurring_offenders, design_type=config.design_type)
+                    for item in candidates
+                ],
+            )
+        profile = profile_for(AgentRole.POST_FILTER, config.design_type)
         candidate_ids = {candidate.candidate_id for candidate in candidates}
         return await self._session.run(
             profile,
@@ -514,7 +609,9 @@ class ProteinDesignPhases:
         )
 
     @staticmethod
-    def _post_filter_evidence(candidate: Candidate, recurring_offenders: list[str]) -> dict[str, Any]:
+    def _post_filter_evidence(
+        candidate: Candidate, recurring_offenders: list[str], *, design_type: str = "antibody"
+    ) -> dict[str, Any]:
         metrics = candidate.metrics
         metadata = candidate.metadata
         gate = metadata.get("gate_evidence")
@@ -540,7 +637,7 @@ class ProteinDesignPhases:
             for name in metric_names
             for value in [metrics.get(name)]
         }
-        return {
+        evidence = {
             "candidate_id": candidate.candidate_id,
             "sequence": candidate.sequence,
             "objective": candidate.objective,
@@ -569,6 +666,21 @@ class ProteinDesignPhases:
             "structure_path": candidate.structure_path,
             "missing_fields": [name for name, value in supplied.items() if value is None],
         }
+        if design_type == "minibinder":
+            for name in ("cdr_contact_fraction", "framework_contact_fraction"):
+                evidence["refold_metrics"].pop(name, None)
+                evidence["interface"].pop(name, None)
+                if name in evidence["missing_fields"]:
+                    evidence["missing_fields"].remove(name)
+            evidence["interface"].pop("cdr3_target_contacts", None)
+            evidence["interface"].update(
+                {
+                    name: gate.get(name)
+                    for name in ("total_binder_contacts", "binder_interface_residues", "coverage_ratio")
+                }
+            )
+            evidence["not_applicable"] = ["cdr_contact_fraction", "framework_contact_fraction", "cdr3_target_contacts"]
+        return evidence
 
     @staticmethod
     def _tool_metadata(config: WorkflowConfig, **values: Any) -> dict[str, Any]:
@@ -586,6 +698,26 @@ class ProteinDesignPhases:
         if config.llm_max_tokens is not None:
             metadata["llm_max_tokens"] = config.llm_max_tokens
         return metadata
+
+    @classmethod
+    def _design_profile(cls, config: WorkflowConfig):
+        profile = profile_for(AgentRole.DESIGN, config.design_type)
+        if config.design_type == "minibinder":
+            return profile
+        # Derive task constants from configuration, never the current parent,
+        # cycle number, Router choice, reflection, or retrieved memories.
+        task_context = DESIGN_TASK_CONTEXT.format(
+            target_name=context_json(config.target),
+            target_sequence=context_json(config.target_chains or config.target_sequence),
+            target_length=len(config.target_sequence),
+            hotspots=context_json(config.fold_options.get("target_hotspots", config.hotspots)),
+            binder_chain_ids=context_json(sorted(cls._parent_chains(cls._initial_parent(config)))),
+            mutable_positions_formatted=context_json(config.mutable_positions),
+            fixed_residues=context_json(config.fixed_residues),
+            objective_key=config.objective_key,
+            minimize=context_json(config.minimize),
+        )
+        return replace(profile, system_prompt=profile.system_prompt.rstrip() + "\n\n" + task_context.strip())
 
     @staticmethod
     def _initial_parent(config: WorkflowConfig) -> dict[str, Any]:

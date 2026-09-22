@@ -1,4 +1,4 @@
-"""CLI commands for validating and launching protein-design tasks."""
+"""CLI commands for validating, launching and inspecting protein-design tasks."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from opendde_harness.plugin.protein_design.core.preparation import (
 from opendde_harness.plugin.protein_design.core.runtime import WorkflowConfigLoader
 
 protein_design_app = typer.Typer(
-    help="Validate and launch detached protein-design tasks.",
+    help="Validate, launch and inspect detached protein-design tasks.",
     no_args_is_help=True,
 )
 console = Console()
@@ -47,9 +47,45 @@ async def _launch(
     return await DetachedDesignTaskController(plugin_config).start(workflow)
 
 
+@protein_design_app.command("status")
+def task_status(
+    task_id: str | None = typer.Option(None, "--task-id", help="Exact task ID; omit to list all local tasks."),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Show saved progress and errors, reconciling exited workers like the Agent tool."""
+    try:
+        # Status uses local task files, not compute or LLM credentials. Keep it
+        # available even when the application's provider configuration is broken.
+        value = DetachedDesignTaskController({}).status(task_id)
+    except Exception as exc:
+        error_console.print(f"Protein-design status failed: {exc}", markup=False)
+        raise typer.Exit(1) from exc
+    snapshots = value if isinstance(value, list) else [value]
+    if json_output:
+        payload = [item.model_dump(mode="json") for item in snapshots]
+        typer.echo(json.dumps(payload if isinstance(value, list) else payload[0], ensure_ascii=False))
+        return
+    if not snapshots:
+        typer.echo("No protein-design tasks found.")
+        return
+    for snapshot in snapshots:
+        typer.echo(
+            f"{snapshot.task_id}  {snapshot.status.value}  "
+            f"cycle {snapshot.cycle}/{snapshot.total_cycles}  phase={snapshot.phase or '-'}"
+        )
+        typer.echo(f"  target: {snapshot.target}")
+        if snapshot.selected_skill:
+            typer.echo(f"  skill: {snapshot.selected_skill}")
+        if snapshot.best_candidate is not None:
+            typer.echo(f"  best candidate: {snapshot.best_candidate.candidate_id}")
+        if snapshot.error:
+            typer.echo(f"  error: {snapshot.error}")
+
+
 def _workflow_summary(workflow: WorkflowConfig, plugin_config: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "target": workflow.target,
+        "design_type": workflow.design_type,
         "cycles": workflow.cycles,
         "candidates_per_cycle": workflow.candidates_per_cycle,
         "population_size": workflow.population_size,

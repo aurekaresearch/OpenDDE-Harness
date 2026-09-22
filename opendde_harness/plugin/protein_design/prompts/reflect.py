@@ -19,6 +19,12 @@ schema, concisely and with normal English spacing."""
 
 REFLECT_ANALYSIS_PROMPT = """Reflect on the current antibody design cycle for {target_name}.
 
+Return the configured structured reflection. Mark unsupported evidence as
+unavailable rather than inferring it. Objective deltas are computed by Python:
+positive improvement values always mean better performance, including when the
+configured objective is minimized. When CDR RMSD is present for inverse folding,
+lower values are better.
+
 <target>
 - name: {target_name}
 - sequence: {target_sequence}
@@ -26,19 +32,27 @@ REFLECT_ANALYSIS_PROMPT = """Reflect on the current antibody design cycle for {t
 - hotspots: {hotspots}
 </target>
 
+<antibody_identification>
+{phase_analyze_summary}
+</antibody_identification>
+
+<analysis_configuration>
+- candidate_database: {candidates_json_path}
+- objective_key: {objective_key}
+- minimize: {minimize}
+- binder_chain_ids: {binder_chain_ids}
+- target_chain_ids: {target_chain_ids}
+</analysis_configuration>
+
 <quality_evidence>
 {quality_check_summary}
 </quality_evidence>
 
 <search_trajectory_evidence>
-Positive improvement values always mean better performance, including when the
-configured objective is minimized.
-
 {trajectory_summary}
 </search_trajectory_evidence>
 
 <current_cycle>
-- cycle: {cycle_num}
 - parent_id: {parent_name}
 - parent_backend: {parent_backend}
 - parent_sequence: {parent_sequence}
@@ -52,27 +66,10 @@ Canonical metric context computed by Python:
 </current_cycle>
 
 <fold_results>
-Objective deltas are computed by Python and positive values mean improvement.
-When CDR RMSD is present for inverse folding, lower values are better.
-
 {fold_results_table}
 </fold_results>
 
-<antibody_identification>
-{phase_analyze_summary}
-</antibody_identification>
-
-<evolutionary_analysis_inputs>
-- candidate_database: {candidates_json_path}
-- current_parent_id: {parent_name}
-- objective_key: {objective_key}
-- minimize: {minimize}
-</evolutionary_analysis_inputs>
-
 <structure_analysis_inputs>
-- cycle: {cycle_num}
-- binder_chain_ids: {binder_chain_ids}
-- target_chain_ids: {target_chain_ids}
 - verified_candidate_structure_catalog:
 {structure_path_catalog}
 </structure_analysis_inputs>
@@ -81,5 +78,5 @@ When CDR RMSD is present for inverse folding, lower values are better.
 {epitope_analysis}
 </epitope_evidence>
 
-Return the configured structured reflection now. Mark unsupported evidence as
-unavailable rather than inferring it."""
+Current cycle: {cycle_num}.
+"""

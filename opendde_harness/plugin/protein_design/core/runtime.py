@@ -38,6 +38,7 @@ class _BinderSection:
 class WorkflowConfigLoader:
     _DESIGN_FIELDS = frozenset(
         {
+            "type",
             "bootstrap_full_redesign_cycles",
             "cdr_contact_fraction_threshold",
             "constrained_max_mutation_reuse_fraction",
@@ -88,6 +89,7 @@ class WorkflowConfigLoader:
     _LLM_FIELDS = frozenset({"max_tokens", "model_name", "temperature"})
     _FOLD_FIELDS = frozenset(
         {
+            "checkpoint_path",
             "deterministic",
             "diffusion_samples",
             "diffusion_steps",
@@ -169,6 +171,12 @@ class WorkflowConfigLoader:
         WorkflowConfigLoader._reject_unknown_fields("design", design, WorkflowConfigLoader._DESIGN_FIELDS)
         WorkflowConfigLoader._reject_unknown_fields("llm", llm, WorkflowConfigLoader._LLM_FIELDS)
         WorkflowConfigLoader._reject_unknown_fields("fold", fold, WorkflowConfigLoader._FOLD_FIELDS)
+        design_type = design.get("type", "antibody")
+        if design_type not in {"antibody", "minibinder"}:
+            raise ValueError("design.type must be antibody or minibinder")
+        if design_type == "minibinder":
+            if "cdr_contact_fraction_threshold" in design:
+                raise ValueError("CDR contact thresholds do not apply to minibinders")
         target = WorkflowConfigLoader._parse_target(data)
         target_name = target.name
         target_chains = target.chains
@@ -193,6 +201,19 @@ class WorkflowConfigLoader:
             for chain_id, sequence in binder_chains.items()
         }
         skill_weights, post = WorkflowConfigLoader._parse_design_policy(design)
+        mutation_bounds = None
+        if design_type == "minibinder":
+            raw_budget = str(design.get("num_mutations", 1))
+            try:
+                limits = [int(part) for part in raw_budget.split("-")]
+                low, high = (limits[0], limits[0]) if len(limits) == 1 else limits
+            except (ValueError, IndexError):
+                raise ValueError(
+                    "minibinder num_mutations must be a positive integer or inclusive range such as 1-3"
+                ) from None
+            if not 1 <= low <= high <= sum(map(len, mutable_positions.values())):
+                raise ValueError("minibinder mutation budget must fit the mutable positions")
+            mutation_bounds = (low, high)
         if design.get("parent_fitness_temperature") is not None and any(
             key in design for key in ("parent_fitness_temperature_start", "parent_fitness_temperature_end")
         ):
@@ -210,6 +231,8 @@ class WorkflowConfigLoader:
         )
         return WorkflowConfig(
             target=str(target_name or "unknown"),
+            design_type=design_type,
+            mutation_count_bounds=mutation_bounds,
             compute_url=compute.get("url"),
             compute_worker_id=compute.get("worker_id"),
             compute_profile=compute.get("profile"),
@@ -227,7 +250,9 @@ class WorkflowConfigLoader:
             metadata={
                 "source_config": data,
                 "loss_weights": loss_weights,
-                "binder_type": WorkflowConfigLoader._antibody_format(list(binder_chain_type_by_chain.values())),
+                "binder_type": "minibinder"
+                if design_type == "minibinder"
+                else WorkflowConfigLoader._antibody_format(list(binder_chain_type_by_chain.values())),
                 "benchmark_metadata": dict(benchmark_metadata),
             },
             target_sequence=target_sequence,
@@ -262,7 +287,7 @@ class WorkflowConfigLoader:
             skill_weights=skill_weights,
             router_selection_strategy=design.get("router_selection_strategy", "agent"),
             esm2_available=bool((skill_weights or {}).get("esm2-guided-mutation", 0.0) > 0.0),
-            mutation_count_instruction=f"Use {design.get('num_mutations', 'the configured number of')} CDR mutations.",
+            mutation_count_instruction=f"Use {design.get('num_mutations', 'the configured number of')} {'binder' if design_type == 'minibinder' else 'CDR'} mutations.",
             post_filter_enabled=bool(post.get("enabled", False)),
             post_filter_top_k=int(post.get("top_k", 20)),
         )
@@ -335,6 +360,7 @@ class WorkflowConfigLoader:
 
     @staticmethod
     def _parse_binders(data: dict[str, Any], design: dict[str, Any]) -> "_BinderSection":
+        minibinder = design.get("type") == "minibinder"
         binder_chains: dict[str, str] = {}
         fixed_residues: dict[str, list[int]] = {}
         explicit_fixed_residues: dict[str, list[int]] = {}
@@ -378,11 +404,24 @@ class WorkflowConfigLoader:
                     item.get("sequence"),
                     f"initial_binders[{binder_index}].chains.{chain_key}.sequence",
                 )
-                chain_type = WorkflowConfigLoader._normalize_antibody_chain_type(
-                    item.get("chain_type"),
-                    f"initial_binders[{binder_index}].chains.{chain_key}.chain_type",
+                chain_type = (
+                    "minibinder"
+                    if minibinder
+                    else WorkflowConfigLoader._normalize_antibody_chain_type(
+                        item.get("chain_type"),
+                        f"initial_binders[{binder_index}].chains.{chain_key}.chain_type",
+                    )
                 )
-                if item.get("cdr_regions") is None and item.get("fixed_residues") is None:
+                if minibinder:
+                    if item.get("chain_type", "minibinder") != "minibinder":
+                        raise ValueError("minibinder chains must use chain_type: minibinder")
+                    if item.get("cdr_regions") is not None:
+                        raise ValueError("minibinders have no CDRs; use designable_residues and fixed_residues")
+                    if set(sequence) - set("ACDEFGHIKLMNPQRSTVWYX"):
+                        raise ValueError("minibinder sequences require canonical amino acids or mutable X placeholders")
+                    if item.get("designable_residues") is None:
+                        raise ValueError("minibinder optimization requires explicit designable_residues")
+                elif item.get("cdr_regions") is None and item.get("fixed_residues") is None:
                     raise ValueError(
                         f"initial_binders[{binder_index}].chains.{chain_key} must define "
                         "cdr_regions or fixed_residues; non-antibody protein design is not supported"
@@ -420,11 +459,15 @@ class WorkflowConfigLoader:
                 else:
                     mutable = set(range(len(sequence)))
                 mutable.difference_update(explicit)
+                if minibinder and any(
+                    residue == "X" and index not in mutable for index, residue in enumerate(sequence)
+                ):
+                    raise ValueError("minibinder X placeholders must be mutable, never fixed")
                 # Legacy antibody configs often define the immutable framework
                 # and leave the complementary CDR positions implicit.  Keep the
                 # structural CDR annotation aligned with those design permissions
                 # so the contact gate does not see an empty CDR.
-                if not cdr_was_configured and not designable_was_configured and fixed_was_configured:
+                if not minibinder and not cdr_was_configured and not designable_was_configured and fixed_was_configured:
                     cdr = sorted(mutable)
                     groups = WorkflowConfigLoader._parse_position_groups(cdr, len(sequence))
                 if chain_key in fixed_residues:
@@ -447,10 +490,15 @@ class WorkflowConfigLoader:
                 cdr_regions[chain_key] = cdr
                 cdr_region_groups[chain_key] = groups
                 fixed_residues[chain_key] = sorted(set(range(len(sequence))) - mutable)
-            WorkflowConfigLoader._validate_antibody_topology(
-                candidate_chain_types,
-                f"initial_binders[{binder_index}]",
-            )
+            if minibinder:
+                if len(chains) != 1:
+                    raise ValueError("minibinder optimization currently requires one binder chain")
+                if not any(len(binder_chains[c]) > len(fixed_residues[c]) for c in chains):
+                    raise ValueError("minibinder optimization requires at least one mutable residue")
+            else:
+                WorkflowConfigLoader._validate_antibody_topology(
+                    candidate_chain_types, f"initial_binders[{binder_index}]"
+                )
             current_chain_ids = set(chains)
             if expected_binder_chain_ids is None:
                 expected_binder_chain_ids = current_chain_ids
@@ -492,6 +540,8 @@ class WorkflowConfigLoader:
             "antibody-inverse-folding",
             "esm2-guided-mutation",
         }
+        if design.get("type") == "minibinder":
+            supported = {"minibinder-point-mutation", "minibinder-full-redesign", "minibinder-inverse-folding"}
         if raw_weights is None:
             skill_weights = None
         elif isinstance(raw_weights, dict):
@@ -537,6 +587,16 @@ class WorkflowConfigLoader:
             .strip()
             .lower()
         )
+        if design.get("type") == "minibinder":
+            if fold_execution_mode == "api":
+                raise ValueError(
+                    "minibinder optimization requires local/docker folding with a general checkpoint; API model selection is not supported"
+                )
+            checkpoint = str(fold.get("checkpoint_path") or "").strip()
+            if checkpoint and "abag" in Path(checkpoint).name.lower():
+                raise ValueError(
+                    "minibinder optimization requires fold.checkpoint_path pointing to a general protein checkpoint, not opendde_abag.pt"
+                )
         if fold_execution_mode == "api":
             from opendde_harness.plugin.protein_design.servers.backends.opendde_api import (
                 resolve_opendde_api_url,
@@ -579,6 +639,7 @@ class WorkflowConfigLoader:
         }
         fold_options.update(
             {
+                "design_type": design.get("type", "antibody"),
                 "binder_chain_ids": list(binder_chains),
                 "target_chain_ids": list(target_chains),
                 # Keep the complete target-chain payload.  In particular,

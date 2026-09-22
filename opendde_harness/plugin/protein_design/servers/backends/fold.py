@@ -168,6 +168,7 @@ class FoldConfig:
     execution_mode: Optional[str] = None
     image: Optional[str] = None
     gpus: str = "all"
+    cp_degree: int = 1
     device: Optional[str] = None
     enable_batch_inference: bool = True
     persistent_worker: bool = True
@@ -191,6 +192,7 @@ class FoldConfig:
 
     # Paths
     output_dir: Optional[str] = None
+    checkpoint_path: Optional[str] = None
 
     def __post_init__(self) -> None:
         requested = self.backend
@@ -199,6 +201,8 @@ class FoldConfig:
         if str(requested).strip().lower() != "opendde":
             raise ValueError("only the OpenDDE fold and refold backend is currently supported")
         self.backend = "opendde"
+        if isinstance(self.cp_degree, bool) or not isinstance(self.cp_degree, int) or self.cp_degree < 1:
+            raise ValueError("fold.cp_degree must be a positive integer")
         self.seeds = resolve_fold_seeds(self.seeds)
         mode = normalize_execution_mode(self.execution_mode)
         self.execution_mode = mode
@@ -317,7 +321,7 @@ class StructurePredictor:
 
     def _get_opendde_checkpoint_args(self) -> tuple[Optional[str], List[str]]:
         """Return container checkpoint path and Docker mount args for OpenDDE."""
-        checkpoint_path = os.environ.get("STRUCTPRED_OPENDDE_CHECKPOINT_PATH")
+        checkpoint_path = self.config.checkpoint_path or os.environ.get("STRUCTPRED_OPENDDE_CHECKPOINT_PATH")
         if not checkpoint_path:
             return None, []
 
@@ -1372,23 +1376,28 @@ class StructurePredictor:
                 [NVIDIA_SMI_EXECUTABLE, "-L"], capture_output=True, text=True, timeout=DOCKER_CONTROL_TIMEOUT_SECONDS
             )
             if result.returncode == 0:
-                return [str(i) for i in range(len(result.stdout.strip().split("\n")))]
-            return ["0"]
+                gpu_spec = ",".join(str(i) for i in range(len(result.stdout.strip().split("\n"))))
+            else:
+                gpu_spec = "0"
 
         if gpu_spec.startswith("device="):
             gpu_spec = gpu_spec.removeprefix("device=")
 
-        return [g.strip() for g in gpu_spec.split(",") if g.strip()]
+        gpu_ids = [g.strip() for g in gpu_spec.split(",") if g.strip()]
+        if len(gpu_ids) < self.config.cp_degree:
+            raise ValueError("fold.cp_degree exceeds the number of available GPU IDs")
+        # A device list selects resources; it must not implicitly enable CP.
+        return gpu_ids[: self.config.cp_degree]
 
     def _docker_gpu_request(self) -> str:
         """Return the Docker CLI device request for the configured GPUs."""
         gpu_ids = self._parse_gpu_ids()
-        return "all" if self._normalized_gpu_spec() == "all" else f'"device={",".join(map(str, gpu_ids))}"'
+        return f'"device={",".join(map(str, gpu_ids))}"'
 
     def _local_gpu_environment(self) -> List[str]:
         """Expose only configured GPUs to local torchrun/python commands."""
         gpu_ids = self._parse_gpu_ids()
-        return [] if self._normalized_gpu_spec() == "all" else [f"CUDA_VISIBLE_DEVICES={','.join(map(str, gpu_ids))}"]
+        return [f"CUDA_VISIBLE_DEVICES={','.join(map(str, gpu_ids))}"]
 
     def _foldcp_environment(self, gpu_ids: List[str]) -> List[str]:
         """Fold-CP settings for callers that resolve them from the environment."""
@@ -1434,8 +1443,7 @@ class StructurePredictor:
         checkpoint_container_path, checkpoint_mount_args = self._get_opendde_checkpoint_args()
 
         gpu_ids = self._parse_gpu_ids()
-        # Enable multi-GPU distributed inference for OpenDDE batch prediction
-        # Each GPU will process a subset of the batch in parallel
+        # Multi-process execution is only used for explicitly requested CP.
         nproc = len(gpu_ids)
 
         seeds_str = ",".join(map(str, self.config.seeds))
@@ -1557,7 +1565,7 @@ class StructurePredictor:
             cmd.extend(
                 [
                     "torchrun",
-                    "--nproc_per_node=gpu",
+                    f"--nproc_per_node={nproc}",
                     f"--master_port={port}",
                     "runner/inference.py",
                 ]

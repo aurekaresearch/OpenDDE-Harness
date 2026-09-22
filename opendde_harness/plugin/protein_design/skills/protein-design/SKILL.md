@@ -1,6 +1,6 @@
 ---
 name: protein-design
-description: Prepare, review, validate, start, monitor, adjust, stop, and interpret antigen-antibody design tasks from a YAML file or user intent, rejecting non-antibody binder-design requests before launch.
+description: Prepare, validate, run and interpret antibody design or mini binder sequence design and optimization tasks from YAML or user intent.
 metadata:
   opendde:
     always: false
@@ -8,11 +8,11 @@ metadata:
 
 # Protein design
 
-## Antibody-only scope gate
+## Design scope
 
-This Harness designs antibodies against antigens. Before preparing or reviewing a configuration, verify that the requested binder is an antibody in one of the supported formats: a single VHH, a single-chain scFv, or paired VH/VL chains. Refuse to prepare or launch de novo non-antibody binders, peptides, enzymes, receptors, or other general protein-design tasks. Explain that this installation is antibody-specific rather than relabeling an arbitrary protein as an antibody.
+Choose between antibody design (the default: VHH, scFv or paired VH/VL) and fixed-length single-chain mini binder design and optimization (`design.type: minibinder`). De novo non-antibody backbone generation, enzymes and arbitrary protein design are not supported. Never relabel a mini binder as an antibody.
 
-Treat an unspecified or ambiguous binder identity as unresolved in the Binder / antibody confirmation round. Require explicit antibody format, antibody chain roles, and CDR/framework annotations before proceeding. A target being an antibody does not make a non-antibody binder design valid; the designed binder itself must be an antibody.
+For mini binders, read [references/minibinder.md](references/minibinder.md) instead of antibody-framework guidance. Accept a complete or X-masked starting sequence of a confirmed length and explicit mutable positions; every X must be mutable. Full redesign resolves X before folding; do not invent CDR annotations. Apply the shared target preparation and launch approval steps below, substituting mini binder design/fixed regions for antibody format/CDR/framework questions. If identity is ambiguous, resolve the designed binder's type before preparing the configuration.
 
 ## Read preparation context first
 
@@ -21,7 +21,7 @@ Call `protein_design_context` once at the start of configuration preparation. If
 Choose the workflow from the user's input:
 
 - **Run an example or supplied YAML:** read the selected file first. Preserve its scientific settings, reuse its target/scaffold/CDR annotations, and do not restart scaffold selection when these are already specified. Research only missing/contradictory evidence or verification explicitly requested by the user. Copy bundled files to the task configuration directory before requested adaptations. Review and validate the final copy, then ask one combined launch-confirmation question if nothing is unresolved.
-- **Create a new design:** a target-only request such as "Design a VHH against human CRLF2" is not automatically a request to run the CRLF2 example. Read [references/yaml-configuration.md](references/yaml-configuration.md), resolve missing target/epitope evidence, and ask only unresolved scientific choices. If a scaffold is missing, read [references/antibody-frameworks.md](references/antibody-frameworks.md), offer compatible choices, and do not select one silently. Existing example material may be proposed as a starting point, not silently substituted.
+- **Create a new design:** a target-only request is not automatically a request to run an example. Read [references/yaml-configuration.md](references/yaml-configuration.md), resolve missing target/epitope evidence, and ask only unresolved scientific choices. For an antibody missing its scaffold, read [references/antibody-frameworks.md](references/antibody-frameworks.md). For a mini binder, read [references/minibinder.md](references/minibinder.md) and help find public non-antibody starting sequences/structures with provenance. If none is suitable, explain the missing input rather than refusing research or switching to an antibody. Offer compatible choices for confirmation; do not silently substitute example material.
 
 ## Resolve example paths
 
@@ -50,7 +50,7 @@ Web search does not create local MSA or structure files. Verify required file re
 Starting a design consumes compute and fixes scientific choices. A request to prepare or launch an unseen configuration is not final launch approval. Review these categories, but do not turn them into three mandatory conversational rounds. Ask only unresolved choices, combine related questions, and retain confirmed answers. A complete example can proceed directly to one final plan and launch-confirmation question.
 
 1. **Target / antigen** — target identity, sequence/provenance, domain boundaries, epitope/hotspot numbering, mode-compatible MSA policy, and any supplied initial complex.
-2. **Binder / antibody** — format (`VHH`, `scFv`, or `VH/VL`), starting sequences, chain types, CDRs, fixed framework, narrower design permissions, and seed provenance. Reuse these from an explicitly selected example instead of asking the user to pick a scaffold again.
+2. **Binder** — design type, starting sequences, chain types, fixed/designable positions, and seed provenance. For antibodies, also review format (`VHH`, `scFv`, or `VH/VL`), CDRs and framework; for mini binders, require a complete single chain without CDR annotations. Reuse confirmed inputs instead of asking the user to pick a scaffold again.
 3. **Final plan and launch** — after unresolved choices are settled, write the task YAML and run `ddeharness protein-design validate --config <absolute-path> --json`. Show a compact confirmation card: target/epitope, scaffold and fixed/designable regions, objective/default weights or overrides, cycles/candidates, inherited folding mode and MSA policy, configured compute placement (not a claimed bound worker), output location, PostFilter, and YAML path. State what was validated versus still untested. Ask explicitly: "Do you approve this configuration and authorize starting this design?" Do not end with a vague invitation to ask to start later.
 
 Use `ask_user` for related unresolved questions or the final approval when available; otherwise ask in the normal reply and stop. Mark inferred values and sources. Do not repeat validation without changed input/configuration or a validation error. An absent reply, a generic earlier "run it," and validation success are not final approval. If the user changes the plan, validate the changed configuration and renew approval of that exact plan; do not reuse stale consent.

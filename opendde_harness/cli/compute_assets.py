@@ -228,12 +228,16 @@ def inspect_assets(
     checkpoint: str = DEFAULT_CHECKPOINT,
     with_opendde: bool = False,
     verify_hashes: bool = False,
+    additional_checkpoints: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     root = root.expanduser().resolve()
     data = (opendde_root or root).expanduser().resolve()
     assets = [(root, asset) for asset in shared_asset_plan()]
     if with_opendde:
         assets.extend((data, asset) for asset in asset_plan(checkpoint))
+        assets.extend(
+            (data, asset_plan(name)[0]) for name in dict.fromkeys(additional_checkpoints) if name != checkpoint
+        )
     checks = []
     for base, asset in assets:
         path = base / asset.relative_path
@@ -492,6 +496,7 @@ def prepare(
     download_workers: int = 2,
     with_opendde: bool = True,
     paths: dict[str, str] | None = None,
+    additional_checkpoints: tuple[str, ...] = (),
 ) -> dict:
     import portalocker
 
@@ -521,6 +526,11 @@ def prepare(
             data.mkdir(parents=True, exist_ok=True)
             _prepare_downloads(data, checkpoint, download_workers, paths, bar=display)
             manifests.setdefault(data, []).extend(asset_plan(checkpoint))
+            for name in dict.fromkeys(additional_checkpoints):
+                if name != checkpoint:
+                    asset = asset_plan(name)[0]
+                    download_asset(data, asset, bar=display)
+                    manifests[data].append(asset)
         else:
             paths = {}
         paths.update(_prepare_shared_models(root, bar=display))

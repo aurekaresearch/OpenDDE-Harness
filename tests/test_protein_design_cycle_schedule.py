@@ -9,7 +9,7 @@ import yaml
 from pydantic import ValidationError
 from test_protein_design_orchestrator import FakeCompute, FakePhases, make_config
 
-from opendde_harness.plugin.protein_design.agents.router import (
+from opendde_harness.plugin.protein_design.agents.policy import (
     DesignRouteContext,
     route_design_skills,
     sample_design_skill,

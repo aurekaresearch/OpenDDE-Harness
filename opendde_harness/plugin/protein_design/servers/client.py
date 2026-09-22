@@ -64,6 +64,8 @@ class ProteinDesignComputeClient:
         execution_mode: str | None = None,
         image: str | None = None,
         api_url: str | None = None,
+        design_type: str | None = None,
+        checkpoint_path: str | None = None,
     ) -> HealthResponse:
         params = {
             key: value
@@ -72,6 +74,8 @@ class ProteinDesignComputeClient:
                 "execution_mode": execution_mode,
                 "image": image,
                 "api_url": api_url,
+                "design_type": design_type,
+                "checkpoint_path": checkpoint_path,
             }.items()
             if value
         } or None

@@ -30,6 +30,9 @@ def prepare(
     checkpoint: Optional[str] = typer.Option(
         None, "--checkpoint", help="OpenDDE checkpoint filename; used in local mode only."
     ),
+    design_mode: Optional[str] = typer.Option(
+        None, "--design-mode", help="Prepare antibody, minibinder, or both checkpoints in local mode."
+    ),
     download_workers: int = typer.Option(2, "--download-workers", min=1, max=4),
     assets_only: bool = typer.Option(False, "--assets-only", help="Prepare weights only; skip runtime code."),
     code_only: bool = typer.Option(False, "--code-only", help="Prepare runtime code only; skip weights."),
@@ -55,16 +58,33 @@ def prepare(
     if mode not in {None, "api", "local"}:
         raise typer.BadParameter("Mode must be api or local.")
     config = load_protein_design_config()
+    from opendde_harness.plugin.protein_design.core.asset_paths import DESIGN_CHECKPOINTS
+
+    if design_mode not in {None, "antibody", "minibinder", "both"}:
+        raise typer.BadParameter("Design mode must be antibody, minibinder, or both.")
+    if design_mode and checkpoint:
+        raise typer.BadParameter("Use either --design-mode or --checkpoint, not both.")
     saved = config.get("compute_docker") or {}
     mode = mode or (config.get("fold_defaults") or {}).get("execution_mode") or "api"
     if mode not in {"api", "local"}:
         raise typer.BadParameter("Configured folding mode must be api or local.")
+    if design_mode and mode == "api":
+        typer.echo(
+            "Warning: --design-mode is ignored in api mode; no local OpenDDE checkpoints are prepared.", err=True
+        )
     if checkpoint and mode == "api":
         typer.echo(
             "Warning: --checkpoint is ignored in api mode; OpenDDE weights are prepared for local folding only.",
             err=True,
         )
+    modes = (
+        (["antibody", "minibinder"] if design_mode == "both" else [design_mode])
+        if design_mode
+        else ([] if checkpoint else (saved.get("design_modes") or []))
+    )
     checkpoint = checkpoint or Path(saved.get("opendde_checkpoint") or DEFAULT_CHECKPOINT).name
+    if design_mode:
+        checkpoint = DESIGN_CHECKPOINTS[modes[0]]
     if mode == "local" and checkpoint not in compute_assets.CHECKPOINTS:
         raise typer.BadParameter(
             "Unknown OpenDDE checkpoint filename; specify a published checkpoint with --checkpoint."
@@ -81,6 +101,7 @@ def prepare(
                 opendde_root=opendde_root_dir or compute_assets.opendde_root(saved),
                 download_workers=download_workers,
                 with_opendde=mode == "local",
+                additional_checkpoints=tuple(DESIGN_CHECKPOINTS[kind] for kind in modes),
             )
         if not assets_only:
             prepare_runtime_code(code_cache, upstream_dir=upstream_dir)

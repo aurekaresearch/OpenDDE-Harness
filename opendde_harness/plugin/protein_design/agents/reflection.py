@@ -5,6 +5,16 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class MiniBinderReflection(BaseModel):
+    summary: str
+    evidence: list[str] = Field(default_factory=list)
+    next_cycle_recommendations: list[str] = Field(default_factory=list)
+    uncertainties: list[str] = Field(default_factory=list)
+
+    def to_design_directives(self) -> str:
+        return self.model_dump_json()
+
+
 class MetricSnapshot(BaseModel):
     candidate_id: str
     backend: Optional[str] = None

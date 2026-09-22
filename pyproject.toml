@@ -210,6 +210,7 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "biotite>=1.2,<2.0",
     "json-repair>=0.59.5",
     "pexpect>=4.9",
     "pip-audit>=2.10.0",

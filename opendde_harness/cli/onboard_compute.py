@@ -321,6 +321,7 @@ class DockerSettings:
     opendde_data: str = ""
     opendde_common: str = ""
     opendde_checkpoint: str = ""
+    design_modes: list[str] = field(default_factory=list)
     python: str = "python"
     shm_size: str = "16g"
     weights_dir: str = ""
@@ -374,6 +375,10 @@ def validate_settings(
         raise ComputeSetupError("compute_docker.idle_seconds must be a positive number of seconds.")
     if settings.code_mode not in {"managed", "checkout"}:
         raise ComputeSetupError("Code mode must be managed or checkout.")
+    if not isinstance(settings.design_modes, list) or any(
+        kind not in {"antibody", "minibinder"} for kind in settings.design_modes
+    ):
+        raise ComputeSetupError("Design modes must be a list containing antibody and/or minibinder.")
     if validate_directory(settings.weights_dir) is not True:
         raise ComputeSetupError("Choose a specific weights directory without commas or newlines.")
     if settings.mode == "local" and validate_directory(settings.opendde_data) is not True:
@@ -445,10 +450,25 @@ def validate_assets(settings: DockerSettings) -> None:
         for name in COMMON_ASSETS:
             prepared_path(str(common / name), file=True)
         prepared_path(settings.opendde_checkpoint, file=True)
+        from opendde_harness.plugin.protein_design.core.asset_paths import DESIGN_CHECKPOINTS, checkpoint_status
+
+        for mode in settings.design_modes:
+            if mode not in DESIGN_CHECKPOINTS:
+                raise ComputeSetupError(f"Unknown design mode: {mode}")
+            selected = Path(settings.opendde_checkpoint)
+            path = (
+                selected
+                if selected.name not in DESIGN_CHECKPOINTS.values()
+                else Path(settings.opendde_data) / "checkpoint" / DESIGN_CHECKPOINTS[mode]
+            )
+            status = checkpoint_status(path, mode)
+            if not status["ready"]:
+                raise ComputeSetupError(f"{mode} checkpoint {path}: {status['error']}")
 
 
 def prepare_assets(settings: DockerSettings) -> None:
     from opendde_harness.cli.compute_assets import CHECKPOINTS, asset_state_path, prepare
+    from opendde_harness.plugin.protein_design.core.asset_paths import DESIGN_CHECKPOINTS
 
     checkpoint = Path(settings.opendde_checkpoint).name
     if checkpoint not in CHECKPOINTS:
@@ -472,6 +492,7 @@ def prepare_assets(settings: DockerSettings) -> None:
             paths=paths,
             opendde_root=Path(settings.opendde_data) if settings.opendde_data else None,
             with_opendde=settings.mode == "local",
+            additional_checkpoints=tuple(DESIGN_CHECKPOINTS[mode] for mode in settings.design_modes),
         )
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise ComputeSetupError(
@@ -964,6 +985,8 @@ def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, time
                 lambda: check_image_environment(json.loads(docker("image", "inspect", image))[0], load_environment()),
             )
         checkpoint = Path(saved.get("opendde_checkpoint") or DEFAULT_CHECKPOINT).name
+        from opendde_harness.plugin.protein_design.core.asset_paths import DESIGN_CHECKPOINTS
+
         assets = record(
             "assets",
             lambda: inspect_assets(
@@ -972,6 +995,7 @@ def inspect_compute(config: dict[str, Any], *, verify_hashes: bool = False, time
                 checkpoint=checkpoint,
                 with_opendde=mode == "local",
                 verify_hashes=verify_hashes,
+                additional_checkpoints=tuple(DESIGN_CHECKPOINTS[kind] for kind in saved.get("design_modes", [])),
             ),
         )
         report["assets"] = assets

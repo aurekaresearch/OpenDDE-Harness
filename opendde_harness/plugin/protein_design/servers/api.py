@@ -94,6 +94,7 @@ def with_leased_devices(operation: str, payload: dict[str, Any], devices: Sequen
     if operation == "fold":
         options = dict(payload.get("options") or {})
         options["gpus"] = ",".join(str(index) for index in devices)
+        options["cp_degree"] = len(devices)
         esm2_options = dict(options.get("esm2_options") or {})
         if not esm2_options.get("device"):
             esm2_options["device"] = primary
@@ -117,12 +118,17 @@ def fold_gpu_request(placement: Placement | None, options: dict[str, Any]) -> tu
     if spec == "none" or str(options.get("device", "")).strip().lower() == "cpu":
         return 0, None
     if placement is not None and placement.fold:
-        return len(placement.fold), list(placement.fold)
+        return placement.cp_degree, list(placement.fold[: placement.cp_degree])
+    degree = placement.cp_degree if placement is not None else options.get("cp_degree", 1)
+    if isinstance(degree, bool) or not isinstance(degree, int) or degree < 1:
+        raise ValueError("fold.cp_degree must be a positive integer")
     if spec and spec != "all":
         devices = [int(part) for part in spec.split(",") if part.strip()]
         if devices:
-            return len(devices), devices
-    return (placement.cp_degree if placement is not None else 1), None
+            if degree > len(devices):
+                raise ValueError("fold.cp_degree exceeds the number of available GPU IDs")
+            return degree, devices[:degree]
+    return degree, None
 
 
 class TaskLeases:
@@ -447,10 +453,19 @@ def create_app(
         image: str | None = None,
         api_url: str | None = None,
         probe_external: bool = False,
+        design_type: str | None = None,
+        checkpoint_path: str | None = None,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        checkpoint_options = {
+            key: value
+            for key, value in {"design_type": design_type, "checkpoint_path": checkpoint_path}.items()
+            if value
+        }
         payload = dict(
-            await active_harness.health(backend, execution_mode, image, api_url, probe_external=probe_external)
+            await active_harness.health(
+                backend, execution_mode, image, api_url, probe_external=probe_external, **checkpoint_options
+            )
         )
         queue = jobs.queue_stats()
         if configured_token and authorization != f"Bearer {configured_token}":

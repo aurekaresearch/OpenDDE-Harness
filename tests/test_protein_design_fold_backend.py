@@ -26,7 +26,7 @@ def test_two_leased_gpus_launch_fold_cp_context_parallel_inference(tmp_path, mon
     from opendde_harness.plugin.protein_design.servers.backends.fold import FoldConfig, StructurePredictor
 
     monkeypatch.setattr(compute_environment, "resolve_device", lambda *args, **kwargs: "cuda")
-    config = FoldConfig(execution_mode="local", device="cuda", gpus="2,3")
+    config = FoldConfig(execution_mode="local", device="cuda", gpus="2,3", cp_degree=2)
     predictor = object.__new__(StructurePredictor)
     predictor.config = config
     monkeypatch.setenv("STRUCTPRED_OPENDDE_ROOT_DIR", str(tmp_path))
@@ -46,12 +46,13 @@ def test_two_leased_gpus_launch_fold_cp_context_parallel_inference(tmp_path, mon
     assert command[command.index("--foldcp_size_dp") + 1] == "1"
 
 
-def test_one_leased_gpu_keeps_single_process_inference(tmp_path, monkeypatch):
+@pytest.mark.parametrize("gpus", ["1", "1,2,3,4"])
+def test_gpu_list_without_explicit_cp_keeps_single_process_inference(tmp_path, monkeypatch, gpus):
     from opendde_harness.cli import compute_environment
     from opendde_harness.plugin.protein_design.servers.backends.fold import FoldConfig, StructurePredictor
 
     monkeypatch.setattr(compute_environment, "resolve_device", lambda *args, **kwargs: "cuda")
-    config = FoldConfig(execution_mode="local", device="cuda", gpus="1")
+    config = FoldConfig(execution_mode="local", device="cuda", gpus=gpus)
     predictor = object.__new__(StructurePredictor)
     predictor.config = config
     monkeypatch.setenv("STRUCTPRED_OPENDDE_ROOT_DIR", str(tmp_path))
@@ -62,6 +63,7 @@ def test_one_leased_gpu_keeps_single_process_inference(tmp_path, monkeypatch):
     command = predictor._build_opendde_command("unused", tmp_path / "job.json", tmp_path / "run")
 
     assert "CUDA_VISIBLE_DEVICES=1" in command
+    assert not any("nproc_per_node" in item for item in command)
     assert not [item for item in command if item.startswith("--foldcp") or item.startswith("OPENDDE_FOLDCP")]
 
 

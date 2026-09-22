@@ -536,7 +536,7 @@ def test_structured_session_emits_one_input_payload_per_run() -> None:
 
     assert len(payloads) == 2
     assert payloads[0] == payloads[1]
-    assert renders == 2
+    assert renders == 1
 
 
 def test_structured_session_widens_the_budget_when_the_model_runs_out_of_tokens() -> None:
@@ -564,7 +564,7 @@ def test_structured_session_widens_the_budget_when_the_model_runs_out_of_tokens(
     result = asyncio.run(session.run(AGENT_PROFILES[AgentRole.ANALYZE], "prompt"))
 
     assert result.report == "ok"
-    assert provider.budgets == [16384, 32768]
+    assert provider.budgets == [24576, 32768]
     # And no sampling temperature on either request. The agent profile carried
     # one and sent it on every call, so a design task launched from a Codex
     # conversation died on "Unsupported parameter: temperature". A temperature

@@ -397,7 +397,10 @@ test('projects full structured progress artifacts for the selected run', () => {
     spans,
     readArtifact: path => (path === '/progress/1.json' ? event : null)
   })
-  assert.deepEqual(projected.run.events, [event])
+  const { token_usage, ...originalEvent } = projected.run.events[0]
+  assert.deepEqual([originalEvent], [event])
+  assert.equal(token_usage.calls, 0)
+  assert.equal(token_usage.fields.input.value, null)
 })
 
 test('keeps one completed activity with IO and hides empty orchestration events', () => {

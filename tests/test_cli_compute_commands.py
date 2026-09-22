@@ -48,12 +48,29 @@ def test_prepare_uses_configured_mode_and_weights_root(app, prepared, monkeypatc
     (root, checkpoint, state_file), kwargs = prepared["assets"]
     assert root == tmp_path.resolve() and checkpoint == "opendde_abag.pt"
     assert state_file == compute_assets.asset_state_path()
-    assert kwargs == {"download_workers": 3, "with_opendde": True, "opendde_root": compute_assets.opendde_root({})}
+    assert kwargs == {
+        "download_workers": 3,
+        "with_opendde": True,
+        "opendde_root": compute_assets.opendde_root({}),
+        "additional_checkpoints": (),
+    }
     assert prepared["code"] == (None, {"upstream_dir": None})
     prepared.clear()
     result = CliRunner().invoke(app, ["compute", "prepare", "--opendde-root", str(tmp_path / "data"), "--assets-only"])
     assert result.exit_code == 0, result.output
     assert prepared["assets"][1]["opendde_root"] == tmp_path / "data"
+
+
+@pytest.mark.parametrize(
+    "mode,checkpoint,count",
+    [("antibody", "opendde_abag.pt", 1), ("minibinder", "opendde.pt", 1), ("both", "opendde_abag.pt", 2)],
+)
+def test_prepare_design_modes(app, prepared, monkeypatch, mode, checkpoint, count):
+    monkeypatch.setattr(onboard_commands, "_load_raw_config", lambda: {})
+    result = CliRunner().invoke(app, ["compute", "prepare", "--mode", "local", "--design-mode", mode, "--assets-only"])
+    assert result.exit_code == 0, result.output
+    assert prepared["assets"][0][1] == checkpoint
+    assert len(prepared["assets"][1]["additional_checkpoints"]) == count
 
 
 def test_prepare_defaults_to_api_mode_without_configuration(app, prepared, monkeypatch, tmp_path):

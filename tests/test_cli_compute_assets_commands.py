@@ -101,18 +101,28 @@ def test_opendde_root_precedence(tmp_path, monkeypatch):
     assert compute_assets.opendde_root({"opendde_data": str(tmp_path / "saved")}) == (tmp_path / "saved").resolve()
 
 
-def test_local_preparation_uses_both_roots(tmp_path, monkeypatch):
+@pytest.mark.parametrize("additional", [(), ("opendde_abag.pt",)])
+def test_local_preparation_uses_both_roots(tmp_path, monkeypatch, additional):
     weights, data = tmp_path / "harness", tmp_path / "opendde"
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    downloads = []
 
     def download(destination_root, asset, *, bar=None):
         path = destination_root / asset.relative_path
+        downloads.append(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"fixture")
         return path
 
     monkeypatch.setattr(compute_assets, "download_asset", download)
-    state = compute_assets.prepare(weights, "opendde.pt", tmp_path / "state.json", opendde_root=data, with_opendde=True)
+    state = compute_assets.prepare(
+        weights,
+        "opendde.pt",
+        tmp_path / "state.json",
+        opendde_root=data,
+        with_opendde=True,
+        additional_checkpoints=additional,
+    )
     assert state["root"] == str(weights) and state["opendde_root"] == str(data)
     assert state["paths"]["opendde_checkpoint"] == str(data / "checkpoint/opendde.pt")
     assert state["paths"]["weights_dir"] == str(weights)
@@ -120,7 +130,9 @@ def test_local_preparation_uses_both_roots(tmp_path, monkeypatch):
     assert (weights / "soluble_mpnn/solublempnn_v_48_020.pt").is_file()
     assert not (weights / "checkpoint").exists() and not (data / "soluble_mpnn").exists()
     assert len((weights / "SHA256SUMS").read_text().splitlines()) == 6
-    assert len((data / "SHA256SUMS").read_text().splitlines()) == 5
+    assert len((data / "SHA256SUMS").read_text().splitlines()) == 5 + len(additional)
+    assert (data / "checkpoint/opendde_abag.pt").exists() == bool(additional)
+    assert downloads.count(data / "common/components.cif") == 1
     # Prepared with the general checkpoint, so inspect the same one rather than the default.
     report = compute_assets.inspect_assets(weights, opendde_root=data, with_opendde=True, checkpoint="opendde.pt")
     assert report["opendde_root"] == str(data)

@@ -223,6 +223,8 @@ class PythonProteinDesignHarness:
         api_url: str | None = None,
         *,
         probe_external: bool = False,
+        design_type: str | None = None,
+        checkpoint_path: str | None = None,
     ) -> dict[str, Any]:
         from opendde_harness.plugin.protein_design.servers.backends.fold import normalize_execution_mode
 
@@ -230,7 +232,16 @@ class PythonProteinDesignHarness:
         if normalized_backend != "opendde":
             raise ValueError("only the OpenDDE fold and refold backend is currently supported")
         mode = normalize_execution_mode(execution_mode)
-        return await asyncio.to_thread(self._health_snapshot, normalized_backend, mode, image, api_url, probe_external)
+        return await asyncio.to_thread(
+            self._health_snapshot,
+            normalized_backend,
+            mode,
+            image,
+            api_url,
+            probe_external,
+            design_type,
+            checkpoint_path,
+        )
 
     def _health_snapshot(
         self,
@@ -239,6 +250,8 @@ class PythonProteinDesignHarness:
         image: str | None,
         api_url: str | None,
         probe_external: bool = False,
+        design_type: str | None = None,
+        checkpoint_path: str | None = None,
     ) -> dict[str, Any]:
         from opendde_harness.cli.compute_assets import inspect_assets
 
@@ -252,9 +265,20 @@ class PythonProteinDesignHarness:
         backend_ready = True
         backend_evidence: dict[str, Any] = {}
         if mode == "local":
+            from opendde_harness.plugin.protein_design.core.asset_paths import (
+                DESIGN_CHECKPOINTS,
+                checkpoint_status,
+                resolve_checkpoint,
+            )
+
+            selected_checkpoint = checkpoint_path
             code_dir = Path(os.environ.get("STRUCTPRED_OPENDDE_CODE_DIR", "/opt/opendde")).expanduser()
             root_value = os.environ.get("STRUCTPRED_OPENDDE_ROOT_DIR", "").strip()
-            checkpoint_value = os.environ.get("STRUCTPRED_OPENDDE_CHECKPOINT_PATH", "").strip()
+            checkpoint_value = (
+                str(resolve_checkpoint(design_type or "antibody", selected_checkpoint))
+                if design_type or selected_checkpoint
+                else os.environ.get("STRUCTPRED_OPENDDE_CHECKPOINT_PATH", "").strip()
+            )
             root_dir = Path(root_value).expanduser() if root_value else None
             common_value = os.environ.get("STRUCTPRED_OPENDDE_COMMON_DIR", "").strip()
             common_dir = (
@@ -281,7 +305,13 @@ class PythonProteinDesignHarness:
                 "common_assets": common_assets,
                 "common_ready": bool(common_assets) and all(common_assets.values()),
                 "checkpoint_path": str(checkpoint_path) if checkpoint_path else None,
-                "checkpoint_ready": bool(checkpoint_path and checkpoint_path.is_file()),
+                "checkpoint_ready": bool(
+                    checkpoint_path and checkpoint_status(checkpoint_path, design_type or "antibody")["ready"]
+                ),
+                "checkpoint_error": checkpoint_status(checkpoint_path, design_type or "antibody")["error"]
+                if checkpoint_path
+                else "no checkpoint configured",
+                "checkpoints": {kind: checkpoint_status(resolve_checkpoint(kind), kind) for kind in DESIGN_CHECKPOINTS},
                 "import_ready": import_ready,
                 "import_error": import_error,
             }
@@ -330,6 +360,15 @@ class PythonProteinDesignHarness:
                 "image_ready": image_ready,
             }
             backend_ready = docker_cli_ready and docker_socket_ready and image_ready
+            if design_type or checkpoint_path:
+                from opendde_harness.plugin.protein_design.core.asset_paths import checkpoint_status, resolve_checkpoint
+
+                selected = resolve_checkpoint(design_type or "antibody", checkpoint_path)
+                status = checkpoint_status(selected, design_type or "antibody")
+                backend_evidence.update(
+                    checkpoint_path=str(selected), checkpoint_ready=status["ready"], checkpoint_error=status["error"]
+                )
+                backend_ready = backend_ready and status["ready"]
 
         try:
             device = resolve_device()
@@ -489,6 +528,19 @@ class PythonProteinDesignHarness:
 
         options = dict(payload.get("options") or {})
         options["execution_mode"] = normalize_execution_mode(options.get("execution_mode"))
+        if options.get("design_type") == "minibinder" and options["execution_mode"] == "api":
+            raise ValueError("minibinder folding requires a general checkpoint in local/docker mode")
+        if options["execution_mode"] != "api":
+            from opendde_harness.plugin.protein_design.core.asset_paths import checkpoint_status, resolve_checkpoint
+
+            kind = options.get("design_type", "antibody")
+            checkpoint = resolve_checkpoint(kind, options.get("checkpoint_path"))
+            status = checkpoint_status(checkpoint, kind)
+            if not status["ready"]:
+                raise ValueError(
+                    f"{kind} checkpoint {checkpoint}: {status['error']}; run ddeharness compute prepare --mode local --design-mode {kind}"
+                )
+            options["checkpoint_path"] = str(checkpoint)
         task_output = self._task_output_path(payload)
         options["backend"] = payload.get("backend", "opendde")
         if str(options["backend"]).strip().lower() != "opendde":
@@ -543,6 +595,7 @@ class PythonProteinDesignHarness:
             source = raw_candidates[index]
             result_data = self._jsonable(result.to_dict())
             source_metadata = dict(source.get("metadata") or {})
+            source_metadata["design_type"] = options.get("design_type", "antibody")
             for key in ("parent_id", "skill_id", "status"):
                 if source.get(key) is not None:
                     source_metadata.setdefault(key, source[key])
@@ -578,17 +631,20 @@ class PythonProteinDesignHarness:
                 options,
             )
             metrics["gate_passed"] = 1.0 if gate_passed else 0.0
-            for key in (
-                "cdr_contact_fraction",
-                "framework_contact_fraction",
-            ):
+            gate_metric_names = (
+                ("total_binder_contacts", "binder_interface_residues", "coverage_ratio")
+                if options.get("design_type") == "minibinder"
+                else ("cdr_contact_fraction", "framework_contact_fraction")
+            )
+            for key in gate_metric_names:
                 value = gate_evidence.get(key)
                 if isinstance(value, (int, float)):
                     metrics[key] = float(value)
-            metrics["cdr3_gate_passed"] = 1.0 if gate_evidence.get("cdr3_gate_passed") else 0.0
-            metrics["cdr_contact_fraction_gate_passed"] = (
-                1.0 if gate_evidence.get("cdr_contact_fraction_gate_passed") else 0.0
-            )
+            if options.get("design_type") != "minibinder":
+                metrics["cdr3_gate_passed"] = 1.0 if gate_evidence.get("cdr3_gate_passed") else 0.0
+                metrics["cdr_contact_fraction_gate_passed"] = (
+                    1.0 if gate_evidence.get("cdr_contact_fraction_gate_passed") else 0.0
+                )
             source_metadata.update(
                 {
                     "gate_passed": gate_passed,
@@ -603,6 +659,7 @@ class PythonProteinDesignHarness:
                     )
 
                     loss_score = score_confidence_loss(
+                        design_type=str(options.get("design_type", "antibody")),
                         backend=str(result_data.get("backend") or payload.get("backend")),
                         confidence_path=result_data["all_atom_confidence_path"],
                         structure_path=structure_path,
@@ -708,8 +765,11 @@ class PythonProteinDesignHarness:
                 cdr3_positions=cdr3_positions,
                 all_cdr_positions=all_cdr_positions,
                 cdr_contact_fraction_threshold=float(options.get("cdr_contact_fraction_threshold", 0.5)),
+                design_type=str(options.get("design_type", "antibody")),
             )
             coverage = self._jsonable(coverage)
+            if options.get("design_type") == "minibinder":
+                return bool(passed), coverage
             if passed:
                 coverage["reason"] = (
                     "cdr_contact_fraction_passed" if coverage.get("epitope_gate_skipped") else "contacted_hotspot"

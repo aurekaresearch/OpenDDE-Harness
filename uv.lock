@@ -1961,6 +1961,7 @@ protein-design = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "biotite" },
     { name = "json-repair" },
     { name = "pexpect" },
     { name = "pip-audit" },
@@ -2009,6 +2010,7 @@ provides-extras = ["dev", "protein-design"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "biotite", specifier = ">=1.2,<2.0" },
     { name = "json-repair", specifier = ">=0.59.5" },
     { name = "pexpect", specifier = ">=4.9" },
     { name = "pip-audit", specifier = ">=2.10.0" },

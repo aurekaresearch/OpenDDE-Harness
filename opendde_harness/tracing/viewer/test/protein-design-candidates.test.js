@@ -29,6 +29,36 @@ const {
   shortTaskId
 } = require('../ui/protein-design-candidates')
 
+test('mini binder views use binder contacts and do not require antibody measurements', () => {
+  const candidate = {
+    candidateId: 'mini',
+    cycle: 0,
+    sequence: 'ACDEFG',
+    metrics: { iptm: 0.8, ranking_score: 0.7, ipsae: 0.6, loss: 1.2 },
+    metadata: { design_type: 'minibinder', chains: { B: 'ACDEFG' }, gate_evidence: { total_binder_contacts: 4 } }
+  }
+  const run = {
+    taskId: 'mini-run',
+    designType: 'minibinder',
+    mutablePositions: { B: [1, 3, 4] },
+    cycles: [{ cycle: 0, candidates: [candidate] }],
+    structures: []
+  }
+  const html = renderProteinDesignDashboard({ run })
+  assert.match(html, /Binder contacts/)
+  assert.doesNotMatch(html, />CDR contacts</)
+  assert.doesNotMatch(html, />Frame contacts</)
+  assert.doesNotMatch(html, /has-missing-properties/)
+  assert.deepEqual(candidateCdrRegions(candidate, run), [])
+  assert.doesNotMatch(html, /protein-inline-cdr|class="is-cdr|class="protein-full-cdr-label|Design [0-9]/)
+  assert.match(html, /aria-label="ACDEFG">ACDEFG<\/code>/)
+  assert.match(html, /Full sequence/)
+  assert.match(html, /data-copy-sequence="ACDEFG"/)
+  assert.deepEqual(candidateCdrRegions(candidate, { cdrRegionGroups: { B: [[1, 2]] } }), [])
+  assert.deepEqual(candidateCdrRegions({ ...candidate, metadata: {} }, run), [])
+  assert.ok(!propertyDefinitions(null, run).some(item => item.key === 'frame_contacts'))
+})
+
 test('post-filter reuses candidate rows and refolded metrics without mutating design results', () => {
   const original = {
     candidateId: 'a',

@@ -1,14 +1,14 @@
-"""The protein-design plugin supplies what the generic runtime used to hard-code."""
+"""Protein-design tools integrate with the main assistant's built-in prompt."""
 
 import re
 from pathlib import Path
+from unittest.mock import Mock
 
 from opendde_harness.agent.tools.shell import ExecTool
 from opendde_harness.context_engine.segments import render
 from opendde_harness.memory_engine.skill_local.registry import SkillRegistry
 from opendde_harness.plugin import active_registry
 from opendde_harness.plugin.protein_design.agents.skills import BUILTIN_PROTEIN_DESIGN_SKILLS, ProteinDesignSkillCatalog
-from opendde_harness.plugin.protein_design.prompts.identity import antibody_scope, identity_line
 from opendde_harness.plugin.protein_design.readiness import compute_configured
 from opendde_harness.plugin.protein_design.tools import control
 
@@ -31,39 +31,57 @@ CONTROL_TOOLS = (
 def test_plugin_is_active_with_its_data_contributions():
     registry = active_registry()
     assert "protein-design" in registry.activated_ids()
-    assert registry.prompt_segments("identity") == [identity_line()]
-    assert registry.prompt_segments("scope") == [antibody_scope()]
+    assert registry.prompt_segments("identity") == []
+    assert registry.prompt_segments("scope") == []
     assert registry.skills_dirs() == [PLUGIN_SKILLS]
     assert [plugin_id for plugin_id, _ in registry.readiness_checks()] == ["protein-design"]
 
 
 def test_identity_prompt_keeps_the_antibody_block_in_place(tmp_path):
     text = render.identity_text(tmp_path, model="openai/gpt-x")
-    head = "# OpenDDE Harness ϒ\n\nYou are OpenDDE Harness, an antibody design assistant.\n\n## Scope\n"
+    head = f"# OpenDDE Harness ϒ\n\n{render.PROTEIN_DESIGN_IDENTITY}\n\n## Scope\n"
     assert text.startswith(head)
-    assert f"{antibody_scope()}\n\n## Runtime\n" in text
+    assert f"{render.PROTEIN_DESIGN_SCOPE}\n\n## Runtime\n" in text
+    assert text.count(render.PROTEIN_DESIGN_SCOPE) == 1
     headings = [line for line in text.splitlines() if line.startswith("## ")]
     assert headings[:4] == ["## Scope", "## Preparing a design", "## Running and reading a design", "## Runtime"]
 
 
 def test_scope_names_the_bundled_examples_and_the_context_tool():
-    scope = antibody_scope()
+    scope = render.PROTEIN_DESIGN_SCOPE
     assert "Load the `protein-design` skill and call `protein_design_context` once" in scope
     for example in ("docs/examples/crlf2_quickstart.yaml", "docs/examples/cacng1_quickstart.yaml"):
         assert example in scope
         assert (REPO_ROOT / example).is_file()
 
 
+def test_identity_without_design_plugin_preserves_other_contributions(monkeypatch, tmp_path):
+    registry = Mock()
+    registry.activated_ids.return_value = []
+    registry.prompt_segments.side_effect = lambda slot: {
+        "identity": ["You are Demo."],
+        "scope": ["## Demo Scope\n- be brief"],
+    }[slot]
+    monkeypatch.setattr(render, "active_registry", lambda: registry)
+
+    text = render.identity_text(tmp_path)
+
+    assert "You are Demo." in text
+    assert "## Demo Scope\n- be brief" in text
+    assert render.PROTEIN_DESIGN_IDENTITY not in text
+    assert render.PROTEIN_DESIGN_SCOPE not in text
+
+
 def test_scope_only_names_tools_the_plugin_registers():
     source = Path(control.__file__).read_text(encoding="utf-8")
     registered = set(re.findall(r'return "(protein_design_\w+)"', source))
     assert set(CONTROL_TOOLS) <= registered
-    assert set(re.findall(r"protein_design_\w+", antibody_scope())) <= registered
+    assert set(re.findall(r"protein_design_\w+", render.PROTEIN_DESIGN_SCOPE)) <= registered
 
 
 def test_language_directive_sits_between_identity_and_scope(tmp_path):
     text = render.identity_text(tmp_path, model="openai/gpt-x", language="zh")
-    assert "antibody design assistant.\n\nAlways respond in Simplified Chinese (简体中文)" in text
+    assert f"{render.PROTEIN_DESIGN_IDENTITY}\n\nAlways respond in Simplified Chinese (简体中文)" in text
     assert "another language.\n\n## Scope" in text
     assert "简体中文" not in render.identity_text(tmp_path, model="openai/gpt-x")
 

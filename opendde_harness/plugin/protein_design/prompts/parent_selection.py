@@ -20,13 +20,14 @@ Schema:
 }
 """
 
-PARENT_SELECTION_PROMPT = """Select the next parent for cycle {cycle_num}.
-
-Current population:
-{candidate_table}
+PARENT_SELECTION_PROMPT = """Select the next parent from the supplied population.
+Return the required JSON object only.
 
 Latest reflection:
 {reflect_feedback}
 
-Return the required JSON object only.
+Current population:
+{candidate_table}
+
+Current cycle: {cycle_num}.
 """

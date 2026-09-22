@@ -107,7 +107,8 @@ class ConstrainedElitePopulation:
         if not keys:
             return 0.0
         is_single_chain_three_cdrs = (
-            len(keys) == 3
+            self._config.design_type == "antibody"
+            and len(keys) == 3
             and len({chain for chain, _index in keys}) == 1
             and {index for _chain, index in keys} == {0, 1, 2}
         )
@@ -142,6 +143,8 @@ class ConstrainedElitePopulation:
         return {"": candidate.sequence}
 
     def _groups(self, chain: str, length: int) -> list[list[int]]:
+        if self._config.design_type == "minibinder":
+            return [[position for position in self._config.mutable_positions.get(chain, []) if 0 <= position < length]]
         groups = self._config.cdr_region_groups.get(chain, [])
         if groups:
             return [[position for position in group if 0 <= position < length] for group in groups]

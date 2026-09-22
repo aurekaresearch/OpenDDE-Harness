@@ -6,6 +6,101 @@ or [CACNG1](examples/cacng1_quickstart.yaml). YAML contains scientific settings;
 LLM credentials, compute tokens, and service configuration belong in the application
 configuration, not this file. Unknown keys are rejected before launch.
 
+## Inspect a running task
+
+```bash
+ddeharness protein-design status --task-id <task-id>
+ddeharness protein-design status --task-id <task-id> --json
+ddeharness protein-design status
+```
+
+Omit `--task-id` to list local tasks. Status uses saved task state and the same
+worker-liveness reconciliation as the Agent's `protein_design_status` tool;
+it does not start a new computation. `--json` includes the full snapshot.
+
+## Mini binder sequence design and optimization
+
+`design.type` (`type`) defaults to `antibody`; set it to `minibinder` to design or
+optimize a fixed-length single-chain non-antibody binder. This mode does not generate
+backbone coordinates or insert/delete residues. Supply a complete or X-masked sequence,
+`chain_type: minibinder`, and explicit zero-based `designable_residues`.
+`fixed_residues` overrides the mutable mask. Do not supply `cdr_regions` or
+`cdr_contact_fraction_threshold` in this mode.
+
+Every X must be mutable, never fixed. An all-X seed needs no initial structure:
+`minibinder-full-redesign` assigns every mutable position before the first fold.
+For example, a 6-residue test seed uses `sequence: XXXXXX` and
+`designable_residues: "0:5"`; choose a suitable actual design length for your task.
+
+With `objective: loss`, minibinders use a separate scoring formula, not the
+antibody CDR/framework objective. Fixed residues only constrain sequence edits.
+`plddt`, intra-binder `pae`, `con`, `rg`, and `dgram_cce` cover the whole binder;
+`i_pae` and `i_con` measure its target interface (restricted to configured
+hotspots when present). `i_plddt` weights binder confidence by each residue's
+maximum target-contact probability, falling back to whole-binder confidence
+when all those probabilities are zero. The existing `i_ptm` and ESM-2 terms
+remain. There is no framework-contact penalty or CDR/framework contact ratio.
+The reported formula version is `minibinder-confidence-contact8-proxy-esm2-v1`;
+its loss values should not be compared directly with antibody-mode losses.
+
+Select `minibinder-full-redesign`, `minibinder-point-mutation` and/or `minibinder-inverse-folding` in
+`router_skill_probabilities`, including schedule overrides. The default is point
+mutation. `num_mutations` is a positive integer or an inclusive range (`"1-3"`),
+defaults to 1, and must fit the mutable mask. Python enforces that budget for point
+mutation; full redesign, inverse folding and terminal MPNN redesign obey the mutable mask instead.
+Inverse folding requires a successful parent structure. `bootstrap_full_redesign_cycles`
+and `stagnation_full_redesign_threshold` enable minibinder full-design resets.
+
+The compute host selects `opendde_abag.pt` for antibodies and `opendde.pt` for
+mini binders. An explicit `fold.checkpoint_path` (`checkpoint_path`) overrides this selection for the
+task and its refolds; custom compute-service checkpoint paths are also preserved.
+Mini binders reject antibody (`abag`) checkpoints and require local/docker folding;
+API model selection is not supported. Worker selection checks the actual checkpoint
+on the compute host before design starts, including existence, readability and a
+nonzero size. These checks do not establish scientific suitability.
+
+Local onboarding offers antibody, minibinder, or both checkpoints and reports each
+mode separately. Shared `common/` assets are reused. To prepare both on a compute host:
+
+```bash
+ddeharness compute prepare --mode local --design-mode both
+```
+
+Use `--design-mode antibody` or `--design-mode minibinder` to prepare only that mode.
+Downloads verify published sizes and SHA256; routine readiness checks do not rehash
+multi-gigabyte weights. API mode does not require local OpenDDE checkpoints.
+
+The mini binder structure gate requires target interface contacts and contact with
+at least one configured hotspot when hotspots are present. Hotspots use zero-based
+target sequence order and are mapped to structure residue IDs. CDR/framework gates
+are not applied. Antibody developability tools are not run: unsupported QC properties
+remain Unknown, rather than being treated as experimentally measured. Independent
+mini binder memory, prompt profiles and dashboard labels avoid antibody assumptions.
+
+Configuration fragment (merge with actual, reviewed target and binder inputs):
+
+```yaml
+design:
+  type: minibinder
+  n_cycles: 10
+  num_sequences: 8
+  num_mutations: 1
+  router_skill_probabilities:
+    minibinder-point-mutation: 1.0
+    minibinder-inverse-folding: 0.0
+  post_refold_filter:
+    enabled: true
+    top_k: 10
+fold:
+  model: opendde
+  execution_mode: local
+  # Optional: checkpoint_path: /custom/compute-host/checkpoint/model.pt
+```
+
+Prepare the general checkpoint on the compute host and review MSA policy before validation.
+This is not a runnable design or launch authorization. Start with a small
+user-approved smoke run and validate scientifically before a large campaign.
+
 ## Configuration precedence and indexing
 
 - Explicit task `fold` fields override application `fold_defaults`. Remaining
@@ -299,7 +394,13 @@ different scaffold topologies. Binder-side `hotspots` is not a supported key.
 | `compute.placement.fold` | Optional list of GPU indices for folding. |
 | `compute.placement.esm` | Optional ESM2 GPU index. |
 | `compute.placement.mpnn` | Optional SolubleMPNN GPU index. |
-| `compute.placement.cp_degree` | Defaults to the length of an explicit `fold` GPU list, otherwise `1`; must equal that list length when supplied. |
+| `compute.placement.cp_degree` | Defaults to `1` (CP disabled), even with an explicit `fold` GPU list. Set greater than `1` to opt in; the list must contain at least this many devices, with the first `cp_degree` selected. |
+
+Context parallelism is opt-in. A legacy `fold.gpus: "0,1,2,3"` list alone
+does not enable four-GPU CP: without explicit CP placement, one GPU is used.
+Use `compute.placement.cp_degree: 4` to request four-GPU CP explicitly.
+Direct compute API/backend callers can set `fold.cp_degree` (default `1`);
+workflow placement takes precedence over that backend option.
 | `llm.model_name` | Inherit configured default model; task model override. |
 | `llm.max_tokens` | Inherit the phase profile; positive output token limit. |
 

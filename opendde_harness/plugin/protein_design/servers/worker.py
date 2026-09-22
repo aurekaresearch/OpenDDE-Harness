@@ -110,7 +110,7 @@ async def run_task(task_id: str, task_root: Path) -> TaskSnapshot:
         # plugin-level default previously wrote under ``default`` and searched
         # under ``protein-design``, yielding an apparently healthy empty store.
         agent_id=str(getattr(backend, "agent_id", None) or plugin_config.get("memory_agent_id", "default")),
-        app_id="protein-design",
+        app_id="protein-design-minibinder" if workflow.design_type == "minibinder" else "protein-design",
         project_id=None,
     )
     phases = ProteinDesignPhases(

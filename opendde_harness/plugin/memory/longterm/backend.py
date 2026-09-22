@@ -27,6 +27,7 @@ Three architectural invariants worth re-stating:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -284,6 +285,11 @@ class _HttpMemoryAdapter:
             "session_id": session_id,
             "messages": payload_messages,
         }
+        if app_id == "protein-design":
+            # /add otherwise runs boundary detection/extraction inline, which
+            # can exceed the short append budget. Persist first; the existing
+            # reflection-cycle /flush performs extraction with its own budget.
+            body["defer_extraction"] = True
         if app_id is not None:
             body["app_id"] = app_id
         if project_id is not None:
@@ -841,6 +847,15 @@ class LongTermMemoryBackend:
             )
             return False
         except Exception as e:
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 422:
+                # A rejected payload does not mean the service is unreachable.
+                # Do not log the response body: validation errors can echo input.
+                self._dropped_writes += 1
+                self._logger.warning(
+                    "LongTermMemoryBackend.store rejected (HTTP 422: invalid memory payload); "
+                    "this turn was not indexed",
+                )
+                return False
             self._demote_from_exception(e)
             self._dropped_writes += 1
             self._logger.warning(
@@ -995,9 +1010,21 @@ class LongTermMemoryBackend:
             content = _text_of(m)
             # An assistant message may carry tool calls with empty text — keep
             # it (the tool result downstream references its id).
-            tool_calls = [
-                {"id": call.get("id"), "type": "function", "name": call.get("name")} for call in msg.tool_calls_of(m)
-            ]
+            tool_calls = []
+            for call in msg.tool_calls_of(m):
+                arguments = call.get("arguments")
+                tool_calls.append(
+                    {
+                        "id": call.get("id"),
+                        "type": "function",
+                        "function": {
+                            "name": call.get("name"),
+                            "arguments": arguments
+                            if isinstance(arguments, str)
+                            else json.dumps(arguments if arguments is not None else {}, ensure_ascii=False),
+                        },
+                    }
+                )
             if not content and not tool_calls:
                 continue
             entry: dict[str, Any] = {

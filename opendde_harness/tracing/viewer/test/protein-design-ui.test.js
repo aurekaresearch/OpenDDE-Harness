@@ -8,10 +8,9 @@ const shell = require('../ui/shell')
 test('theme control restores the saved mode and persists both toggle directions', () => {
   const vm = require('node:vm')
   const source = fs.readFileSync(path.join(__dirname, '../ui/app.js'), 'utf8')
-  const themeSource = source.slice(
-    source.indexOf('function applyTheme(theme)'),
-    source.lastIndexOf('applyStaticI18n();')
-  )
+  const themeEnd = source.lastIndexOf('\napplyStaticI18n()')
+  assert.ok(themeEnd > source.indexOf('function applyTheme(theme)'))
+  const themeSource = source.slice(source.indexOf('function applyTheme(theme)'), themeEnd)
   const attributes = {}
   let click
   const button = {

@@ -12,10 +12,42 @@ OPENDDE_COMMON_ASSETS = (
     "release_date_cache.json",
 )
 
-#: The folding checkpoint a fresh install prepares and mounts. This harness
-#: designs antibodies, so the antibody-antigen weights are the default; the
-#: general checkpoint stays available as ``--checkpoint opendde.pt``.
+#: Legacy installations default to antibody weights; new tasks resolve by mode
+#: on the compute host, unless an explicit checkpoint was provided.
 DEFAULT_CHECKPOINT = "opendde_abag.pt"
+DESIGN_CHECKPOINTS = {"antibody": DEFAULT_CHECKPOINT, "minibinder": "opendde.pt"}
+
+
+def resolve_checkpoint(design_type: str = "antibody", explicit: str | None = None) -> Path:
+    """Resolve on the compute host; explicit/custom paths retain precedence."""
+    if design_type not in DESIGN_CHECKPOINTS:
+        raise ValueError(f"Unknown design type: {design_type}")
+    configured = explicit or os.environ.get("STRUCTPRED_OPENDDE_CHECKPOINT_PATH", "")
+    if configured:
+        path = Path(configured).expanduser()
+        if explicit or path.name not in DESIGN_CHECKPOINTS.values():
+            return path
+        return path.with_name(DESIGN_CHECKPOINTS[design_type])
+    root = Path(os.environ.get("STRUCTPRED_OPENDDE_ROOT_DIR") or opendde_cache_path()).expanduser()
+    return root / "checkpoint" / DESIGN_CHECKPOINTS[design_type]
+
+
+def checkpoint_status(path: Path, design_type: str) -> dict:
+    """Lightweight runtime check; full digest verification belongs to preparation."""
+    error = None
+    try:
+        if design_type == "minibinder" and "abag" in path.name.lower():
+            error = "minibinder requires a general protein checkpoint, not antibody weights"
+        elif not path.is_file() or not os.access(path, os.R_OK):
+            error = "missing or unreadable"
+        elif not path.stat().st_size:
+            error = "empty file"
+        else:
+            with path.open("rb") as stream:
+                stream.read(1)
+    except OSError as exc:
+        error = str(exc)
+    return {"path": str(path), "ready": error is None, "error": error}
 
 
 def opendde_cache_path() -> Path:

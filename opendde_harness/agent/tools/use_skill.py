@@ -13,20 +13,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from opendde_harness.agent.tools.base import Tool
-from opendde_harness.memory_engine.skill_forge.catalog import is_blocked, normalize_blocklist
+from opendde_harness.memory_engine.skill_forge.loader import SkillLoader
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from opendde_harness.memory_engine.skill_local.registry import SkillRegistry
-
-
-def _split_qualified_id(skill_id: str) -> tuple[str, str]:
-    """Split ``<source>/<native_id>``; a bare id is treated as ``local``."""
-    source, sep, native = skill_id.partition("/")
-    if not sep:
-        return "local", source
-    return source, native
 
 
 class UseSkillTool(Tool):
@@ -38,8 +30,7 @@ class UseSkillTool(Tool):
         *,
         blocklist: "Iterable[str] | None" = None,
     ) -> None:
-        self._registry = registry
-        self._blocklist = normalize_blocklist(blocklist)
+        self._loader = SkillLoader(registry, blocklist=blocklist)
 
     @property
     def name(self) -> str:
@@ -72,27 +63,7 @@ class UseSkillTool(Tool):
         }
 
     async def execute(self, skill_id: Any = None, **_: Any) -> str:
-        if not skill_id or not isinstance(skill_id, str):
-            return "Error: 'skill_id' is required — a skill's qualified id like 'local/<name>'."
-        source, native = _split_qualified_id(skill_id)
-        if is_blocked(self._blocklist, native):
-            return f"Error: skill {native!r} is on the operator blocklist (skillForge.blocklist) and cannot be used."
-        if source not in ("local", "memory"):
-            return f"Error: unknown skill source {source!r} in {skill_id!r} (expected local or memory)."
-        if self._registry is None:
-            meta = None
-        elif source == "local":
-            # ``local`` is a logical SkillForge source, not a physical
-            # SkillRegistry layer. Resolve through normal layer precedence.
-            meta = self._registry.get(native)
-        else:
-            meta = self._registry.get(native, source=source) or self._registry.get(native)
-        if meta is None:
-            return (
-                f"Error: no {source} skill {native!r} found on disk. If it is a "
-                f"pure-instruction skill its body is already in your context."
-            )
-        scripts = meta.path.parent / "scripts"
-        if scripts.is_dir():
-            return f"## {meta.name}\nscripts_dir: {scripts}\ncached: true\n\n{meta.content}"
-        return f"## {meta.name}\n(no bundled scripts — pure-instruction skill; follow the body)\n\n{meta.content}"
+        try:
+            return self._loader.load(skill_id).render()
+        except ValueError as exc:
+            return f"Error: {exc}"
