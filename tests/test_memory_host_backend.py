@@ -769,17 +769,15 @@ async def test_the_profile_reaches_the_prompt_exactly_once_when_the_writer_owns_
     assert segment.text.startswith("# Memory")
 
 
-async def test_a_backend_that_only_indexes_leaves_the_profile_read_to_the_store(tmp_path):
-    """The other half of the same rule. A plugin backend does not know ``user.md``
-    exists, so the store reads it and the backend's hits join it as a second
-    lane."""
+async def test_an_external_backend_is_the_only_long_term_memory_source(tmp_path):
+    """An old local profile must not duplicate or contradict external recall."""
     from opendde_harness.context_engine.segments.memory import MemorySegmentBuilder
 
     store = MemoryStore(tmp_path)
     store.write_long_term(_PROFILE)
     segment = await MemorySegmentBuilder(store, IndexBackend()).build(a_context("what is my role"))
 
-    assert "protein engineer" in segment.text, "the profile still reaches the prompt"
+    assert "protein engineer" not in segment.text
     assert "the user prefers HEPES buffer" in segment.text, "and so do the index's hits"
     assert segment.meta["memory_hits"] == 1
 

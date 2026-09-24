@@ -223,7 +223,7 @@ async def test_the_identity_block_is_rendered_from_the_turn_not_from_config(tmp_
     assert str(tmp_path) in first
     assert "vendor/z" in first and "running on model" not in second
     assert "简体中文" in first and "简体中文" not in second
-    assert "episodes.md" in first and "episodes.md" not in second
+    assert "episodes.md" not in first and "episodes.md" not in second
 
 
 async def test_two_sessions_assembling_at_once_keep_their_own_prefix() -> None:

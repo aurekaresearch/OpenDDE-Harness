@@ -26,7 +26,7 @@ from opendde_harness.plugin.protein_design.core.schedule import apply_cycle_sche
 
 def configuration():
     return {
-        "target": {"name": "test", "chains": {"A": {"sequence": "ACDE", "hotspots": [0]}}},
+        "target": {"name": "test", "chains": {"A": {"sequence": "ACDE", "hotspots": [1]}}},
         "initial_binders": [
             {
                 "name": "seed",
@@ -34,8 +34,8 @@ def configuration():
                     "B": {
                         "sequence": "ACDEFG",
                         "chain_type": "minibinder",
-                        "designable_residues": "1:4",
-                        "fixed_residues": [2],
+                        "designable_residues": "2:5",
+                        "fixed_residues": [3],
                     }
                 },
             }
@@ -59,7 +59,7 @@ def test_minibinder_permissions_are_not_cdr_annotations():
 
 def masked_configuration(sequence="XXXXXX"):
     data = configuration()
-    data["initial_binders"][0]["chains"]["B"].update(sequence=sequence, designable_residues="0:5", fixed_residues=[])
+    data["initial_binders"][0]["chains"]["B"].update(sequence=sequence, designable_residues="1:6", fixed_residues=[])
     return data
 
 
@@ -84,7 +84,7 @@ def test_masked_minibinder_requires_full_redesign_even_with_inverse_structure(se
 def test_masked_minibinder_rejects_immutable_x(fixed):
     data = masked_configuration()
     chain = data["initial_binders"][0]["chains"]["B"]
-    chain.update({"fixed_residues": [0]} if fixed else {"designable_residues": "1:5"})
+    chain.update({"fixed_residues": [1]} if fixed else {"designable_residues": "2:6"})
     with pytest.raises(ValueError, match="X placeholders must be mutable"):
         WorkflowConfigLoader._normalize_config(data)
 
@@ -110,7 +110,7 @@ def test_minibinder_full_redesign_resets_and_schedule():
 @pytest.mark.parametrize("invalid", ["missing", "duplicate", "fixed", "unknown", "length"])
 def test_minibinder_full_redesign_rejects_invalid_assignments(invalid):
     context = ProposalContext("seed", {"B": "AXXXXG"}, {"B": [1, 2, 3, 4]}, None, 1)
-    mutations = [["B", i, aa] for i, aa in zip(range(1, 5), "CDEF")]
+    mutations = [["B", i + 1, aa] for i, aa in zip(range(1, 5), "CDEF")]
     if invalid == "missing":
         mutations.pop()
     elif invalid == "duplicate":
@@ -146,7 +146,7 @@ def test_minibinder_full_design_materializes_seed_and_repairs_missing_positions(
         )
         complete = DesignAgentOutput(
             skill_id="minibinder-full-redesign",
-            candidates=[{"candidate_id": "good", "mutations": [["B", i, aa] for i, aa in enumerate("ACDEFG")]}],
+            candidates=[{"candidate_id": "good", "mutations": [["B", i + 1, aa] for i, aa in enumerate("ACDEFG")]}],
         )
         session = SimpleNamespace(run=AsyncMock(side_effect=[partial, complete]))
         phases = ProteinDesignPhases(session, SimpleNamespace(), DesignMemory(None, agent_id="test"))
@@ -172,7 +172,7 @@ def test_full_minibinder_design_preserves_fixed_residues_and_ignores_point_budge
     context = ProposalContext("seed", {"B": "AXXXXG"}, {"B": [1, 2, 3, 4]}, None, 1, mutation_count_bounds=(1, 1))
     output = DesignAgentOutput(
         skill_id="minibinder-full-redesign",
-        candidates=[{"candidate_id": "child", "mutations": [["B", i, aa] for i, aa in zip(range(1, 5), "CDEF")]}],
+        candidates=[{"candidate_id": "child", "mutations": [["B", i + 1, aa] for i, aa in zip(range(1, 5), "CDEF")]}],
     )
     result = asyncio.run(
         ProposalExecutor(None).execute(output, route(force_skill_id="minibinder-full-redesign"), context)
@@ -278,7 +278,7 @@ def test_minibinder_route_checks_structure_and_disallows_antibody_skills():
         route(skill_weights={"cdr-point-mutation": 1})
 
 
-@pytest.mark.parametrize("position,valid", [(1, True), (0, False), (9, False)])
+@pytest.mark.parametrize("position,valid", [(2, True), (0, False), (1, False), (9, False)])
 def test_point_mutations_keep_fixed_residues_and_length(position, valid):
     output = DesignAgentOutput(
         skill_id="minibinder-point-mutation",
@@ -341,7 +341,7 @@ class Session:
                 candidates=[
                     {
                         "candidate_id": "child",
-                        "mutations": [{"chain_id": "B", "position": 1, "from_aa": "C", "to_aa": "W"}],
+                        "mutations": [{"chain_id": "B", "position": 2, "from_aa": "C", "to_aa": "W"}],
                     }
                 ],
             )
@@ -421,8 +421,8 @@ def test_minibinder_point_mutation_budget_is_enforced():
             {
                 "candidate_id": "child",
                 "mutations": [
-                    {"chain_id": "B", "position": 1, "to_aa": "W"},
-                    {"chain_id": "B", "position": 3, "to_aa": "Y"},
+                    {"chain_id": "B", "position": 2, "to_aa": "W"},
+                    {"chain_id": "B", "position": 4, "to_aa": "Y"},
                 ],
             }
         ],

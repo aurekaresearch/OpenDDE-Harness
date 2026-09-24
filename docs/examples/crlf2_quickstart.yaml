@@ -29,7 +29,6 @@ design:
 fold:
   # These local-folding settings need adaptation for API mode; see docs/protein-design.md.
   model: opendde
-  gpus: "0,1,2,3,4,5,6,7"
   seeds: [973520]
   use_msa: false
   enable_msa_search: false
@@ -45,7 +44,7 @@ initial_binders:
     chains:
       D:
         sequence: EVQLVESGGGLVQPGGSLRLSCAASPAPSGPLYLHWFRQAPGQEREFVASINSSSTSTYYADSVRGRFTNSRDNSKNTLYLQMNSLRAEDTAVYYCAAYPYPPPPPEGPPPPGPFGQGTLVTVSS
-        # Position ranges are zero-based and inclusive at both ends.
+        # Position ranges are one-based and inclusive at both ends.
         # Framework positions outside these CDRs are fixed automatically.
-        cdr_regions: "25:34,49:58,98:114"
+        cdr_regions: "26:35,50:59,99:115"
         chain_type: VHH

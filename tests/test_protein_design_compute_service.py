@@ -141,15 +141,15 @@ async def test_a_cpu_worker_still_runs_one_job_at_a_time() -> None:
 @pytest.mark.parametrize(
     "placement, options, expected",
     [
-        (None, {}, (1, None)),
+        (None, {}, (2, None)),
         (None, {"gpus": "none"}, (0, None)),
         (None, {"device": "cpu"}, (0, None)),
-        (None, {"gpus": "1,2"}, (1, [1])),
-        ({}, {"gpus": "0,1,2,3"}, (1, [0])),
+        (None, {"gpus": "1,2"}, (2, [1, 2])),
+        ({}, {"gpus": "0,1,2,3"}, (2, [0, 1])),
         ({"cp_degree": 2}, {"gpus": "1,2"}, (2, [1, 2])),
         (None, {"gpus": "1,2", "cp_degree": 2}, (2, [1, 2])),
         ({"cp_degree": 2}, {}, (2, None)),
-        ({"fold": [2, 3]}, {"gpus": "all"}, (1, [2])),
+        ({"fold": [2]}, {"gpus": "all"}, (1, [2])),
         ({"fold": [2, 3], "cp_degree": 2}, {"gpus": "all"}, (2, [2, 3])),
     ],
 )
@@ -158,7 +158,153 @@ def test_fold_gpu_requests_follow_the_placement_then_the_fold_options(placement,
 
     requested = Placement.model_validate(placement) if placement is not None else None
 
-    assert api_module.fold_gpu_request(requested, options) == expected
+    assert (
+        api_module.fold_gpu_request(requested, options, candidate_count=2, available_devices=[0, 1, 2, 3]) == expected
+    )
+
+
+def test_fold_gpu_request_rejects_duplicate_gpu_ids() -> None:
+    with pytest.raises(ValueError, match="repeat"):
+        api_module.fold_gpu_request(None, {"gpus": "0,0"}, candidate_count=2, available_devices=[0, 1])
+
+
+def test_eight_visible_gpus_become_eight_candidate_workers_without_cp() -> None:
+    assert api_module.fold_gpu_request(None, {"gpus": "all"}, candidate_count=20, available_devices=list(range(8))) == (
+        8,
+        None,
+    )
+
+
+async def test_one_fold_job_dispatches_candidates_to_single_gpu_workers_in_order() -> None:
+    class Harness:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+            self.release = asyncio.Event()
+
+        async def invoke(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+            assert operation == "fold"
+            self.calls.append(payload)
+            await self.release.wait()
+            return {
+                "candidates": [
+                    {"candidate_id": item["candidate_id"], "metadata": {"success": True}}
+                    for item in payload["candidates"]
+                ]
+            }
+
+    harness = Harness()
+    store = api_module.JobStore(harness, leases=GpuLeaseTable([0, 1]))
+    candidates = [{"candidate_id": str(index)} for index in range(5)]
+    submitted = store.submit("fold", {"candidates": candidates, "options": {}}, count=2, devices=[0, 1])
+    for _ in range(20):
+        if len(harness.calls) == 2:
+            break
+        await asyncio.sleep(0)
+    assert len(harness.calls) == 2
+    assert [call["options"]["gpus"] for call in harness.calls] == ["0", "1"]
+    assert all(call["options"]["cp_degree"] == 1 for call in harness.calls)
+    assert [[item["candidate_id"] for item in call["candidates"]] for call in harness.calls] == [
+        ["0", "2", "4"],
+        ["1", "3"],
+    ]
+    harness.release.set()
+    await store.drain()
+    assert [item["candidate_id"] for item in store.get(submitted.job_id).result["candidates"]] == [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+    ]
+
+
+@pytest.mark.parametrize("devices", [None, [0, 1]])
+async def test_fold_uses_idle_subset_of_gpu_pool_while_another_gpu_is_busy(devices) -> None:
+    class Harness:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.calls: list[dict[str, Any]] = []
+
+        async def invoke(self, _operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append(payload)
+            self.started.set()
+            return {
+                "candidates": [
+                    {"candidate_id": item["candidate_id"], "metadata": {"success": True}}
+                    for item in payload["candidates"]
+                ]
+            }
+
+    harness = Harness()
+    leases = GpuLeaseTable([0, 1])
+    store = api_module.JobStore(harness, leases=leases)
+    payload = {"candidates": [{"candidate_id": str(index)} for index in range(3)], "options": {}}
+    async with leases.lease("esm", job_id="busy", devices=[1]):
+        submitted = store.submit("fold", payload, count=2, devices=devices)
+        try:
+            await asyncio.wait_for(harness.started.wait(), timeout=1.0)
+            await store.drain()
+            assert [call["options"]["gpus"] for call in harness.calls] == ["0"]
+            assert [item["candidate_id"] for item in store.get(submitted.job_id).result["candidates"]] == [
+                "0",
+                "1",
+                "2",
+            ]
+        finally:
+            if not harness.started.is_set():
+                await store.cancel(submitted.job_id)
+
+
+async def test_context_parallel_fold_waits_for_every_requested_gpu() -> None:
+    class Harness:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def invoke(self, _operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append(payload)
+            return {"candidates": [{"candidate_id": "one", "metadata": {"success": True}}]}
+
+    harness = Harness()
+    leases = GpuLeaseTable([0, 1])
+    store = api_module.JobStore(harness, leases=leases)
+    async with leases.lease("esm", job_id="busy", devices=[1]):
+        submitted = store.submit(
+            "fold",
+            {"candidates": [{"candidate_id": "one"}], "options": {"cp_degree": 2}},
+            count=2,
+            devices=[0, 1],
+        )
+        await _settle()
+        assert harness.calls == []
+    await store.drain()
+    assert store.get(submitted.job_id).status == api_module.JobState.SUCCEEDED
+    assert harness.calls[0]["options"]["gpus"] == "0,1"
+
+
+async def test_parallel_fold_only_fails_when_all_candidates_fail() -> None:
+    class Harness:
+        async def invoke(self, _operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "candidates": [
+                    {
+                        "candidate_id": item["candidate_id"],
+                        "metadata": {"success": payload["options"]["gpus"] == "1", "error": "no structure"},
+                    }
+                    for item in payload["candidates"]
+                ]
+            }
+
+    store = api_module.JobStore(Harness(), leases=GpuLeaseTable([0, 1]))
+    payload = {"candidates": [{"candidate_id": "failed"}, {"candidate_id": "passed"}], "options": {}}
+    submitted = store.submit("fold", payload, count=2, devices=[0, 1])
+    await store.drain()
+    assert store.get(submitted.job_id).status == api_module.JobState.SUCCEEDED
+
+    store = api_module.JobStore(Harness(), leases=GpuLeaseTable([0, 2]))
+    submitted = store.submit("fold", payload, count=2, devices=[0, 2])
+    await store.drain()
+    assert store.get(submitted.job_id).status == api_module.JobState.FAILED
+    assert "All OpenDDE candidates failed" in store.get(submitted.job_id).error
 
 
 def test_leased_devices_reach_the_fold_esm_and_mpnn_payloads() -> None:
@@ -339,6 +485,19 @@ def test_the_placement_of_a_fold_request_reaches_the_harness(service) -> None:
     assert payload["options"]["gpus"] == "1"
     assert "placement" not in payload
 
+    harness.gate.set()
+
+
+def test_remote_api_fold_keeps_one_batch_and_uses_no_local_gpu_lease(service) -> None:
+    client, harness, _exits = service
+    body = {
+        "candidates": [{"candidate_id": "a", "sequence": "MKV"}, {"candidate_id": "b", "sequence": "MAA"}],
+        "options": {"execution_mode": "api", "gpus": "all"},
+    }
+    client.post("/fold", json=body)
+    assert _await(lambda: len(harness.calls) == 1)
+    assert len(harness.calls[0][1]["candidates"]) == 2
+    assert client.get("/health").json()["workers"]["gpu_leases"] == [{"index": 0, "jobs": []}, {"index": 1, "jobs": []}]
     harness.gate.set()
 
 

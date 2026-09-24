@@ -720,6 +720,7 @@ class WorkflowConfigLoader:
 
     @staticmethod
     def _parse_positions(value: Any, sequence_length: int) -> list[int]:
+        """Read one-based, inclusive YAML positions into internal zero-based indices."""
         positions: set[int] = set()
         if value is None:
             return []
@@ -732,14 +733,14 @@ class WorkflowConfigLoader:
                 start, end = (int(part) for part in token.split(":", 1))
                 if start > end:
                     raise ValueError(f"invalid residue range {token!r}: start is greater than end")
-                if start < 0 or end >= sequence_length:
+                if start < 1 or end > sequence_length:
                     raise ValueError(f"residue range {token!r} is outside sequence length {sequence_length}")
-                positions.update(range(start, end + 1))
+                positions.update(range(start - 1, end))
             else:
                 position = int(token)
-                if position < 0 or position >= sequence_length:
+                if position < 1 or position > sequence_length:
                     raise ValueError(f"residue position {position} is outside sequence length {sequence_length}")
-                positions.add(position)
+                positions.add(position - 1)
         return sorted(positions)
 
     @staticmethod

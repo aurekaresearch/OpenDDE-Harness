@@ -29,7 +29,7 @@ def test_system_is_identical_when_cycles_routes_and_memory_change():
     second = session._system_message(ProteinDesignPhases._design_profile(cfg))
     assert first == second
     assert "test-target" in first and '"A":"ACDE"' in first
-    assert '"B":[1,2]' in first and '"B":[0,3]' in first
+    assert '"B":[2,3]' in first and '"B":[1,4]' in first
     assert "new reflection" not in first and "new gate" not in first
     assert "=== TARGET ===" not in DESIGN_PROMPT
     assert "=== FIXED DESIGN CONSTRAINTS ===" not in DESIGN_PROMPT

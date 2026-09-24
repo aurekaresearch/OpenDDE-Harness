@@ -42,7 +42,6 @@ from typing import Any, Callable, Iterator
 from loguru import logger
 
 from opendde_harness.utils.atomic_io import locked_append
-from opendde_harness.utils.helpers import ensure_dir
 
 _RELEVANCE_TOKEN_RE = re.compile(r"\w{2,}", re.UNICODE)
 
@@ -413,12 +412,12 @@ def _atomic_write_text(path: Path, data: str) -> None:
 
 
 class MemoryStore:
-    """The workspace's hand-maintained profile and episodic log, read transactionally.
+    """The scoped local-backend profile and episodic log, read transactionally.
 
-    Two files under the ``user_memory`` pillar: ``profile/user.md`` (what
+    Two files under the instance's ``memory/host/<scope>``: ``profile/user.md`` (what
     :meth:`get_memory_context` puts in the prompt) and
     ``episodic/episodes.md`` (grep-searchable by the agent). Plus one
-    versioned state file for the store's own cursors.
+    versioned state file and shared lock in ``state/<scope>/memory``.
     """
 
     #: Bumped when the shape of the state file changes. A file written by a
@@ -429,19 +428,23 @@ class MemoryStore:
         self,
         workspace: Path,
         now_fn: Callable[[], datetime] | None = None,
+        *,
+        memory_dir: Path | None = None,
+        state_dir: Path | None = None,
     ):
-        # User profile + episodic log live under the ``user_memory``
-        # pillar. ``memory_dir`` is an alias of ``memory_file.parent``
-        # for callsites that derive sibling paths (lock file below).
-        self.memory_file = ensure_dir(workspace / "user_memory" / "profile") / "user.md"
-        self.history_file = ensure_dir(workspace / "user_memory" / "episodic") / "episodes.md"
+        from opendde_harness.config.paths import assert_storage_ready, get_workspace_storage
+
+        storage = get_workspace_storage(workspace)
+        assert_storage_ready(storage)
+        content = memory_dir if memory_dir is not None else storage.host_memory
+        self.state_dir = state_dir if state_dir is not None else storage.memory_state
+        # Merely constructing the store must not initialize local memory in
+        # external/off mode. Atomic writers create their directories on demand.
+        self.memory_file = content / "profile" / "user.md"
+        self.history_file = content / "episodic" / "episodes.md"
         self.memory_dir = self.memory_file.parent
-        # Sibling lock file (`user.md.lock`). Shared across all processes
-        # that write user.md so every writer serializes on the same
-        # advisory lock -- and the state file is written under it too, so a
-        # cursor update from one session can never race another's.
-        self.memory_lock_path = self.memory_file.with_suffix(self.memory_file.suffix + ".lock")
-        self.state_file = ensure_dir(workspace / "user_memory") / "state.json"
+        self.memory_lock_path = self.state_dir / "store.lock"
+        self.state_file = self.state_dir / "state.json"
         self._now_fn = now_fn or datetime.now
 
     @contextmanager

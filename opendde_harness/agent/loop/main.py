@@ -201,11 +201,16 @@ class AgentLoop:
             settings = AgentLoopSettings()
         self.settings = settings
         self.workspace = workspace
+        from opendde_harness.config.paths import get_workspace_storage
+        from opendde_harness.config.workspace_migration import warn_legacy_workspace
+
+        self.storage = get_workspace_storage(workspace)
+        warn_legacy_workspace(workspace)
         # The model a turn runs on is per session, so it cannot live in two
         # attributes on a process-wide loop. ``_default_binding`` is what a
         # session starts on; ``provider``/``model`` below read whichever
         # binding the running turn entered.
-        self.sessions = session_manager or SessionManager(workspace)
+        self.sessions = session_manager or SessionManager(workspace, sessions_dir=self.storage.sessions)
         self._bindings = SessionBindings(
             ModelBinding(provider, settings.model or provider.get_default_model(), provider_name=settings.provider),
             providers=settings.providers,
@@ -240,6 +245,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(
             workspace,
+            storage=self.storage,
             skill_forge_config=settings.skill_forge,
             llm_provider=provider,
         )

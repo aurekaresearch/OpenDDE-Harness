@@ -54,6 +54,7 @@ class LocalSkillCatalog:
         llm_provider: "LLMProvider | None" = None,  # accepted for caller compat; unused
         *,
         start_watcher: bool = True,
+        skills_dir: Path | None = None,
     ):
         # R1: build extra_dirs from config.local_dirs. List order = priority
         # (later overrides earlier on name collision). Each tuple:
@@ -83,6 +84,7 @@ class LocalSkillCatalog:
             builtin_skills_dir=builtin_skills_dir,
             extra_dirs=extra_dirs,
             scan_max_depth=int(getattr(config, "scan_max_depth", 5) if config else 5),
+            skills_dir=skills_dir,
         )
 
         self._config = config

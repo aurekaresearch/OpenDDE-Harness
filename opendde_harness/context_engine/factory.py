@@ -101,7 +101,7 @@ def build_context_engine(
 
     builders = [
         IdentitySegmentBuilder(workspace),
-        BootstrapSegmentBuilder(workspace),
+        BootstrapSegmentBuilder(workspace, assistant_dir=builder.storage.assistant),
         # The user's own AGENTS.md / ODH.md, read from the directory the tool
         # was launched in rather than from the workspace.
         ProjectInstructionsSegmentBuilder(workspace),

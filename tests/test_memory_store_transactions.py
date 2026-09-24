@@ -137,6 +137,7 @@ def test_unparseable_state_is_moved_aside_not_overwritten(store):
     """Corrupt JSON is evidence. The store starts from empty and says where it
     put the file it could not read, instead of silently resetting it -- which
     is what made an absent cursor and a damaged one look the same."""
+    store.state_file.parent.mkdir(parents=True, exist_ok=True)
     store.state_file.write_text('{"version": 1, "pending_extra', encoding="utf-8")
 
     with warnings_logged() as lines:
@@ -154,6 +155,7 @@ def test_unparseable_state_is_moved_aside_not_overwritten(store):
 
 
 def test_state_from_a_version_this_build_does_not_know_is_preserved(store):
+    store.state_file.parent.mkdir(parents=True, exist_ok=True)
     store.state_file.write_text(json.dumps({"version": 99, "whatever": True}), encoding="utf-8")
 
     with warnings_logged() as lines:
@@ -166,6 +168,7 @@ def test_state_from_a_version_this_build_does_not_know_is_preserved(store):
 
 
 def test_state_that_is_not_an_object_is_preserved_too(store):
+    store.state_file.parent.mkdir(parents=True, exist_ok=True)
     store.state_file.write_text("[1, 2, 3]", encoding="utf-8")
 
     assert store.read_state() == {}
@@ -173,6 +176,7 @@ def test_state_that_is_not_an_object_is_preserved_too(store):
 
 
 def test_two_damaged_files_in_the_same_second_do_not_overwrite_each_other(store):
+    store.state_file.parent.mkdir(parents=True, exist_ok=True)
     store.state_file.write_text("first", encoding="utf-8")
     store.read_state()
     store.state_file.write_text("second", encoding="utf-8")

@@ -387,7 +387,6 @@ def _bootstrap_empty_config() -> None:
     overwriting an existing file there would clobber it.
     """
     from opendde_harness.config.loader import get_config_path, load_config, save_config
-    from opendde_harness.config.paths import get_workspace_path
     from opendde_harness.utils.helpers import sync_workspace_templates
 
     path = get_config_path()
@@ -396,7 +395,7 @@ def _bootstrap_empty_config() -> None:
     from opendde_harness.config.update import init_extension_block_defaults
 
     init_extension_block_defaults()
-    workspace = get_workspace_path()
+    workspace = load_config().workspace_path
     workspace.mkdir(parents=True, exist_ok=True)
     # Silent: the wizard is mid-screen, and which template files it copied is
     # its own bookkeeping rather than something the user chose.

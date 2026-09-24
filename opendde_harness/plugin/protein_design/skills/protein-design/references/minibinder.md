@@ -1,6 +1,6 @@
 # Existing mini binder optimization
 
-Use `design.type: minibinder`. Supply exactly one binder chain with `chain_type: minibinder`, a canonical amino-acid sequence or X-masked sequence of the confirmed length, explicit `designable_residues`, and optional `fixed_residues`. Positions are zero-based sequence indices; fixed positions override design permissions. `cdr_regions` is invalid in this mode. Length and target sequence remain fixed.
+Use `design.type: minibinder`. Supply exactly one binder chain with `chain_type: minibinder`, a canonical amino-acid sequence or X-masked sequence of the confirmed length, explicit `designable_residues`, and optional `fixed_residues`. Positions are one-based sequence indices; fixed positions override design permissions. `cdr_regions` is invalid in this mode. Length and target sequence remain fixed.
 
 Available primary strategies are `minibinder-full-redesign`, `minibinder-point-mutation` and `minibinder-inverse-folding`. Every X must be mutable, never fixed. Masked seeds require full redesign before folding; complete seeds can be folded first. Inverse folding requires a successful parent structure. Optional `design.initial_structure_path` must name a real structure accessible on the compute host. `bootstrap_full_redesign_cycles` and `stagnation_full_redesign_threshold` select minibinder full redesign in this mode. It assigns every mutable position once and is not limited by `num_mutations`; fixed positions and length remain unchanged.
 

@@ -399,8 +399,8 @@ class CheckpointConfig(_Base):
     """When the per-turn shadow-git snapshot is active. See class
     docstring for the interaction with the AgentLoop ``interactive`` flag."""
 
-    shadow_dir: str = ".opendde_harness/shadow.git"
-    """Shadow git-dir, relative to the workspace. The real workspace is the
+    shadow_dir: str = "shadow.git"
+    """Shadow git-dir, relative to instance state/<scope>/checkpoint. The workspace is the
     work-tree; the user's own ``.git`` is never touched."""
 
 

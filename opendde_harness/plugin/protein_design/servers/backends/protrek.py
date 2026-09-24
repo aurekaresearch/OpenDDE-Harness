@@ -260,7 +260,7 @@ def _format_protrek_summary(
             lines.append(f"   - Foldseek sequence: `{result['foldseek_sequence']}`")
         if result.get("query_aligned_alternatives"):
             lines.append(
-                "   - query-aligned natural alternatives (0-based): "
+                "   - query-aligned natural alternatives (1-based): "
                 + ", ".join(result["query_aligned_alternatives"][:40])
             )
 
@@ -303,7 +303,7 @@ def _annotate_sequence_alignments(query_sequence: str, parsed_results: List[Dict
                 if query_residue == hit_residue:
                     identical += 1
                 elif query_residue != "X":
-                    alternatives.append(f"{query_residue}{int(query_index)}{hit_residue}")
+                    alternatives.append(f"{query_residue}{int(query_index) + 1}{hit_residue}")
             annotated.append(
                 {
                     **result,

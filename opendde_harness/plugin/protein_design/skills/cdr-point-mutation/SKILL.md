@@ -29,7 +29,7 @@ Return exactly one JSON object with no prose or code fence before or after it:
   "candidates": [
     {
       "id": "cycle_N_mut_001",
-      "mutations": [["H", 100, "W"]],
+      "mutations": [["H", 101, "W"]],
       "strategy": "[H3 / interface] concise mechanism",
       "risk_level": "low",
       "metadata": {"hypothesis": "strengthen H3 packing"}
@@ -43,7 +43,7 @@ Return exactly one JSON object with no prose or code fence before or after it:
 - Context providers are automatic evidence sources; do not declare them in candidates.
 - Encode substitutions as `[chain, pos, "A"]`, insertions as
   `[chain, pos, "+A"]`, and deletions as `[chain, pos, "-"]`.
-- Use zero-based positions. Do not emit no-ops or duplicate a target position
+- Use one-based positions. Do not emit no-ops or duplicate a target position
   within one candidate.
 - Match the exact requested candidate and mutation counts.
 - Put skill-specific evidence only in the `metadata` JSON object.

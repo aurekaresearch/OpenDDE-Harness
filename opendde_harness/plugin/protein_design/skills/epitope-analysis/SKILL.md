@@ -37,6 +37,11 @@ python3 -m opendde_harness.plugin.protein_design.servers.backends.epitope_analys
 
 ### With Known Hotspots
 
+The analysis CLI's `--hotspots` and Python `analyze_epitope(..., hotspots=...)`
+use actual structure residue IDs, as do the `residue_id` results below. These
+are not YAML hotspot positions: YAML uses one-based order within the supplied
+target sequence. Map between them using the actual structure, not a fixed offset.
+
 ```bash
 python3 -m opendde_harness.plugin.protein_design.servers.backends.epitope_analysis \
     --config_yaml configs/design.yaml \
@@ -150,7 +155,7 @@ python3 -m opendde_harness.plugin.protein_design.servers.backends.epitope_analys
 CDR positions are required from `initial_binders[].chains` in the design YAML.
 Use `cdr_regions` or `designable_residues` directly, or define framework
 `fixed_residues`; the complement is treated as the CDR/designable positions.
-All YAML positions are 0-based sequence indices and are mapped to structure
+All YAML positions are 1-based sequence indices and are mapped to structure
 residues by chain-local residue order, not by PDB/mmCIF residue number.
 
 ```bash
@@ -248,7 +253,7 @@ coverage = contacted_hotspots / len(provided_hotspots)
 ### CDR Assignment
 
 Uses only CDR/designable positions from the YAML binder chain configuration.
-Configured 0-based sequence positions are mapped onto each structure chain in
+Configured 1-based sequence positions are mapped onto each structure chain in
 residue order, so non-contiguous or non-1-based structure numbering is supported.
 
 ## Performance

@@ -18,6 +18,7 @@ class _Request:
     job_id: str
     count: int
     devices: tuple[int, ...] | None
+    minimum_count: int | None = None
     granted: tuple[int, ...] = field(default=())
 
 
@@ -26,8 +27,8 @@ class GpuLeaseTable:
 
     A fold holds its GPUs exclusively; ESM and SolubleMPNN jobs share one GPU
     up to ``shared_jobs_per_gpu`` but never join a running fold.  Waiters are
-    served first-in-first-out, so a fold waiting for a busy GPU set cannot be
-    starved by a stream of shared jobs.
+    served first-in-first-out; ordinary folds can take an idle subset of their
+    pool, while context-parallel folds still wait for the full set.
     """
 
     def __init__(
@@ -78,6 +79,7 @@ class GpuLeaseTable:
         job_id: str,
         count: int = 1,
         devices: Sequence[int] | None = None,
+        minimum_count: int | None = None,
     ):
         requested = tuple(int(index) for index in devices) if devices is not None else None
         if requested is not None:
@@ -86,7 +88,13 @@ class GpuLeaseTable:
                 raise ValueError(
                     "requested GPU placement is not available on this compute worker: " + ", ".join(map(str, unknown))
                 )
-        request = _Request(kind=kind, job_id=job_id, count=max(0, int(count)), devices=requested)
+        if minimum_count is not None and (
+            kind != FOLD_KIND or minimum_count < 1 or minimum_count > (len(requested) if requested else count)
+        ):
+            raise ValueError("minimum_count must be within the requested fold GPU pool")
+        request = _Request(
+            kind=kind, job_id=job_id, count=max(0, int(count)), devices=requested, minimum_count=minimum_count
+        )
         free = self._free_memory() if requested is None and self._devices else {}
         async with self._condition:
             self._waiting.append(request)
@@ -132,11 +140,14 @@ class GpuLeaseTable:
             return len(running) < self._shared_jobs_per_gpu
 
         if request.devices is not None:
-            return list(request.devices) if all(map(usable, request.devices)) else None
+            available = [index for index in request.devices if usable(index)]
+            required = request.minimum_count if request.minimum_count is not None else len(request.devices)
+            return available if len(available) >= required else None
         count = request.count if request.kind == FOLD_KIND else 1
         recent = set(self._recent.get(request.kind, ()))
         candidates = sorted(
             (index for index in self._devices if usable(index)),
             key=lambda index: (index not in recent, len(holders[index]), -free.get(index, 0), index),
         )
-        return candidates[:count] if len(candidates) >= count else None
+        required = request.minimum_count if request.minimum_count is not None else count
+        return candidates[:count] if len(candidates) >= required else None

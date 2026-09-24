@@ -130,6 +130,10 @@ from opendde_harness.cli.session_commands import session_app
 
 app.add_typer(session_app, name="sessions")
 
+from opendde_harness.cli.workspace_commands import workspace_app
+
+app.add_typer(workspace_app, name="workspace")
+
 
 @app.command("compare")
 def compare(

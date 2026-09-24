@@ -67,12 +67,12 @@ def test_antibody_default_is_unchanged_and_still_requires_framework(confidence):
 def test_minibinder_hotspots_and_interface_confidence(confidence):
     confidence["contact_probs"][2:, 0] = 0.9
     confidence["contact_probs"][0, 2:] = 0.9
-    result = score(design_type="minibinder", fixed_residues={}, target_hotspots={"A": [1]})
+    result = score(design_type="minibinder", fixed_residues={}, target_hotspots={"A": [0]})
     assert result["target_objective_token_count"] == 1
     assert result["loss_components"]["i_con"] == pytest.approx(-math.log(0.9))
     assert result["loss_components"]["i_plddt"] == pytest.approx(0.1)
-    with pytest.raises(ValueError, match="one-based"):
-        score(design_type="minibinder", fixed_residues={}, target_hotspots={"A": [0]})
+    with pytest.raises(ValueError, match="zero-based"):
+        score(design_type="minibinder", fixed_residues={}, target_hotspots={"A": [2]})
     confidence["contact_probs"][:2, 2:] = 0
     confidence["contact_probs"][2:, :2] = 0
     result = score(design_type="minibinder", fixed_residues={})

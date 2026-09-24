@@ -11,6 +11,7 @@ rendering helpers themselves live in
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from opendde_harness.config.paths import WorkspaceStorage, get_workspace_storage
 from opendde_harness.memory_engine.consolidate.consolidator import MemoryStore
 from opendde_harness.memory_engine.skill_forge import LocalSkillCatalog
 from opendde_harness.providers import messages as msg
@@ -30,14 +31,17 @@ class ContextBuilder:
         llm_provider: "LLMProvider | None" = None,
         *,
         start_watcher: bool = True,
+        storage: WorkspaceStorage | None = None,
     ):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.storage = storage if storage is not None else get_workspace_storage(workspace)
+        self.memory = MemoryStore(workspace, memory_dir=self.storage.host_memory, state_dir=self.storage.memory_state)
         self.skills = LocalSkillCatalog(
             workspace,
             config=skill_forge_config,
             llm_provider=llm_provider,
             start_watcher=start_watcher,
+            skills_dir=self.storage.skills,
         )
 
     def add_tool_result(

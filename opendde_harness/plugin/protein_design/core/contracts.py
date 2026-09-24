@@ -43,9 +43,9 @@ class Placement(ContractModel):
             raise ValueError("compute.placement.fold GPU indices must be zero or greater")
         if len(set(self.fold)) != len(self.fold):
             raise ValueError("compute.placement.fold must not repeat a GPU index")
-        if len(self.fold) < self.cp_degree:
+        if self.cp_degree > 1 and len(self.fold) != self.cp_degree:
             raise ValueError(
-                "compute.placement.fold must list at least cp_degree GPUs; "
+                "compute.placement.fold must list exactly cp_degree GPUs when context parallelism is enabled; "
                 f"got {len(self.fold)} for cp_degree {self.cp_degree}"
             )
         return self

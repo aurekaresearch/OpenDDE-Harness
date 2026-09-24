@@ -163,7 +163,7 @@ def preparation_context(
         "design_types": ["antibody", "minibinder"],
         "minibinder_requirements": {
             "scope": "fixed-length single-chain sequence design from mutable X placeholders or existing sequences; no de novo backbone generation",
-            "mutable_mask": "explicit designable_residues; zero-based sequence positions",
+            "mutable_mask": "explicit designable_residues; one-based inclusive sequence positions",
             "fold": "local/docker with explicit general checkpoint_path on compute host; not API",
         },
         "checked_roots": checked,
@@ -189,7 +189,8 @@ def preparation_context(
             "Local Docker compute starts on demand when a task needs it and stops after an idle timeout; its URL may change between runs.",
             "Explicit YAML fold settings override defaults. API mode requires service-managed MSA and cannot use local A3M paths or use_msa=false.",
             "Only a read-only /health read of the default compute URL was performed; no model loading, worker selection or task launch.",
-            "Leave compute.placement unset unless the user names GPUs; set fold to a list of compute.gpus indices, esm and mpnn to one index each.",
+            "By default, fold candidates are distributed across available GPUs in one compute container, with one single-GPU OpenDDE worker per GPU. Set compute.placement.fold or fold.gpus to restrict the GPU pool. Fold-CP is off by default (cp_degree: 1); set cp_degree above 1 only to opt into context parallelism for each candidate. ESM/MPNN can reuse fold GPUs between jobs.",
+            "YAML hotspot positions are one-based. Preserve user-supplied one-based positions; the loader performs the internal zero-based conversion. Check target_hotspots_1based in validation output before launch.",
             "If an example is unavailable, request its checkout or YAML path; do not repeat global wildcard searches.",
         ],
     }

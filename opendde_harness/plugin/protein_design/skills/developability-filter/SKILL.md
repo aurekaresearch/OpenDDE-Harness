@@ -64,7 +64,7 @@ candidate:
    isomerization, N-glycosylation, Met/Trp oxidation context, unpaired Cys, and
    acid-cleavage DP motifs.
 
-Use chain roles and zero-based inclusive CDR ranges from the supplied antibody
+Use chain roles and one-based inclusive CDR ranges from the supplied antibody
 identification evidence. If chain identity remains uncertain, make the affected
 dimensions Medium Risk and explain the uncertainty.
 

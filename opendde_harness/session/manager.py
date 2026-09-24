@@ -436,9 +436,14 @@ class SessionManager:
     Sessions are stored as JSONL files in the sessions directory.
     """
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, *, sessions_dir: Path | None = None):
+        from opendde_harness.config.paths import assert_storage_ready, get_workspace_storage
+
+        assert_storage_ready(get_workspace_storage(workspace))
         self.workspace = workspace
-        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self.sessions_dir = ensure_dir(
+            sessions_dir if sessions_dir is not None else get_workspace_storage(workspace).sessions
+        )
         self._cache: dict[str, Session] = {}
 
     def _get_session_path(self, key: str) -> Path:

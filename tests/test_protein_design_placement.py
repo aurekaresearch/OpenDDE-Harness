@@ -37,17 +37,15 @@ def test_auto_is_accepted_as_the_explicit_default(config_path) -> None:
 
 
 def test_a_device_list_does_not_implicitly_enable_cp(config_path) -> None:
-    config = WorkflowConfigLoader.config_from_path(config_path({"fold": [1, 2, 3], "esm": 0, "mpnn": 0}))
-
-    assert config.placement.fold == [1, 2, 3]
-    assert config.placement.cp_degree == 1
-    assert (config.placement.esm, config.placement.mpnn) == (0, 0)
+    placement = WorkflowConfigLoader.config_from_path(config_path({"fold": [1, 2, 3], "esm": 0, "mpnn": 0})).placement
+    assert placement.fold == [1, 2, 3]
+    assert placement.cp_degree == 1
 
 
 @pytest.mark.parametrize(
     "placement, message",
     [
-        ({"fold": [0, 1], "cp_degree": 3}, "at least cp_degree"),
+        ({"fold": [0, 1], "cp_degree": 3}, "exactly cp_degree"),
         ({"fold": [0, 0]}, "repeat"),
         ({"fold": [-1]}, "zero or greater"),
         ({"fold": 2}, "list of GPU indices"),

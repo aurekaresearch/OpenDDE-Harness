@@ -13,7 +13,7 @@ Return the requested Design JSON with `skill_id: minibinder-full-redesign`,
 `selection_reason` and the required number of `candidates`. Each candidate has
 `candidate_id`, `mutations`, `strategy`, `risk_level` and optional `metadata`.
 
-- Encode assignments as `[chain_id, zero_based_position, amino_acid]` triples.
+- Encode assignments as `[chain_id, one_based_position, amino_acid]` triples.
 - Assign every mutable position exactly once, including unchanged residues.
   Use only `ACDEFGHIKLMNPQRSTVWY`; resolve every X. Preserve fixed residues,
   chain IDs and length. Do not emit full sequences, indels or target changes.

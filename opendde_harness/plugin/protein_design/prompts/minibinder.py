@@ -5,7 +5,7 @@ An X is an unknown residue placeholder, not a foldable amino acid. Use full rede
 There are no antibody CDRs, framework-contact penalties, antibody numbering or humanization rules.
 Use only supplied measured evidence; missing measurements are unknown, not zero or failed.
 Predicted fold/interface confidence is not measured binding affinity or experimental validation.
-Preserve chain IDs, chain length, fixed residues and explicit mutable masks. Positions are zero-based sequence indices.
+Preserve chain IDs, chain length, fixed residues and explicit mutable masks. Positions are one-based sequence indices.
 For point mutation, mutation_budget is the inclusive [minimum, maximum] number of changed residues per candidate.
 Return only the requested structured output. Never invent tool results or structure paths.
 """

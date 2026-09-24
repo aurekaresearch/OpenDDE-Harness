@@ -6,7 +6,7 @@ context to propose executable designs; do not ask for more information.
 
 CONSTRAINTS
 - Mutate only authoritative mutable positions; preserve all fixed residues.
-- Copy literal binder chain IDs and zero-based positions. Never translate chain
+- Copy supplied binder chain IDs and positions. Never translate chain
   IDs to biological conventions (for example, D to H).
 - Use the Python-selected parent; do not replace it.
 - Respect the requested candidate count and the selected route's mutation policy:
@@ -29,14 +29,14 @@ OUTPUT
   contract, without prose or Markdown. Put `skill_id` and a concise comparison
   in `selection_reason` at the top level, not in each candidate.
 - For LLM proposals, encode mutations only as
-  `[chain_id, zero_based_position, new_residue]` arrays, never strings or objects.
+  `[chain_id, one_based_position, new_residue]` arrays, never strings or objects.
   Full redesign must explicitly assign every mutable position in each candidate.
 - For `esm2`, return `candidates: []`; Python performs generation. For
   `inverse_folding`, propose anchors unless the route specifies coverage=`all_mutable`.
 - For `antibody-inverse-folding`, choose controls from the current bottleneck
   under `metadata.soluble_mpnn_parameters`: temperature 0.01-1.0,
   num_sequences, relax_radius 0-8, wt_bias 0-20, omit_aas, and bias_aas.
-  Optional design_positions maps literal chains to zero-based mutable positions.
+  Optional design_positions maps literal chains to mutable positions using the same numbering.
   Python validates controls and enforces fixed residues and the cycle-wide budget.
 """
 

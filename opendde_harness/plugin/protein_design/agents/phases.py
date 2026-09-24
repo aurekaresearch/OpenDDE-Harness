@@ -25,6 +25,8 @@ from opendde_harness.plugin.protein_design.agents.prompt_context import (
     context_json,
     design_population,
     minibinder_prompt,
+    prompt_positions,
+    prompt_target_chains,
     quality_candidates,
     reflection_candidates,
 )
@@ -94,14 +96,14 @@ class ProteinDesignPhases:
     async def analyze_once(self, config: WorkflowConfig) -> AnalyzeAgentOutput:
         prompt = ANALYZE_REPORT_PROMPT.format(
             target_name=config.target,
-            target_sequence=context_json(config.target_chains),
+            target_sequence=context_json(prompt_target_chains(config.target_chains)),
             target_length=len(config.target_sequence),
-            hotspots=config.fold_options.get("target_hotspots", config.hotspots),
+            hotspots=prompt_positions(config.fold_options.get("target_hotspots", config.hotspots)),
             binder_name=self._initial_parent(config).get("candidate_id", "initial_binder"),
             binder_sequence=self._parent_chains(self._initial_parent(config)),
             binder_length=sum(len(value) for value in self._parent_chains(self._initial_parent(config)).values()),
-            binder_fixed_residues=config.fixed_residues,
-            binder_cdr_regions=config.cdr_regions,
+            binder_fixed_residues=prompt_positions(config.fixed_residues),
+            binder_cdr_regions=prompt_positions(config.cdr_regions),
         )
         if config.design_type == "minibinder":
             prompt = minibinder_prompt(config, parent=self._initial_parent(config))
@@ -236,9 +238,9 @@ class ProteinDesignPhases:
         gate_feedback = compact_gate_feedback(config.metadata.get("gate_feedback", "not available"))
         prompt = DESIGN_PROMPT.format(
             target_name=config.target,
-            target_sequence=context_json(config.target_chains),
+            target_sequence=context_json(prompt_target_chains(config.target_chains)),
             target_length=len(config.target_sequence),
-            hotspots=context_json(config.fold_options.get("target_hotspots", config.hotspots)),
+            hotspots=context_json(prompt_positions(config.fold_options.get("target_hotspots", config.hotspots))),
             binder_chain_ids=context_json(sorted(chains)),
             parent_binder_sequence=context_json(chains),
             parent_binder_length=sum(len(value) for value in chains.values()),
@@ -248,7 +250,7 @@ class ProteinDesignPhases:
             parent_ipsae=self._metric(best, "ipsae"),
             parent_ranking_score=best.objective if best else None,
             metric_context=context_json(best.metrics if best else {}),
-            mutable_positions_formatted=context_json(config.mutable_positions),
+            mutable_positions_formatted=context_json(prompt_positions(config.mutable_positions)),
             antibody_population_info=context_json(design_population(parents, parent, gate_feedback)),
             parent_selection_mode="python_deterministic",
             parent_selection_guidance="Python selected the parent; do not replace it.",
@@ -502,7 +504,7 @@ class ProteinDesignPhases:
             target_name=config.target,
             target_sequence=config.target_sequence,
             target_length=len(config.target_sequence),
-            hotspots=context_json(config.hotspots),
+            hotspots=context_json(prompt_positions(config.hotspots)),
             quality_check_summary=context_json(quality.model_dump() if quality else "unavailable"),
             trajectory_summary=context_json(config.metadata.get("trajectory_summary", "unavailable")),
             cycle_num=cycle,
@@ -561,7 +563,7 @@ class ProteinDesignPhases:
                 "objective_key": config.objective_key,
                 "minimize": config.minimize,
                 "analysis": analysis.model_dump(mode="json"),
-                "cdr_regions": config.cdr_regions,
+                "cdr_regions": prompt_positions(config.cdr_regions),
                 "metric_definitions": {
                     "iptm": "Interface confidence, 0-1; higher is generally better, not measured affinity.",
                     "ptm": "Global fold confidence, 0-1; higher is generally better.",
@@ -708,12 +710,12 @@ class ProteinDesignPhases:
         # cycle number, Router choice, reflection, or retrieved memories.
         task_context = DESIGN_TASK_CONTEXT.format(
             target_name=context_json(config.target),
-            target_sequence=context_json(config.target_chains or config.target_sequence),
+            target_sequence=context_json(prompt_target_chains(config.target_chains) or config.target_sequence),
             target_length=len(config.target_sequence),
-            hotspots=context_json(config.fold_options.get("target_hotspots", config.hotspots)),
+            hotspots=context_json(prompt_positions(config.fold_options.get("target_hotspots", config.hotspots))),
             binder_chain_ids=context_json(sorted(cls._parent_chains(cls._initial_parent(config)))),
-            mutable_positions_formatted=context_json(config.mutable_positions),
-            fixed_residues=context_json(config.fixed_residues),
+            mutable_positions_formatted=context_json(prompt_positions(config.mutable_positions)),
+            fixed_residues=context_json(prompt_positions(config.fixed_residues)),
             objective_key=config.objective_key,
             minimize=context_json(config.minimize),
         )

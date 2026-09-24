@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from opendde_harness.plugin.protein_design.core.contracts import Candidate, WorkflowConfig
+from opendde_harness.plugin.protein_design.core.residue_positions import external_mutations
 
 # Retrieval ranking weights for a design case.  Ordered so that beating the global
 # best outranks a local improvement, and a gate failure costs more than the largest
@@ -138,7 +139,7 @@ def build_design_case_v2(
         "action": {
             "primary_skill": selected_skill_id,
             "learned_skills": list(config.metadata.get("learned_skills_applied", [])),
-            "mutations": mutations,
+            "mutations": external_mutations(mutations),
             "design_scope": design_scope,
         },
         "outcome": {
@@ -400,7 +401,7 @@ def recurring_offender_ids(value: Any) -> list[str]:
             return 0.0
 
     return [
-        str(key)
+        f"{str(key).rsplit(':', 1)[0]}:{int(str(key).rsplit(':', 1)[1]) + 1}"
         for key, _value in sorted(
             value.items(),
             key=lambda item: (-count(item), str(item[0])),
@@ -492,7 +493,8 @@ def _lesson(
     else:
         mutation_text = (
             ", ".join(
-                f"{item.get('chain')}{item.get('position')} {item.get('from')}>{item.get('to')}" for item in mutations
+                f"{item.get('chain')}{item.get('position')} {item.get('from')}>{item.get('to')}"
+                for item in external_mutations(mutations)
             )
             or "the proposed sequence design"
         )

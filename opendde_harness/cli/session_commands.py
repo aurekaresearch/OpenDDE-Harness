@@ -24,7 +24,7 @@ from rich.console import Console
 from rich.table import Table
 
 from opendde_harness.cli._log_silence import mute_subsystem_logs_unless_debug
-from opendde_harness.config.paths import get_workspace_path
+from opendde_harness.config.loader import load_config
 from opendde_harness.session.export import default_export_path, write_transcript
 from opendde_harness.session.manager import SessionManager, new_chat_id
 
@@ -44,7 +44,7 @@ def _suppress_info_logs() -> None:
 
 
 def _open_manager() -> SessionManager:
-    return SessionManager(get_workspace_path())
+    return SessionManager(load_config().workspace_path)
 
 
 def _bare_id(key: str) -> str:
@@ -282,7 +282,7 @@ def session_export(
     if session is None:
         console.print(f"[red]No session matching {id_or_prefix!r}[/red]")
         raise typer.Exit(code=1)
-    dest = output if output is not None else default_export_path(get_workspace_path(), res.key)
+    dest = output if output is not None else default_export_path(manager.workspace, res.key)
     try:
         written = write_transcript(session, dest)
     except OSError as exc:
