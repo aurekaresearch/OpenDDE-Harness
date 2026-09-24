@@ -48,7 +48,7 @@ def migrate(
         console.print(f"Managed files archived outside workspace. Manifest: {result.manifest}", markup=False)
         if result.requires_review:
             console.print(
-                f"{len(result.requires_review)} archived memory/configuration files require review; NOT imported into EverOS."
+                f"{len(result.requires_review)} archived memory/configuration files require review; NOT imported into the external memory service."
             )
     except (OSError, RuntimeError, ValueError) as exc:
         console.print(f"Migration refused or interrupted: {exc}", markup=False)

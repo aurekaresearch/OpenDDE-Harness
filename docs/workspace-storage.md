@@ -18,7 +18,7 @@ It isolates sessions and runtime state; it does not change memory app IDs.
 | Memory queue, cursor and lock | `state/<scope>/memory/` |
 | Shadow Git | `state/<scope>/checkpoint/shadow.git` |
 | Local fallback memory | `memory/host/<scope>/` |
-| EverOS | `memory/` (unchanged) |
+| External long-term memory | `memory/` (unchanged) |
 
 External memory is the sole long-term recall source when enabled. The local
 backend is an alternative, not a second injection lane. With memory disabled,
@@ -58,7 +58,7 @@ copies verify. If interrupted, rerun the same apply command to resume. Do not
 manually remove the pending marker to bypass an unfinished migration.
 
 Historical `user.md`, episodic notes and unclassified procedural material are
-archived for review, **not imported into EverOS** and not silently discarded.
+archived for review, **not imported into the external memory service** and not silently discarded.
 No paid model call is made. The command reports the number requiring review.
 Custom checkpoint locations outside the historical default are not automatically
 moved; retain them and review their mapping before deployment.
