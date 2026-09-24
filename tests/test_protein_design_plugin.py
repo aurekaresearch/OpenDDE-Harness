@@ -86,17 +86,18 @@ def test_language_directive_sits_between_identity_and_scope(tmp_path):
     assert "简体中文" not in render.identity_text(tmp_path, model="openai/gpt-x")
 
 
-def test_workspace_block_lists_memory_files_only_when_memory_is_enabled(tmp_path):
-    skills_line = f"- Custom skills: {tmp_path}/skills/{{skill-name}}/SKILL.md"
+def test_workspace_block_does_not_advertise_local_memory_for_external_backends(tmp_path):
+    from opendde_harness.config.paths import get_workspace_storage
+
+    skills_line = f"- Custom skills: {get_workspace_storage(tmp_path).skills}/{{skill-name}}/SKILL.md"
 
     off = render.identity_text(tmp_path, model="openai/gpt-x", long_term_memory=False)
     assert f"## Workspace\nYour workspace is at: {tmp_path}\n{skills_line}\n\n" in off
     assert "user_memory" not in off
 
     on = render.identity_text(tmp_path, model="openai/gpt-x", long_term_memory=True)
-    assert f"- User profile: {tmp_path}/user_memory/profile/user.md" in on
-    assert f"- Episodic log: {tmp_path}/user_memory/episodic/episodes.md" in on
-    assert "(grep-searchable; entries start with [YYYY-MM-DD HH:MM])" in on
+    assert "user.md" not in on
+    assert "episodes.md" not in on
 
 
 def test_the_model_line_is_omitted_when_the_turn_names_no_model(tmp_path):

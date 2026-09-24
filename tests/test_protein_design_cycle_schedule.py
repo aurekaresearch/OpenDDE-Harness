@@ -207,7 +207,7 @@ def test_removing_redundant_example_fields_preserves_effective_permissions(name)
     )
     for binder in explicit["initial_binders"]:
         for chain, value in binder["chains"].items():
-            value["fixed_residues"] = cleaned.fixed_residues[chain]
+            value["fixed_residues"] = [position + 1 for position in cleaned.fixed_residues[chain]]
     before = WorkflowConfigLoader._normalize_config(explicit)
     for key in (
         "fixed_residues",

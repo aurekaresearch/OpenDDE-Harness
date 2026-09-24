@@ -96,6 +96,18 @@ def _sequence_indices(atoms: Any, chain_ids: Sequence[str]) -> dict[tuple[str, i
     return indices
 
 
+def sequence_hotspot_residue_ids(
+    model: Any, hotspots: set[tuple[str, int]], target_chains: Sequence[str]
+) -> set[tuple[str, int]]:
+    """Map internal sequence indices to the structure IDs used in contact evidence."""
+    indices = _sequence_indices(model, target_chains)
+    by_position = {(chain, index): (chain, residue) for (chain, residue), index in indices.items()}
+    missing = hotspots - set(by_position)
+    if missing:
+        raise ValueError(f"configured target hotspots missing from structure: {sorted(missing)}")
+    return {by_position[item] for item in hotspots}
+
+
 def evaluate_hotspot_contact_map(
     structure_path: str | Path,
     binder_chains: Sequence[str],
@@ -129,17 +141,9 @@ def evaluate_hotspot_contact_map(
         "num_off_target": 0,
     }
     model = _load_structure_model(structure_path)
-    if design_type == "minibinder":
-        target_indices = _sequence_indices(model, list(target_chains or hotspot_map))
-        by_position = {(chain, index): (chain, residue) for (chain, residue), index in target_indices.items()}
-        missing = epitope_set - set(by_position)
-        if missing:
-            raise ValueError(f"configured target hotspots missing from structure: {sorted(missing)}")
-        epitope_set = {by_position[item] for item in epitope_set}
-        coverage["missed_hotspots"] = set(epitope_set)
-        coverage["hotspot_position_semantics"] = (
-            "structure_residue_id; configured hotspots use zero-based sequence order"
-        )
+    epitope_set = sequence_hotspot_residue_ids(model, epitope_set, list(target_chains or hotspot_map))
+    coverage["missed_hotspots"] = set(epitope_set)
+    coverage["hotspot_position_semantics"] = "structure_residue_id"
     binder_chain_set = {str(chain) for chain in binder_chains}
     binder_mask = _protein_atom_mask(model, binder_chain_set) & _heavy_atom_mask(model)
     binder_atoms = model[binder_mask]

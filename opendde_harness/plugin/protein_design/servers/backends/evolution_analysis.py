@@ -58,6 +58,8 @@ def _mutations(candidate: dict[str, Any]) -> list[str]:
         if isinstance(mutation, dict):
             chain = mutation.get("chain_id") or mutation.get("chain") or "?"
             position = mutation.get("position")
+            if position is not None:
+                position = int(position) + 1
             before = mutation.get("from_aa") or "?"
             after = mutation.get("to_aa") or "?"
             result.append(f"{chain}:{position}:{before}>{after}")

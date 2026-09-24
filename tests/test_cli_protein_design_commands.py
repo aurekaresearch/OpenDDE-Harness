@@ -8,7 +8,43 @@ import yaml
 from typer.testing import CliRunner
 
 from opendde_harness.cli import protein_design_commands as commands
+from opendde_harness.plugin.protein_design.core.contracts import Placement
 from opendde_harness.plugin.protein_design.core.detached import DetachedDesignTaskController, TaskFileStore
+
+
+@pytest.mark.parametrize("degree", [3])
+def test_placement_rejects_silently_unused_or_missing_devices(degree):
+    with pytest.raises(ValueError, match="exactly cp_degree"):
+        Placement(fold=[0, 1], cp_degree=degree)
+
+
+def test_placement_default_does_not_silently_discard_extra_gpus():
+    assert Placement(fold=[0, 1]).fold == [0, 1]
+
+
+def test_validation_reports_candidate_parallelism_by_default():
+    source = Path(__file__).parents[1] / "docs/examples/crlf2_scheduled.yaml"
+    data = yaml.safe_load(source.read_text())
+    data["compute"] = {"placement": {"fold": [0, 1, 2]}}
+    workflow = commands.WorkflowConfigLoader._normalize_config(data)
+    summary = commands._workflow_summary(workflow)
+    assert summary["compute"]["fold_gpu_count"] == 3
+    assert summary["compute"]["fold_parallelism"] == "candidate_parallel"
+    assert summary["compute"]["candidate_data_parallelism"] is True
+
+
+def test_validation_exposes_parallelism_and_external_hotspots():
+    source = Path(__file__).parents[1] / "docs/examples/crlf2_scheduled.yaml"
+    data = yaml.safe_load(source.read_text())
+    data["compute"] = {"placement": {"fold": [0, 1], "cp_degree": 2, "esm": 0, "mpnn": 0}}
+    chain = next(iter(data["target"]["chains"]))
+    data["target"]["chains"][chain]["hotspots"] = [1, 39]
+    workflow = commands.WorkflowConfigLoader._normalize_config(data)
+    summary = commands._workflow_summary(workflow)
+    assert summary["target_hotspots_1based"][chain] == [1, 39]
+    assert summary["compute"]["fold_gpu_count"] == 2
+    assert summary["compute"]["fold_parallelism"] == "context_parallel"
+    assert summary["compute"]["candidate_data_parallelism"] is False
 
 
 @pytest.fixture

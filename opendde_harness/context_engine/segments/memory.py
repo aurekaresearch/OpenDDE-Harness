@@ -1,14 +1,8 @@
-"""Segment 4 — ``# Memory``. The profile ⊕ the backend's recall(user).
+"""Segment 4 — recall from the selected backend, never a second local lane.
 
-The one composite segment: a single ``# Memory`` heading whose body merges the
-slow-changing profile with the backend's query-conditioned recall hits.
-
-Which of the two lanes carries the profile depends on who owns ``user.md``. A
-plugin backend does not know the file exists, so the store reads it directly and
-the backend's hits join it as a second lane. The host's own writer owns the file
-on both sides -- it writes the sections and its ``recall`` returns them -- so it
-answers for the profile alone, and reading the store as well would put the same
-sections in the prompt twice.
+The local backend recalls its own profile. An external backend supplies its
+own hits; disabled memory supplies neither. Historical local files are not
+implicitly injected alongside external recall.
 """
 
 from __future__ import annotations
@@ -55,7 +49,7 @@ class MemorySegmentBuilder:
             host = "\n\n".join(text for text in ((hit.text or "").strip() for hit in recall_hits) if text)
             recall_bullets = ""
         else:
-            host = self._memory_store.get_memory_context(current_message=ctx.current_message)
+            host = ""
             recall_bullets = render.render_recalled_memory(recall_hits)
 
         sections = [s for s in (host, recall_bullets) if s]

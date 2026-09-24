@@ -39,12 +39,14 @@ def render_transcript(session: Session) -> str:
 
 
 def default_export_path(workspace: Path, key: str) -> Path:
-    """Default destination for a session export: ``<workspace>/exports/<sid>.md``.
+    """Default destination in the instance's workspace-scoped exports directory.
 
     The session key's ``:`` is folded to a filesystem-safe name via
     ``safe_filename`` (same encoding the session store uses for its files).
     """
-    return Path(workspace) / "exports" / f"{safe_filename(key)}.md"
+    from opendde_harness.config.paths import get_workspace_storage
+
+    return get_workspace_storage(workspace).exports / f"{safe_filename(key)}.md"
 
 
 def write_transcript(session: Session, dest: Path) -> Path:

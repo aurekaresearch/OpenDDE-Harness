@@ -143,10 +143,9 @@ def _resolve_hotspot_tokens(
     target_chains: Sequence[str],
     target_hotspots: Mapping[str, Sequence[int]] | None,
 ) -> tuple[list[int], dict[str, list[int]], str]:
-    """Resolve configured one-based target positions to confidence token indices.
+    """Resolve internal zero-based target indices to confidence token indices.
 
-    YAML hotspot positions, ``HotspotResidue`` and fold-backend pocket constraints
-    all use one-based sequence positions.  Invalid configured hotspots must
+    YAML coordinates are converted by the configuration loader. Invalid hotspots must
     fail loudly: silently falling back to the whole target changes the design
     objective without telling the caller.
     """
@@ -168,13 +167,13 @@ def _resolve_hotspot_tokens(
         if not positions:
             continue
         chain_length = len(chain_token_indices[chain])
-        invalid = [position for position in positions if position < 1 or position > chain_length]
+        invalid = [position for position in positions if position < 0 or position >= chain_length]
         if invalid:
             raise ValueError(
-                f"Hotspot positions for chain {chain} must be one-based and within 1..{chain_length}; got {invalid}"
+                f"Hotspot indices for chain {chain} must be zero-based and within 0..{chain_length - 1}; got {invalid}"
             )
         normalized[chain] = positions
-        hotspot_tokens.extend(chain_token_indices[chain][position - 1] for position in positions)
+        hotspot_tokens.extend(chain_token_indices[chain][position] for position in positions)
 
     if not hotspot_tokens:
         raise ValueError("Configured target_hotspots contains no residue positions")
@@ -302,7 +301,7 @@ def _score_minibinder_loss(
             "contact_probability_semantics": "P(distance < 8 angstrom)",
             "contact_loss_proxy": CONTACT_LOSS_PROXY,
             "target_contact_scope": scope,
-            "target_hotspot_position_semantics": "one_based_sequence_position",
+            "target_hotspot_position_semantics": "zero_based_sequence_position",
             "target_hotspots_used": hotspots,
             "target_hotspot_token_count": sum(map(len, hotspots.values())),
             "target_objective_token_count": len(target_tokens),
@@ -454,7 +453,7 @@ def score_confidence_loss(
             "reference_inter_contact_cutoff_angstrom": (REFERENCE_INTER_CONTACT_CUTOFF_ANGSTROM),
             "reference_contact_loss_available": False,
             "target_contact_scope": target_scope,
-            "target_hotspot_position_semantics": "one_based_sequence_position",
+            "target_hotspot_position_semantics": "zero_based_sequence_position",
             "target_hotspots_used": normalized_hotspots,
             "target_hotspot_token_count": sum(len(positions) for positions in normalized_hotspots.values()),
             "target_objective_token_count": len(objective_target_tokens),
@@ -472,7 +471,7 @@ def score_confidence_loss(
         "reference_inter_contact_cutoff_angstrom": (REFERENCE_INTER_CONTACT_CUTOFF_ANGSTROM),
         "reference_contact_loss_available": False,
         "target_contact_scope": target_scope,
-        "target_hotspot_position_semantics": "one_based_sequence_position",
+        "target_hotspot_position_semantics": "zero_based_sequence_position",
         "target_hotspots_used": normalized_hotspots,
         "target_hotspot_token_count": sum(len(positions) for positions in normalized_hotspots.values()),
         "target_objective_token_count": len(objective_target_tokens),

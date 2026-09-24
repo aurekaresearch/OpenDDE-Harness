@@ -170,20 +170,32 @@ def _commit_lock(git_dir: Path) -> asyncio.Lock:
 class CheckpointService:
     """Shadow-git working-tree snapshots, one commit per turn."""
 
-    def __init__(self, workspace: Path, shadow_dir: str = ".opendde_harness/shadow.git") -> None:
+    def __init__(self, workspace: Path, shadow_dir: str = "shadow.git", *, checkpoint_dir: Path | None = None) -> None:
+        from opendde_harness.config.paths import assert_storage_ready, get_workspace_storage
+
         self._workspace = Path(workspace).expanduser().resolve()
-        candidate = (self._workspace / shadow_dir).resolve()
-        # Containment is a load-bearing invariant: per-workspace recovery
-        # isolation (Bug2) breaks if the shadow git lands outside its
-        # workspace, since a second AgentLoop on a different workspace
-        # configured with a similarly-escaping path could share the repo
-        # and cross-contaminate ``edited_files``. ``..`` / absolute paths /
-        # ``""`` / ``"."`` all fall into this trap; reject them with a
-        # clear error rather than letting the resolved path drift silently.
-        if candidate == self._workspace or not candidate.is_relative_to(self._workspace):
+        storage = get_workspace_storage(self._workspace)
+        assert_storage_ready(storage)
+        root = (checkpoint_dir if checkpoint_dir is not None else storage.checkpoint).resolve()
+        # No scope component may redirect into a different workspace/repo.
+        for component in (storage.checkpoint, *storage.checkpoint.parents):
+            if component == storage.root:
+                break
+            if component.is_symlink():
+                raise ValueError("checkpoint scope must not contain a symlink")
+        if storage.root == self._workspace or storage.root.is_relative_to(self._workspace):
+            raise ValueError("checkpoint instance data root must be outside the workspace")
+        if root != storage.checkpoint or root.is_relative_to(self._workspace):
+            raise ValueError("checkpoint directory must match this instance's workspace scope")
+        # Existing configs serialized the former default. It identifies the
+        # same repository migrated by `workspace migrate`, not a nested one.
+        if shadow_dir == ".opendde_harness/shadow.git":
+            shadow_dir = "shadow.git"
+        candidate = (root / shadow_dir).resolve()
+        if Path(shadow_dir).is_absolute() or candidate == root or not candidate.is_relative_to(root):
             raise ValueError(
                 f"shadow_dir={shadow_dir!r} must resolve to a path strictly "
-                f"under the workspace ({self._workspace}); got {candidate}"
+                f"under the scoped checkpoint directory ({root}); got {candidate}"
             )
         self._git_dir = candidate
         self._shadow_rel = shadow_dir

@@ -387,9 +387,22 @@ def estimate_prompt_tokens_chain(
     return 0, "none"
 
 
-def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
-    """Sync bundled templates to workspace. Only creates missing files."""
+def sync_workspace_templates(
+    workspace: Path,
+    silent: bool = False,
+    *,
+    assistant_dir: Path | None = None,
+    skills_dir: Path | None = None,
+) -> list[str]:
+    """Initialize instance assistant templates; never migrate workspace files."""
     from importlib.resources import files as pkg_files
+
+    from opendde_harness.config.paths import assert_storage_ready, get_workspace_storage
+
+    storage = get_workspace_storage(workspace)
+    assert_storage_ready(storage)
+    assistant = assistant_dir if assistant_dir is not None else storage.assistant
+    skills = skills_dir if skills_dir is not None else storage.skills
 
     try:
         tpl = pkg_files("opendde_harness") / "templates"
@@ -408,44 +421,12 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
             return
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(src.read_text(encoding="utf-8") if src else "", encoding="utf-8")
-        added.append(str(dest.relative_to(workspace)))
+        added.append(str(dest))
 
-    def _migrate(src: Path, dest: Path):
-        """One-shot copy of legacy content to the L4 path. No-op when the
-        source is missing or the destination already exists — safe to
-        re-run on every workspace sync.  Reads as binary then decodes
-        with UTF-8 (replace) so legacy files written under a non-UTF-8
-        Windows code page still migrate without crashing."""
-        if not src.is_file() or dest.exists():
-            return
-        try:
-            raw = src.read_bytes()
-            text = raw.decode("utf-8", errors="replace")
-        except OSError:
-            return
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(text, encoding="utf-8")
-        added.append(f"{dest.relative_to(workspace)} (migrated from {src.relative_to(workspace)})")
-
-    # Step 1 — migrate legacy workspace files into the L4 layout. Each
-    # rule fires only when the legacy file exists and the L4 target is
-    # still missing, so user edits made directly to L4 paths win.
-    _migrate(workspace / "memory" / "MEMORY.md", workspace / "user_memory" / "profile" / "user.md")
-    _migrate(workspace / "memory" / "HISTORY.md", workspace / "user_memory" / "episodic" / "episodes.md")
-    _migrate(workspace / "SOUL.md", workspace / "agent_memory" / "profile" / "soul.md")
-    _migrate(workspace / "AGENTS.md", workspace / "agent_memory" / "profile" / "agent.md")
-    _migrate(workspace / "USER.md", workspace / "user_memory" / "profile" / "user.md")
-    # Step 2 — fall back to bundled templates for anything still missing.
-    # L4 pillar files first; root-level files (TOOLS) stay put.
-    _write(tpl / "SOUL.md", workspace / "agent_memory" / "profile" / "soul.md")
-    _write(tpl / "AGENTS.md", workspace / "agent_memory" / "profile" / "agent.md")
-    _write(tpl / "USER.md", workspace / "user_memory" / "profile" / "user.md")
-    _write(None, workspace / "user_memory" / "episodic" / "episodes.md")
-    # Files L4 specifies but the legacy layout had no source for.
-    _write(None, workspace / "agent_memory" / "procedural" / "skills.md")
-    _write(None, workspace / "agent_memory" / "procedural" / "case.md")
-    _write(tpl / "TOOLS.md", workspace / "TOOLS.md")
-    (workspace / "skills").mkdir(exist_ok=True)
+    _write(tpl / "SOUL.md", assistant / "soul.md")
+    _write(tpl / "AGENTS.md", assistant / "agent.md")
+    _write(tpl / "TOOLS.md", assistant / "TOOLS.md")
+    skills.mkdir(parents=True, exist_ok=True)
 
     if added:
         for name in added:
@@ -454,6 +435,6 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         from rich.console import Console
 
         _c = Console(stderr=True)
-        label = "Initialized workspace" if existed == 0 else "Updated workspace templates"
+        label = "Initialized assistant" if existed == 0 else "Updated assistant templates"
         _c.print(f"  [dim]{label} ({len(added)} file{'s' if len(added) != 1 else ''})[/dim]")
     return added

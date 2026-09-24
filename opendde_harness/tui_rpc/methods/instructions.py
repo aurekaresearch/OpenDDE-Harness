@@ -30,9 +30,10 @@ if TYPE_CHECKING:
 
 def _bootstrap_paths(config: "Config") -> set[Path]:
     """The files segment 2 already renders, which this segment must not repeat."""
+    from opendde_harness.config.paths import get_workspace_storage
     from opendde_harness.context_engine.segments.render import BOOTSTRAP_FILES
 
-    workspace = config.workspace_path
+    workspace = get_workspace_storage(config.workspace_path).assistant
 
     return {workspace / name for name in BOOTSTRAP_FILES}
 

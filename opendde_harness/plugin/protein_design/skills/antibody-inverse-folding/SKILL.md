@@ -14,16 +14,16 @@ be loaded, but no other primary design skill may be composed with it.
 2. Propose explicit, diverse CDR anchor substitutions. For every anchor, choose
    SolubleMPNN sampling controls in `metadata.soluble_mpnn_parameters` based on the current
    bottleneck instead of assuming one fixed setting:
-   `temperature`, `num_sequences`, `relax_radius`, `wt_bias`,
+   `temperature`, `relax_radius`, `wt_bias`,
    `omit_aas`, and optional global `bias_aas`. To choose an exact CDR subset,
-   provide `design_positions` as a chain-to-zero-based-position object; it is
+   provide `design_positions` as a chain-to-one-based-position object; it is
    always intersected with the authoritative mutable CDR list. Python validates
-   these values, caps the cycle-wide work, hard-fixes each forced anchor, and
+   these values, allocates the configured candidate count across the anchor plans, hard-fixes each forced anchor, and
    never permits framework positions to become designable.
 3. Treat SolubleMPNN as the sequence generator, not as evidence that a candidate
    binds. Preserve the strategy skill's hypothesis and let downstream folding,
    CDR-RMSD, interface, and developability gates evaluate the sample.
-4. Keep chain identities and zero-based sequence-position semantics consistent
+4. Keep chain identities and one-based sequence-position semantics consistent
    when translating to structure residue numbering.
 
 ## Output contract
@@ -38,19 +38,18 @@ Use the same candidate JSON shape as every other primary design skill:
   "candidates": [
     {
       "id": "cycle_N_inverse_001",
-      "mutations": [["D", 103, "F"]],
+      "mutations": [["D", 104, "F"]],
       "strategy": "[H3 / inverse-folding] structure-conditioned local redesign",
       "risk_level": "medium",
       "metadata": {
         "anchor_rationale": "stabilize the H3 tip",
         "soluble_mpnn_parameters": {
           "temperature": 0.25,
-          "num_sequences": 4,
           "relax_radius": 3,
           "wt_bias": 2.0,
           "omit_aas": "",
           "bias_aas": {"Y": 0.5},
-          "design_positions": {"D": [101, 102, 103]}
+          "design_positions": {"D": [102, 103, 104]}
         }
       }
     }
@@ -69,10 +68,14 @@ Use the same candidate JSON shape as every other primary design skill:
 - Return mutation-style JSON anchors under top-level
   `"skill_id": "antibody-inverse-folding"`. The runner uses them as independent
   structure-conditioned generation hypotheses.
-- Encode every anchor in the canonical zero-based three-item array form
-  `["D", 103, "F"]` inside `"mutations"`. Do not emit mutation objects with
+- Return at most the requested number of anchor plans. Python distributes the
+  cycle's configured candidate count across all plans; do not set `num_sequences`.
+  It keeps valid unique sequences and samples missing candidates for at most
+  three rounds. A remaining shortfall is reported as an error, not a completed batch.
+- Encode every anchor in the canonical one-based three-item array form
+  `["D", 104, "F"]` inside `"mutations"`. Do not emit mutation objects with
   `chain`, `position`, `from`, or `to` keys, and do not emit compact strings
-  such as `D103F`. The runner accepts those forms only as compatibility
+  such as `D104F`. The runner accepts those forms only as compatibility
   fallbacks.
 - Context providers are automatic evidence sources; do not declare them in candidates.
 - Preserve `fixed_residues`, `design_method`, and chain mapping in generated

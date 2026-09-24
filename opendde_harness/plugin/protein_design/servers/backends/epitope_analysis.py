@@ -37,7 +37,7 @@ def _contiguous_regions(positions: List[int]) -> List[Set[int]]:
 
 
 def _parse_yaml_positions(value: Any) -> Optional[List[int]]:
-    """Parse the residue-list syntax accepted by ChainConfig."""
+    """Convert one-based inclusive YAML residue lists to internal indices."""
     if value is None or value == [] or value == "":
         return None
     tokens = value.split(",") if isinstance(value, str) else value
@@ -57,9 +57,9 @@ def _parse_yaml_positions(value: Any) -> Optional[List[int]]:
                 start, end = map(int, bounds)
             else:
                 raise ValueError(f"Invalid YAML residue range: {token!r}")
-        if start < 0 or end < start:
+        if start < 1 or end < start:
             raise ValueError(f"Invalid YAML residue range: {token!r}")
-        positions.update(range(start, end + 1))
+        positions.update(range(start - 1, end))
     return sorted(positions)
 
 
@@ -292,7 +292,7 @@ def analyze_cdr_contributions(
     cdr_regions: CDRRegions,
     contact_pairs: Tuple[np.ndarray, np.ndarray],
 ) -> Dict[str, Dict[str, int]]:
-    """Analyze contacts for YAML-defined 0-based CDR regions."""
+    """Analyze contacts for internally normalized 0-based CDR regions."""
     cdr_contributions: Dict[str, Dict[str, Any]] = {}
     cdr_by_position = {}
     for chain_id, chain_regions in cdr_regions.items():
@@ -469,6 +469,8 @@ def format_text_output(result: Dict[str, Any]) -> str:
 
 
 def main():
+    from opendde_harness.plugin.protein_design.core.residue_positions import external_positions
+
     parser = argparse.ArgumentParser(description="Epitope analysis using distance-based contact detection")
     parser.add_argument("--structure_file", required=True, help="Path to structure file (PDB or CIF)")
     parser.add_argument("--antibody_chains", required=True, help="Comma-separated antibody chain IDs (e.g., H,L)")
@@ -506,6 +508,7 @@ def main():
         )
 
         # Format output
+        result["cdr_regions"] = external_positions(result.get("cdr_regions", {}))
         if args.format == "json":
             output_text = json.dumps(result, indent=2)
         else:

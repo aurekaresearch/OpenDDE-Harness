@@ -441,11 +441,17 @@ def skill_catalogue(tmp_path):
         )
         provider = Counting()
         pool = LocalPool(registry)
+        from opendde_harness.config.paths import get_workspace_storage
+
         backend = SimpleNamespace(recall=AsyncMock(return_value=[])) if extra_source else None
         engine = build_context_engine(
             workspace=tmp_path,
             config=ContextConfig(),
-            builder=SimpleNamespace(memory=SimpleNamespace(), skills=SimpleNamespace(pool=pool, registry=registry)),
+            builder=SimpleNamespace(
+                memory=SimpleNamespace(),
+                skills=SimpleNamespace(pool=pool, registry=registry),
+                storage=get_workspace_storage(tmp_path),
+            ),
             provider=provider,
             model=PRIMARY,
             context_window_tokens=200_000,
@@ -580,11 +586,12 @@ async def test_a_block_scalar_description_reaches_the_catalogue_as_one_line(tmp_
     """Most shipped SKILL.md files write ``description: |``. The description is
     the whole selection signal now, so storing the indicator instead of the
     text advertised half the catalogue as a literal ``|``."""
+    from opendde_harness.config.paths import get_workspace_storage
     from opendde_harness.context_engine.base import AssemblyContext
     from opendde_harness.context_engine.segments.skills import SkillsSegmentBuilder
     from opendde_harness.memory_engine.skill_forge import LocalSkillCatalog, LocalSkillSource, SkillForgeRouter
 
-    skill = tmp_path / "workspace" / "skills" / "epitopes"
+    skill = get_workspace_storage(tmp_path / "workspace").skills / "epitopes"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text(
         "---\nname: epitopes\ndescription: |\n  Identify epitope residues\n  and hotspot coverage.\n---\n\nBody.\n"

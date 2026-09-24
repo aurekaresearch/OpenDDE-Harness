@@ -111,24 +111,36 @@ def with_leased_devices(operation: str, payload: dict[str, Any], devices: Sequen
     return payload
 
 
-def fold_gpu_request(placement: Placement | None, options: dict[str, Any]) -> tuple[int, list[int] | None]:
-    """Resolve one fold's GPU demand into a (count, explicit devices) lease request."""
+def fold_gpu_request(
+    placement: Placement | None,
+    options: dict[str, Any],
+    *,
+    candidate_count: int,
+    available_devices: Sequence[int],
+) -> tuple[int, list[int] | None]:
+    """Lease one GPU per candidate worker, unless Fold-CP is explicitly requested."""
 
     spec = str(options.get("gpus", "")).strip().strip('"').strip("'").removeprefix("device=")
     if spec == "none" or str(options.get("device", "")).strip().lower() == "cpu":
         return 0, None
-    if placement is not None and placement.fold:
-        return placement.cp_degree, list(placement.fold[: placement.cp_degree])
-    degree = placement.cp_degree if placement is not None else options.get("cp_degree", 1)
+    degree = placement.cp_degree if placement is not None and placement.cp_degree > 1 else options.get("cp_degree", 1)
     if isinstance(degree, bool) or not isinstance(degree, int) or degree < 1:
         raise ValueError("fold.cp_degree must be a positive integer")
-    if spec and spec != "all":
-        devices = [int(part) for part in spec.split(",") if part.strip()]
-        if devices:
-            if degree > len(devices):
-                raise ValueError("fold.cp_degree exceeds the number of available GPU IDs")
-            return degree, devices[:degree]
-    return degree, None
+    devices = list(placement.fold) if placement is not None and placement.fold else None
+    if devices is None and spec and spec != "all":
+        devices = [int(part.strip()) for part in spec.split(",") if part.strip()]
+    if devices is not None:
+        if len(set(devices)) != len(devices):
+            raise ValueError("fold.gpus must not repeat a GPU index")
+        if degree > 1 and len(devices) != degree:
+            raise ValueError("fold.cp_degree requires exactly that many GPU IDs")
+        return (degree if degree > 1 else min(candidate_count, len(devices))), (
+            devices if degree > 1 else devices[:candidate_count]
+        )
+    count = degree if degree > 1 else min(candidate_count, len(available_devices))
+    if degree > len(available_devices) and degree > 1:
+        raise ValueError("fold.cp_degree exceeds the number of available GPUs")
+    return count, None
 
 
 class TaskLeases:
@@ -308,9 +320,19 @@ class JobStore:
         devices: Sequence[int] | None,
     ) -> None:
         try:
-            async with self._leases.lease(kind, job_id=job_id, count=count, devices=devices) as granted:
+            ordinary_fold = operation == "fold" and int((payload.get("options") or {}).get("cp_degree", 1)) == 1
+            async with self._leases.lease(
+                kind,
+                job_id=job_id,
+                count=count,
+                devices=devices,
+                minimum_count=1 if ordinary_fold and count > 1 else None,
+            ) as granted:
                 job.state = JobState.RUNNING
-                result = await self._harness.invoke(operation, with_leased_devices(operation, payload, granted))
+                if ordinary_fold and len(granted) > 1:
+                    result = await self._fold_candidates_parallel(payload, granted)
+                else:
+                    result = await self._harness.invoke(operation, with_leased_devices(operation, payload, granted))
                 if not job.cancel_requested:
                     job.result = result
                     job.progress = 1.0
@@ -322,6 +344,39 @@ class JobStore:
             if not job.cancel_requested:
                 job.error = str(exc)
                 job.state = JobState.FAILED
+
+    async def _fold_candidates_parallel(self, payload: dict[str, Any], devices: Sequence[int]) -> dict[str, Any]:
+        """Fan out one population across resident single-GPU workers in this service."""
+        groups: list[list[tuple[int, dict[str, Any]]]] = [[] for _ in devices]
+        for index, candidate in enumerate(payload["candidates"]):
+            groups[index % len(devices)].append((index, candidate))
+        calls = []
+        for device, group in zip(devices, groups, strict=True):
+            shard = dict(payload)
+            shard["candidates"] = [candidate for _index, candidate in group]
+            options = {**(payload.get("options") or {}), "parallel_gpu_index": device}
+            options["esm2_options"] = {**(options.get("esm2_options") or {}), "device": f"cuda:{device}"}
+            shard["options"] = options
+            calls.append(self._harness.invoke("fold", with_leased_devices("fold", shard, [device])))
+        # Wait for every shard even if one fails: a Python/CUDA call cannot be
+        # interrupted safely, so the GPU lease must outlive all worker calls.
+        outcomes = await asyncio.gather(*calls, return_exceptions=True)
+        failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+        if failures:
+            raise failures[0]
+        merged: list[dict[str, Any] | None] = [None] * len(payload["candidates"])
+        for group, outcome in zip(groups, outcomes, strict=True):
+            candidates = outcome.get("candidates", [])
+            if len(candidates) != len(group):
+                raise RuntimeError(f"OpenDDE returned {len(candidates)} results for {len(group)} candidates")
+            for (index, _source), candidate in zip(group, candidates, strict=True):
+                merged[index] = candidate
+        if merged and not any(item["metadata"]["success"] for item in merged):
+            errors = "; ".join(
+                f"{item['candidate_id']}: {item['metadata'].get('error') or 'fold failed'}" for item in merged
+            )
+            raise RuntimeError(f"All OpenDDE candidates failed: {errors}")
+        return {"candidates": merged}
 
 
 def create_app(
@@ -484,9 +539,22 @@ def create_app(
 
     @app.post("/fold", response_model=JobSubmission)
     async def fold(request: FoldRequest) -> JobSubmission:
+        from opendde_harness.plugin.protein_design.servers.backends.fold import normalize_execution_mode
+
         payload = request.model_dump()
         placement = request.placement
-        count, devices = fold_gpu_request(placement, payload.get("options") or {})
+        options = payload.get("options") or {}
+        if placement is not None and placement.cp_degree > 1:
+            options["cp_degree"] = placement.cp_degree
+            payload["options"] = options
+        if normalize_execution_mode(options.get("execution_mode")) == "api":
+            # The remote OpenDDE API owns its GPU scheduling; do not fan out
+            # local worker processes or lease this container's GPUs for it.
+            count, devices = 0, None
+        else:
+            count, devices = fold_gpu_request(
+                placement, options, candidate_count=len(request.candidates), available_devices=leases.devices
+            )
         payload.pop("placement", None)
         try:
             return jobs.submit("fold", payload, kind=FOLD_KIND, count=count, devices=devices)

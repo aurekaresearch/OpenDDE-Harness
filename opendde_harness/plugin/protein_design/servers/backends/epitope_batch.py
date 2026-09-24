@@ -133,6 +133,8 @@ def write_results_csv(results: List[Dict[str, Any]], output_path: str):
 
 
 def main():
+    from opendde_harness.plugin.protein_design.core.residue_positions import external_positions
+
     parser = argparse.ArgumentParser(description="Batch epitope analysis for multiple structures")
     parser.add_argument("--structure_dir", required=True, help="Directory containing structure files")
     parser.add_argument("--antibody_chains", required=True, help="Comma-separated antibody chain IDs (e.g., H,L)")
@@ -178,6 +180,9 @@ def main():
         )
 
         # Write CSV
+        for result in results:
+            if "cdr_regions" in result:
+                result["cdr_regions"] = external_positions(result["cdr_regions"])
         write_results_csv(results, args.output_csv)
         print(f"\n✅ CSV results written to {args.output_csv}", file=sys.stderr)
 

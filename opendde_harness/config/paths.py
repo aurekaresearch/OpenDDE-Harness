@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from opendde_harness.config.loader import get_config_path
@@ -38,6 +40,49 @@ def get_workspace_path(workspace: str | None = None) -> Path:
     """Resolve and ensure the agent workspace path."""
     path = Path(workspace).expanduser() if workspace else Path.home() / ".opendde_harness" / "workspace"
     return ensure_dir(path)
+
+
+@dataclass(frozen=True)
+class WorkspaceStorage:
+    """Instance-owned persistence, separate from the execution directory."""
+
+    root: Path
+    scope: str
+    assistant: Path
+    skills: Path
+    sessions: Path
+    exports: Path
+    memory_state: Path
+    checkpoint: Path
+    host_memory: Path
+
+
+def get_workspace_scope(workspace: Path) -> str:
+    return hashlib.sha256(str(workspace.expanduser().resolve()).encode()).hexdigest()
+
+
+def assert_storage_ready(storage: WorkspaceStorage) -> None:
+    """Never let a new reader or writer see a partially migrated instance."""
+    if (storage.root / "migration.pending").exists():
+        raise RuntimeError("workspace migration is unfinished; resume or roll back before starting Harness")
+
+
+def get_workspace_storage(workspace: Path, *, data_dir: Path | None = None) -> WorkspaceStorage:
+    """Resolve paths without creating files (including during migration preview)."""
+    root = (data_dir if data_dir is not None else get_config_path().parent).expanduser().resolve()
+    scope = get_workspace_scope(workspace)
+    state = root / "state" / scope
+    return WorkspaceStorage(
+        root,
+        scope,
+        root / "assistant",
+        root / "skills",
+        root / "sessions" / scope,
+        root / "exports" / scope,
+        state / "memory",
+        state / "checkpoint",
+        root / "memory" / "host" / scope,
+    )
 
 
 def get_cli_history_path() -> Path:

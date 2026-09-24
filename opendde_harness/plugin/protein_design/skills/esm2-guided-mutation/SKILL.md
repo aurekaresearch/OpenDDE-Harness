@@ -31,7 +31,8 @@ materializes the proposals.
 ## Contract
 
 - Python proposes substitutions only at the listed mutable positions using the
-  configured semantic chain IDs and zero-based positions.
+  configured semantic chain IDs. Agent-facing sequence positions are one-based;
+  the runtime uses zero-based indices internally.
 - The runtime records `esm2_llr`, the parent residue, and the selected rank in
   candidate metadata before folding.
 

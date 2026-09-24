@@ -182,6 +182,7 @@ async def test_a_crash_between_the_store_and_the_ack_replays_the_turn_once(tmp_p
     def _no_cursor(*_args, **_kwargs):
         raise OSError("read-only file system")
 
+    original_commit = MemoryStore.commit_extraction_cursor
     monkeypatch.setattr(MemoryStore, "commit_extraction_cursor", _no_cursor)
     await loop.drain_backend_stores(timeout=5)
 
@@ -189,7 +190,7 @@ async def test_a_crash_between_the_store_and_the_ack_replays_the_turn_once(tmp_p
     assert len(loop.outbox.pending()) == 1, "unacknowledged, so still owed"
 
     # The next process picks the entry up and this time the cursor sticks.
-    monkeypatch.undo()
+    monkeypatch.setattr(MemoryStore, "commit_extraction_cursor", original_commit)
     restarted = _loop(tmp_path, backend)
     await restarted.drain_backend_stores(timeout=5)
 

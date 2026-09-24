@@ -43,7 +43,9 @@ def _workspace(tmp_path):
     An empty ``# Skills`` block would make the byte-identity assertion true for
     the wrong reason.
     """
-    skill = tmp_path / "skills" / "assay-notes"
+    from opendde_harness.config.paths import get_workspace_storage
+
+    skill = get_workspace_storage(tmp_path).skills / "assay-notes"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text(
         "---\nname: assay-notes\ndescription: how this project records assay results\n---\n\nWrite them down.\n",

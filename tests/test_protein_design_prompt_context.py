@@ -88,7 +88,7 @@ def test_gate_summary_preserves_decisions_and_deduplicates_without_mutating_reco
     assert "contacted_binder_residues" not in gate
     assert "structure_path" not in result["candidates"]["parent"]
     assert "mutations" not in result["candidates"]["parent"]
-    assert result["recurring_offenders"] == {"B:2": 3}
+    assert result["recurring_offenders"] == {"B:3": 3}
     assert len(context_json(result)) < len(context_json(original)) / 4
     assert original == before
 
@@ -121,7 +121,7 @@ def test_gate_feedback_bounds_sites_and_preserves_failed_skipped_and_unknown():
     assert result["candidates"]["unknown"]["gate_evidence"] == {}
     assert len(result["recurring_offenders"]) == 5
     assert result["recurring_offenders_omitted"] == 15
-    assert set(result["recurring_offenders"]) == {f"B:{i}" for i in range(15, 20)}
+    assert set(result["recurring_offenders"]) == {f"B:{i}" for i in range(16, 21)}
     assert "immutable" in result["recurring_offender_positions"]
     assert "raw contact" not in context_json(result)
     assert value == original
@@ -177,7 +177,7 @@ def test_minibinder_static_prefix_and_single_parent_keep_other_candidates():
     assert [item["candidate_id"] for item in result["other_population_candidates"]] == ["other"]
     assert "population" not in result
     assert "cdr" not in first and "framework" not in first and "raw_result" not in first
-    assert result["mutable_positions"] == config.mutable_positions
+    assert result["mutable_positions"] == {"B": [3]}
     assert inputs == before
     assert first == minibinder_prompt(config, **dict(reversed(list(inputs.items()))))
     keys = list(result)

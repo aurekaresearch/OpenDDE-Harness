@@ -585,6 +585,8 @@ class PythonProteinDesignHarness:
             }
             esm_scores = self._score_esm(esm_payload)["scores"]
         fold_output = task_output / "fold"
+        if options.get("parallel_gpu_index") is not None:
+            fold_output = fold_output / f"gpu_{int(options['parallel_gpu_index'])}"
         if options.get("post_refold"):
             fold_output = task_output / "post_refold" / uuid.uuid4().hex
         results = predictor.predict_batch(sequences, output_dir=fold_output)
@@ -697,7 +699,11 @@ class PythonProteinDesignHarness:
                     },
                 }
             )
-        if candidates and not any(item["metadata"]["success"] for item in candidates):
+        if (
+            candidates
+            and options.get("parallel_gpu_index") is None
+            and not any(item["metadata"]["success"] for item in candidates)
+        ):
             errors = "; ".join(
                 f"{item['candidate_id']}: {item['metadata']['error'] or 'fold failed'}" for item in candidates
             )
@@ -853,11 +859,11 @@ class PythonProteinDesignHarness:
         from opendde_harness.plugin.protein_design.servers.backends.soluble_mpnn import SolubleMPNNClient
 
         params = dict(payload.get("parameters") or {})
+        sampling_seed = params.pop("seed", None)
         constructor_params = {
             "weights_path": params.pop("weights_path", None),
             "backbone_noise": float(params.pop("backbone_noise", 0.0)),
             "device": resolve_device(params.pop("device", None)),
-            "seed": params.pop("seed", None),
         }
         client_key = json.dumps(
             constructor_params,
@@ -974,6 +980,7 @@ class PythonProteinDesignHarness:
                 bias_by_res=spec["bias_by_res"],
                 temperature=temperature,
                 num_sequences=count,
+                seed=sampling_seed,
                 expected_length=len(spec["parent_sequence"]),
             )
             for chain_id, spec in chain_specs.items()
@@ -1102,9 +1109,22 @@ class PythonProteinDesignHarness:
         return {"available": True, "result": result}
 
     def _epitope_analysis(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from opendde_harness.plugin.protein_design.core.gate import sequence_hotspot_residue_ids
+
         from .backends import epitope_analysis as module
 
         structure = self._resolve_output_file(payload["structure_path"], {".pdb", ".cif", ".mmcif"}, payload=payload)
+        hotspots = {
+            (str(item["chain"]), int(item["position"])) if isinstance(item, dict) else tuple(item)
+            for item in payload.get("hotspots") or []
+        }
+        structure_hotspots = (
+            sequence_hotspot_residue_ids(
+                module.load_structure(str(structure)), hotspots, list(payload["antigen_chains"])
+            )
+            if hotspots
+            else set()
+        )
         cdr_regions = {
             str(chain): {str(name): {int(position) for position in positions} for name, positions in regions.items()}
             for chain, regions in payload["cdr_regions"].items()
@@ -1115,10 +1135,7 @@ class PythonProteinDesignHarness:
             antigen_chains=list(payload["antigen_chains"]),
             cdr_regions=cdr_regions,
             cutoff=float(payload.get("cutoff", 4.5)),
-            hotspots=[
-                (str(item["chain"]), int(item["position"])) if isinstance(item, dict) else tuple(item)
-                for item in payload.get("hotspots") or []
-            ],
+            hotspots=sorted(structure_hotspots),
         )
         return {"available": True, "result": self._jsonable(result)}
 

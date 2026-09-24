@@ -105,7 +105,7 @@ class ProposalExecutor:
         skill_id: str,
         context: ProposalContext,
     ) -> CandidateProposal:
-        mutations = [self._parse_mutation(item) for item in raw.get("mutations", [])]
+        mutations = [self._parse_llm_mutation(item) for item in raw.get("mutations", [])]
         if skill_id == POINT_MUTATION_SKILL and not mutations:
             raise ProposalValidationError("point mutation requires at least one mutation")
         if skill_id == POINT_MUTATION_SKILL and not any(
@@ -151,10 +151,68 @@ class ProposalExecutor:
     ) -> list[CandidateProposal]:
         if not context.parent_structure_path:
             raise ProposalValidationError("inverse folding requires a parent structure")
-        first = output.candidates[0] if output.candidates else {}
+        plans = output.candidates or [{}]
+        if len(plans) > context.candidate_count:
+            raise ProposalValidationError("inverse folding has more anchor plans than the configured candidate count")
+        proposals: list[CandidateProposal] = []
+        seen: set[tuple[tuple[str, str], ...]] = set()
+        for attempt in range(3):
+            remaining = context.candidate_count - len(proposals)
+            if remaining == 0:
+                return proposals
+            # Share this round's sampling budget across the plans. Each round
+            # requests at most the number of missing candidates, never N per plan.
+            base, extra = divmod(remaining, len(plans))
+            for plan_index, plan in enumerate(plans):
+                count = base + ((plan_index - attempt) % len(plans) < extra)
+                if not count:
+                    continue
+                batch = await self._sample_inverse_folding(plan, context, count, attempt)
+                for proposal in batch[:count]:
+                    try:
+                        self._validate_batch([proposal], context)
+                    except ProposalValidationError as exc:
+                        self._add_error(str(exc))
+                        continue
+                    fingerprint = tuple(sorted(proposal.chains.items()))
+                    if fingerprint in seen:
+                        self._add_error("duplicate candidate sequence")
+                        continue
+                    seen.add(fingerprint)
+                    proposals.append(
+                        proposal.model_copy(
+                            update={
+                                "candidate_id": f"c{context.cycle:04d}_{context.parent_id}_inverse_folding_{len(proposals) + 1:03d}",
+                                "strategy": str(plan.get("strategy") or proposal.strategy),
+                                "risk_level": str(plan.get("risk_level") or proposal.risk_level),
+                                "metadata": {
+                                    **proposal.metadata,
+                                    "anchor_plan_id": plan.get("id") or plan.get("candidate_id") or str(plan_index),
+                                    "sampling_attempt": attempt + 1,
+                                },
+                            }
+                        )
+                    )
+        if len(proposals) != context.candidate_count:
+            raise ProposalValidationError(
+                f"inverse folding produced {len(proposals)}/{context.candidate_count} valid unique candidates "
+                f"after 3 sampling rounds; {'; '.join(dict.fromkeys(self.last_errors)) or 'backend returned too few candidates'}"
+            )
+        return proposals
+
+    async def _sample_inverse_folding(
+        self,
+        first: Mapping[str, Any],
+        context: ProposalContext,
+        num_sequences: int,
+        attempt: int,
+    ) -> list[CandidateProposal]:
         metadata = dict(first.get("metadata") or {})
         parameters = dict(metadata.get("soluble_mpnn_parameters") or {})
-        num_sequences = int(parameters.pop("num_sequences", context.candidate_count))
+        # The workflow owns the batch size; LLM sampling controls cannot shrink it.
+        parameters.pop("num_sequences", None)
+        if attempt and isinstance(parameters.get("seed"), int) and not isinstance(parameters["seed"], bool):
+            parameters["seed"] += attempt
         raw_positions = parameters.pop("design_positions", None)
         allowed_positions = {
             str(chain): {int(position) for position in positions}
@@ -168,11 +226,11 @@ class ProposalExecutor:
                 chain_id = str(chain)
                 if chain_id not in allowed_positions:
                     raise ProposalValidationError(f"SolubleMPNN design_positions has unknown chain {chain_id!r}")
-                requested = {int(position) for position in positions}
+                requested = {int(position) - 1 for position in positions}
                 illegal = sorted(requested - allowed_positions[chain_id])
                 if illegal:
                     raise ProposalValidationError(
-                        f"SolubleMPNN design_positions targets immutable residues {chain_id}:{illegal}"
+                        f"SolubleMPNN design_positions targets immutable residues {chain_id}:{[p + 1 for p in illegal]}"
                     )
                 if requested:
                     selected_positions[chain_id] = sorted(requested)
@@ -182,7 +240,9 @@ class ProposalExecutor:
             }
         if raw_positions is not None:
             parameters["design_positions"] = selected_positions
-        anchor_mutations = [self._parse_mutation(item).model_dump(mode="json") for item in first.get("mutations", [])]
+        anchor_mutations = [
+            self._parse_llm_mutation(item).model_dump(mode="json") for item in first.get("mutations", [])
+        ]
         result = await self._compute.generate_soluble_mpnn(
             SolubleMPNNRequest(
                 structure_path=context.parent_structure_path,
@@ -193,7 +253,7 @@ class ProposalExecutor:
                 ],
                 parent_chains=dict(context.parent_sequences),
                 anchor_mutations=anchor_mutations,
-                num_sequences=min(context.candidate_count, num_sequences),
+                num_sequences=num_sequences,
                 parameters=parameters,
                 placement=context.placement,
             )
@@ -272,6 +332,13 @@ class ProposalExecutor:
         raise ProposalValidationError("backend candidate is missing materialized chains")
 
     @staticmethod
+    def _parse_llm_mutation(raw: Any) -> Mutation:
+        mutation = ProposalExecutor._parse_mutation(raw)
+        if mutation.position < 1:
+            raise ProposalValidationError("LLM mutation positions must be one-based")
+        return mutation.model_copy(update={"position": mutation.position - 1})
+
+    @staticmethod
     def _parse_mutation(raw: Any) -> Mutation:
         if isinstance(raw, Mapping):
             payload = {
@@ -304,23 +371,25 @@ class ProposalExecutor:
         for mutation in mutations:
             key = (mutation.chain_id, mutation.position)
             if key in seen:
-                raise ProposalValidationError(f"duplicate mutation target: {key}")
+                raise ProposalValidationError(f"duplicate mutation target: {mutation.chain_id}:{mutation.position + 1}")
             seen.add(key)
             if mutation.chain_id not in result:
                 raise ProposalValidationError(f"unknown chain_id: {mutation.chain_id}")
             if mutation.position not in mutable.get(mutation.chain_id, set()):
                 raise ProposalValidationError(
-                    f"mutation targets immutable framework residue {mutation.chain_id}:{mutation.position}"
+                    f"mutation targets immutable framework residue {mutation.chain_id}:{mutation.position + 1}"
                 )
             residue = mutation.to_aa.upper()
             if residue not in CANONICAL_AMINO_ACIDS:
                 raise ProposalValidationError(f"non-canonical amino acid: {residue}")
             if mutation.position >= len(result[mutation.chain_id]):
-                raise ProposalValidationError(f"mutation position out of range: {key}")
+                raise ProposalValidationError(
+                    f"mutation position out of range: {mutation.chain_id}:{mutation.position + 1}"
+                )
             parent_residue = result[mutation.chain_id][mutation.position]
             if mutation.from_aa not in (None, "", "*") and mutation.from_aa.upper() != parent_residue:
                 raise ProposalValidationError(
-                    f"mutation source mismatch at {mutation.chain_id}:{mutation.position}: "
+                    f"mutation source mismatch at {mutation.chain_id}:{mutation.position + 1}: "
                     f"expected {mutation.from_aa.upper()}, parent has {parent_residue}"
                 )
             result[mutation.chain_id][mutation.position] = residue
@@ -368,7 +437,7 @@ class ProposalExecutor:
                 for position, (old, new) in enumerate(zip(parent, sequence, strict=True)):
                     if old != new and position not in mutable.get(chain_id, set()):
                         raise ProposalValidationError(
-                            f"candidate changed immutable framework residue {chain_id}:{position}"
+                            f"candidate changed immutable framework residue {chain_id}:{position + 1}"
                         )
             fingerprint = tuple(sorted(proposal.chains.items()))
             if fingerprint in seen_sequences:

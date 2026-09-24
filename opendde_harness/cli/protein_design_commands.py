@@ -83,6 +83,19 @@ def task_status(
 
 
 def _workflow_summary(workflow: WorkflowConfig, plugin_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    cp_degree = (
+        workflow.placement.cp_degree
+        if workflow.placement.cp_degree > 1
+        else int(workflow.fold_options.get("cp_degree", 1))
+    )
+    gpu_spec = str(workflow.fold_options.get("gpus", "all")).strip()
+    explicit_gpu_count = (
+        len(workflow.placement.fold)
+        if workflow.placement.fold
+        else len([part for part in gpu_spec.split(",") if part.strip()])
+        if gpu_spec not in {"", "all", "none"}
+        else None
+    )
     return {
         "target": workflow.target,
         "design_type": workflow.design_type,
@@ -97,6 +110,10 @@ def _workflow_summary(workflow: WorkflowConfig, plugin_config: dict[str, Any] | 
         "binder_type": workflow.metadata.get("binder_type"),
         "binder_chain_ids": list(workflow.binder_chains),
         "target_chain_ids": list(workflow.target_chains),
+        "target_hotspots_1based": {
+            chain: [position + 1 for position in values.get("hotspots", [])]
+            for chain, values in workflow.target_chains.items()
+        },
         "mutable_residue_count": sum(len(positions) for positions in workflow.mutable_positions.values()),
         "fold": fold_summary(workflow.fold_options),
         "loss_weights": workflow.fold_options.get("loss_weights"),
@@ -114,6 +131,10 @@ def _workflow_summary(workflow: WorkflowConfig, plugin_config: dict[str, Any] | 
             "requested_url": display_url(workflow.compute_url),
             "requested_worker_id": workflow.compute_worker_id,
             "requested_profile": workflow.compute_profile,
+            "placement": workflow.placement.model_dump(),
+            "fold_gpu_count": cp_degree if cp_degree > 1 else explicit_gpu_count,
+            "fold_parallelism": "context_parallel" if cp_degree > 1 else "candidate_parallel",
+            "candidate_data_parallelism": cp_degree == 1,
         },
         "post_filter_enabled": workflow.post_filter_enabled,
     }

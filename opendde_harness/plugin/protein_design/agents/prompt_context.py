@@ -6,6 +6,24 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from opendde_harness.plugin.protein_design.core.residue_positions import (
+    external_mutations,
+)
+from opendde_harness.plugin.protein_design.core.residue_positions import (
+    external_positions as prompt_positions,
+)
+
+
+def prompt_target_chains(value: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    return {
+        chain: {**fields, "hotspots": prompt_positions(fields.get("hotspots", []))}
+        if isinstance(fields, Mapping)
+        else fields
+        for chain, fields in value.items()
+    }
+
 
 def bounded_design_memories(memories: list[str]) -> list[str]:
     """Bound recalled advisory excerpts without modifying stored memories."""
@@ -51,11 +69,11 @@ def minibinder_prompt(config, **evidence) -> str:
     static = {
         "design_type": "minibinder",
         "target": config.target,
-        "target_chains": config.target_chains,
-        "hotspots": config.fold_options.get("target_hotspots", config.hotspots),
+        "target_chains": prompt_target_chains(config.target_chains),
+        "hotspots": prompt_positions(config.fold_options.get("target_hotspots", config.hotspots)),
         "binder_chains": config.binder_chains,
-        "mutable_positions": config.mutable_positions,
-        "fixed_residues": config.fixed_residues,
+        "mutable_positions": prompt_positions(config.mutable_positions),
+        "fixed_residues": prompt_positions(config.fixed_residues),
         "objective_key": config.objective_key,
         "minimize": config.minimize,
     }
@@ -130,9 +148,20 @@ def compact_gate(evidence: Mapping[str, Any], *, minibinder: bool = False) -> di
         value = evidence.get(key)
         if isinstance(value, (list, tuple)):
             result[key] = list(value[:24])
+            if key == "framework_contact_residue_ids":
+                result[key] = [
+                    {**item, "sequence_position": int(item["sequence_position"]) + 1}
+                    if isinstance(item, Mapping) and item.get("sequence_position") is not None
+                    else item
+                    for item in result[key]
+                ]
             result[f"{key}_count"] = len(value)
             if len(value) > 24:
                 result[f"{key}_omitted"] = len(value) - 24
+    if "cdr_position_semantics" in result:
+        result["cdr_position_semantics"] = "one_based_sequence_order"
+    if evidence.get("hotspot_position_semantics"):
+        result["hotspot_position_semantics"] = evidence["hotspot_position_semantics"]
     return result
 
 
@@ -162,6 +191,8 @@ def compact_candidate(
         elif key in candidate:
             result[key] = candidate[key]
     result["gate_evidence"] = compact_gate(metadata.get("gate_evidence") or {}, minibinder=minibinder)
+    if result.get("mutations"):
+        result["mutations"] = external_mutations(result["mutations"])
     return result
 
 
@@ -244,12 +275,14 @@ def compact_gate_feedback(value: Any, *, minibinder: bool = False) -> Any:
     if not minibinder:
         recurring = value.get("recurring_offenders") or {}
         ranked = sorted(recurring.items(), key=lambda item: (-item[1], item[0]))
-        result["recurring_offenders"] = dict(ranked[:5])
+        result["recurring_offenders"] = {
+            f"{key.rsplit(':', 1)[0]}:{int(key.rsplit(':', 1)[1]) + 1}": count for key, count in ranked[:5]
+        }
         if len(ranked) > 5:
             result["recurring_offenders_omitted"] = len(ranked) - 5
         if ranked:
             result["recurring_offender_positions"] = (
-                "chain:zero_based_sequence_position; fixed residues remain immutable"
+                "chain:one_based_sequence_position; fixed residues remain immutable"
             )
     return result
 

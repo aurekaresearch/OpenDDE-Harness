@@ -10,11 +10,11 @@ Read `protein_design_context` first (CLI fallback: `ddeharness protein-design co
 
 - target name, organism/species, isoform or domain boundaries when relevant;
 - target chain IDs and complete sequences, including source/provenance;
-- intended epitope or hotspot residues and whether numbering is zero-based YAML indexing or an external biological numbering scheme;
+- intended epitope or hotspot residues and whether numbering is one-based YAML indexing or an external biological numbering scheme;
 - whether target MSA features are used, plus absolute unpaired/paired A3M paths and provenance;
 - initial target-binder complex structure path and chain mapping, when supplied.
 
-When the user supplies only a target name, use Web search to resolve the missing identity and sequence context before asking for confirmation. Prefer UniProt/NCBI sequence records and use RCSB PDB plus primary literature for epitope evidence. Record accessions or URLs, sequence version, construct/domain boundaries, and the source numbering scheme. Do not silently choose among species, isoforms, extracellular-domain constructs, or competing reported epitopes. Map source residue numbering to zero-based YAML hotspot indices only after confirming the exact sequence; otherwise leave the mapping unresolved. Web search cannot substitute for a readable local MSA or structure path on the compute worker.
+When the user supplies only a target name, use Web search to resolve the missing identity and sequence context before asking for confirmation. Prefer UniProt/NCBI sequence records and use RCSB PDB plus primary literature for epitope evidence. Record accessions or URLs, sequence version, construct/domain boundaries, and the source numbering scheme. Do not silently choose among species, isoforms, extracellular-domain constructs, or competing reported epitopes. Map source residue numbering to one-based YAML hotspot indices only after confirming the exact sequence; otherwise leave the mapping unresolved. Web search cannot substitute for a readable local MSA or structure path on the compute worker.
 
 API mode uses service-managed MSA: do not offer disabling MSA or search for local A3M files. For local folding only, if target MSA policy is unresolved, ask with other missing target information whether the user wants to:
 
@@ -106,7 +106,6 @@ design:
 
 fold:
   model: opendde
-  gpus: "0,1,2,3,4,5,6,7"
   enable_batch_inference: true
   seeds: [973520]
   use_msa: true
@@ -126,8 +125,8 @@ initial_binders:
     chains:
       D:
         sequence: BINDER_SEQUENCE
-        cdr_regions: "25:34,49:58,98:114"
-        fixed_residues: "0:24,35:48,59:97,115:124"
+        cdr_regions: "26:35,50:59,99:115"
+        fixed_residues: "1:25,36:49,60:98,116:125"
         chain_type: VHH
 ```
 
@@ -178,10 +177,12 @@ compute:
 | `placement.fold` | GPU indices held exclusively by one OpenDDE fold. |
 | `placement.esm` | Single GPU index for ESM-2 scoring and ESM-guided proposals. |
 | `placement.mpnn` | Single GPU index for SolubleMPNN generation. |
-| `placement.cp_degree` | Fold-CP context-parallel degree; defaults to `len(fold)`, otherwise `1`. |
+| `placement.cp_degree` | Fold-CP context-parallel degree; always defaults to `1`. Set explicitly to the number of requested fold GPUs. |
 
-`fold` must list exactly `cp_degree` distinct indices. ESM and SolubleMPNN may
-share one GPU with each other but never with a running fold. An explicit request
+`fold` must list exactly `cp_degree` distinct indices. Multiple GPUs cooperate on
+one candidate; candidate-level data parallelism is not supported by this setting.
+ESM and SolubleMPNN may name the same GPUs as fold; conflicting jobs are queued
+by the scheduler rather than running simultaneously. An explicit request
 for a busy GPU waits in the queue instead of failing. Validate the file with
 `ddeharness protein-design validate --config <path>` before launch.
 
@@ -325,7 +326,7 @@ If only a target name is provided, search the Web to resolve species and isoform
 |---|---|
 | `initial_binders[].name` | Stable identifier for the starting candidate. |
 | `initial_binders[].chains.<chain_id>.sequence` | Full binder-chain sequence. `X` is allowed only at intended mutable bootstrap positions. |
-| `cdr_regions` | CDR permission regions. Quoted string ranges are zero-based and inclusive, for example `"25:34,49:58,98:114"`. |
+| `cdr_regions` | CDR permission regions. Quoted string ranges are one-based and inclusive, for example `"26:35,50:59,99:115"`. |
 | `designable_residues` | Optional narrower explicit mutation permission. When present, it takes precedence over `cdr_regions`. |
 | `fixed_residues` | Immutable residues. This always overrides both `cdr_regions` and `designable_residues`; quote range strings. |
 | `chain_type` | Antibody mode: `VHH`, `scFv`, `VH`, or `VL` (`VK`, `VL-kappa`, and `VL-lambda` normalize to `VL`). Mini binder mode: `minibinder`. |
@@ -341,7 +342,7 @@ Before final launch review, verify:
 3. Target, binder, and structure chain IDs agree.
 4. The main `fold.model` is `opendde`.
 5. Binder topology and annotations match `design.type`: antibody CDR/framework constraints or a single mini binder chain with explicit designable positions.
-6. Designable, CDR (antibody only) and fixed ranges are zero-based, inclusive and in bounds; fixed always wins.
+6. Designable, CDR (antibody only) and fixed ranges are one-based, inclusive and in bounds; fixed always wins.
 7. Fixed positions (including antibody frameworks) are not mutable. Mini binders use a general checkpoint in local/docker mode.
 8. Mini binder seeds contain only canonical amino acids. Antibody `X` occurs only in mutable bootstrap residues; generated children containing `X` cannot enter the population.
 9. Objective direction is correct: minimize `loss`, maximize `iptm`.

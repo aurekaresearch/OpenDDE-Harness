@@ -6,7 +6,7 @@ description: Redesign every system-approved mutable antibody CDR region at nativ
 # CDR Full Redesign
 
 1. Read the target, antibody header, mutable-position list, prior memory, and
-   QC warnings. Treat chain IDs and zero-based positions as immutable input.
+   QC warnings. Treat chain IDs and one-based positions as immutable input.
 2. Form several distinct region-level hypotheses grounded in the supplied
    epitope and structural evidence. Preserve realistic antibody loop chemistry,
    canonical constraints outside H3, VH/VL balance, and framework anchors.
@@ -34,7 +34,7 @@ Return exactly one JSON object with no prose or code fence before or after it:
   "candidates": [
     {
       "id": "cycle_N_redesign_001",
-      "mutations": [["D", 95, "A"], ["D", 96, "R"], ["D", 97, "N"]],
+      "mutations": [["D", 96, "A"], ["D", 97, "R"], ["D", 98, "N"]],
       "strategy": "[H3 / cdr-h3-reshape] concise mechanism",
       "risk_level": "high",
       "metadata": {"hypothesis": "reshape the complete H3 paratope"}

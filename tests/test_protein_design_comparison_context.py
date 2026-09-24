@@ -33,7 +33,7 @@ def test_comparison_projection_retains_lineage_failure_and_measurements():
     before = deepcopy(record)
     result = reflection_candidates([record])[0]
     assert result["parent_id"] == "parent"
-    assert result["mutations"] == [["B", 1, "C"]]
+    assert result["mutations"] == [["B", 2, "C"]]
     assert result["metrics"]["missing"] is None
     assert result["success"] is False and result["error"] == "partial output"
     assert result["structure_path"] == record["structure_path"]
@@ -131,5 +131,5 @@ def test_sequence_less_candidates_keep_compact_assignments_and_minibinder_gates(
         },
     }
     result = design_population([record], {"candidate_id": "parent"}, {}, minibinder=True)[0]
-    assert result["position_assignments"] == [["B", 3, "Y"]]
+    assert result["position_assignments"] == [["B", 4, "Y"]]
     assert result["gate_evidence"] == {"coverage_ratio": 0.5}

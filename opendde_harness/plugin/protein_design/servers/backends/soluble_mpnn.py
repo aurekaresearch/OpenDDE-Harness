@@ -162,6 +162,7 @@ class SolubleMPNNClient:
         forced_residues: dict[int, str] | None = None,
         temperature: float = 0.1,
         num_sequences: int = 10,
+        seed: int | None = None,
     ) -> list[dict[str, Any]]:
         import torch
         from external.ligandmpnn.data_utils import (
@@ -176,6 +177,8 @@ class SolubleMPNNClient:
             raise ValueError("SolubleMPNN temperature must be finite and positive")
         if isinstance(num_sequences, bool) or not isinstance(num_sequences, int) or not 1 <= num_sequences <= 256:
             raise ValueError("SolubleMPNN num_sequences must be between 1 and 256")
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
+            raise ValueError("SolubleMPNN seed must be a nonnegative integer")
         if not designable_positions or any(
             isinstance(p, bool) or not isinstance(p, int) or not 0 <= p < expected_length for p in designable_positions
         ):
@@ -240,10 +243,12 @@ class SolubleMPNNClient:
         )
         # Sampling and backbone noise use upstream global RNGs; isolate concurrent requests.
         with _SAMPLING_LOCK, torch.random.fork_rng(devices=cuda_devices), torch.inference_mode():
-            seed = self.seed if self.seed is not None else secrets.randbits(32)
-            torch.random.default_generator.manual_seed(seed)
+            sampling_seed = seed if seed is not None else self.seed
+            if sampling_seed is None:
+                sampling_seed = secrets.randbits(32)
+            torch.random.default_generator.manual_seed(sampling_seed)
             for device_index in cuda_devices:
-                torch.cuda.default_generators[device_index].manual_seed(seed)
+                torch.cuda.default_generators[device_index].manual_seed(sampling_seed)
             features["randn"] = torch.randn((num_sequences, length), device=self.device)
             result = self.model.sample(features)
             mask = features["mask"] * features["chain_mask"]

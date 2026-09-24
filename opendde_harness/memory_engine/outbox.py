@@ -103,8 +103,9 @@ class MemoryOutbox:
         store: MemoryStore,
         *,
         now_fn: Callable[[], datetime] | None = None,
+        state_dir: Path | None = None,
     ) -> None:
-        self.path = ensure_dir(workspace / "user_memory") / "outbox.jsonl"
+        self.path = ensure_dir(state_dir if state_dir is not None else store.state_dir) / "outbox.jsonl"
         self.store = store
         self._now_fn = now_fn or datetime.now
         #: Turns abandoned without being indexed, this process. Read once by the

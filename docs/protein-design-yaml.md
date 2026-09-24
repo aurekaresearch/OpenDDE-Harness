@@ -23,14 +23,14 @@ it does not start a new computation. `--json` includes the full snapshot.
 `design.type` (`type`) defaults to `antibody`; set it to `minibinder` to design or
 optimize a fixed-length single-chain non-antibody binder. This mode does not generate
 backbone coordinates or insert/delete residues. Supply a complete or X-masked sequence,
-`chain_type: minibinder`, and explicit zero-based `designable_residues`.
+`chain_type: minibinder`, and explicit one-based `designable_residues`.
 `fixed_residues` overrides the mutable mask. Do not supply `cdr_regions` or
 `cdr_contact_fraction_threshold` in this mode.
 
 Every X must be mutable, never fixed. An all-X seed needs no initial structure:
 `minibinder-full-redesign` assigns every mutable position before the first fold.
 For example, a 6-residue test seed uses `sequence: XXXXXX` and
-`designable_residues: "0:5"`; choose a suitable actual design length for your task.
+`designable_residues: "1:6"`; choose a suitable actual design length for your task.
 
 With `objective: loss`, minibinders use a separate scoring formula, not the
 antibody CDR/framework objective. Fixed residues only constrain sequence edits.
@@ -71,7 +71,7 @@ Downloads verify published sizes and SHA256; routine readiness checks do not reh
 multi-gigabyte weights. API mode does not require local OpenDDE checkpoints.
 
 The mini binder structure gate requires target interface contacts and contact with
-at least one configured hotspot when hotspots are present. Hotspots use zero-based
+at least one configured hotspot when hotspots are present. Hotspots use one-based
 target sequence order and are mapped to structure residue IDs. CDR/framework gates
 are not applied. Antibody developability tools are not run: unsupported QC properties
 remain Unknown, rather than being treated as experimentally measured. Independent
@@ -113,8 +113,11 @@ user-approved smoke run and validate scientifically before a large campaign.
 - Cycles start at **0**; `start_cycle` and `end_cycle` are **inclusive**. A ten-cycle
   task runs cycles 0 through 9. Initial scoring is displayed as cycle -1 and is
   outside the schedule. Optional terminal refolding is also outside the schedule.
-- Residue positions are zero-based and inclusive. Quote ranges such as
-  `"25:34,49:58,98:114"`; unquoted `2:4` can be parsed as a YAML 1.1 integer.
+- Residue positions are one-based and inclusive. Quote ranges such as
+  `"26:35,50:59,99:115"`; unquoted `2:4` can be parsed as a YAML 1.1 integer.
+  The first residue is 1 and the last is the supplied chain's length. These
+  are sequence positions, not PDB/mmCIF author residue IDs. Runtime array
+  indices remain zero-based; conversion occurs at the input/output boundary.
 
 ## Exploration followed by refinement
 
@@ -391,14 +394,20 @@ different scaffold topologies. Binder-side `hotspots` is not a supported key.
 | `compute.worker_id` | Optional registered worker ID. Prefer one placement selector rather than conflicting selectors. |
 | `compute.profile` | Optional configured worker profile. |
 | `compute.placement` | `auto` or a mapping specifying resource placement below. |
-| `compute.placement.fold` | Optional list of GPU indices for folding. |
+| `compute.placement.fold` | Optional GPU pool for candidate-parallel folding in one compute container. |
 | `compute.placement.esm` | Optional ESM2 GPU index. |
 | `compute.placement.mpnn` | Optional SolubleMPNN GPU index. |
-| `compute.placement.cp_degree` | Defaults to `1` (CP disabled), even with an explicit `fold` GPU list. Set greater than `1` to opt in; the list must contain at least this many devices, with the first `cp_degree` selected. |
+| `compute.placement.cp_degree` | Defaults to `1` (CP disabled). Values above `1` opt into Fold-CP; then `placement.fold` must contain exactly this many devices. |
 
-Context parallelism is opt-in. A legacy `fold.gpus: "0,1,2,3"` list alone
-does not enable four-GPU CP: without explicit CP placement, one GPU is used.
-Use `compute.placement.cp_degree: 4` to request four-GPU CP explicitly.
+By default, the compute service distributes each fold batch across the available
+GPUs: one resident single-GPU OpenDDE worker per GPU in the **same container**.
+`compute.placement.fold: [0, 1, 2, 3]` or `fold.gpus: "0,1,2,3"` restricts the
+candidate worker pool to those GPUs. No separate design tasks or containers are
+started. Excess GPUs are not leased when there are fewer candidates than GPUs.
+Set `compute.placement.cp_degree: 4` only when context parallelism is intended;
+then four GPUs cooperate on one candidate rather than folding separate candidates.
+ESM/MPNN can reuse fold GPU indices between jobs; the scheduler serializes
+conflicting leases.
 Direct compute API/backend callers can set `fold.cp_degree` (default `1`);
 workflow placement takes precedence over that backend option.
 | `llm.model_name` | Inherit configured default model; task model override. |

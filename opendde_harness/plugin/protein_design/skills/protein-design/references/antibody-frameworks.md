@@ -7,7 +7,7 @@ Read this reference only when a user wants an antibody-design configuration but 
 - First confirm whether the design is a single-chain VHH or paired VH/VL variable regions. The paired entries below are called “Fab” for convenience, but contain only VH and VL sequences; constant domains are not included.
 - Offer the two matching choices and let the user select one in the Binder / antibody confirmation round. Do not silently choose a default.
 - Use the CDR-masked sequence in a de novo CDR bootstrap. The unmasked source sequence is included for provenance and inspection only.
-- Keep every listed `fixed_residues` position immutable. The ranges are zero-based and inclusive, matching the protein-design YAML schema.
+- Keep every listed `fixed_residues` position immutable. The ranges are one-based and inclusive, matching the protein-design YAML schema.
 - Do not transfer a source antibody's biological specificity or target annotation to a new task.
 
 ## Paired VH/VL choices
@@ -24,13 +24,13 @@ initial_binders:
     chains:
       H:
         sequence: EVQLVESGGGLVQPGRSLRLSCAASXXXXXXXXXXWVRQAPGKGLEWVSXXXXXXXXXXYADSVEGRFTISRDNAKNSLYLQMNSLRAEDTAVYYCAKXXXXXXXXXXXXWGQGTLVTVSS
-        cdr_regions: "25:34,49:58,98:109"
-        fixed_residues: "0:24,35:48,59:97,110:120"
+        cdr_regions: "26:35,50:59,99:110"
+        fixed_residues: "1:25,36:49,60:98,111:121"
         chain_type: VH
       L:
         sequence: DIQMTQSPSSLSASVGDRVTITCXXXXXXXXXXXWYQQKPGKAPKLLIYXXXXXXXGVPSRFSGSGSGTDFTLTISSLQPEDVATYYCXXXXXXXXXFGQGTKVEIK
-        cdr_regions: "23:33,49:55,88:96"
-        fixed_residues: "0:22,34:48,56:87,97:106"
+        cdr_regions: "24:34,50:56,89:97"
+        fixed_residues: "1:23,35:49,57:88,98:107"
         chain_type: VL
 ```
 
@@ -46,13 +46,13 @@ initial_binders:
     chains:
       H:
         sequence: QVQLQQSGAEVKKPGSSVRVSCKASXXXXXXXXXXWVRQAPGQGLEWMGXXXXXXXXXXYSQNFQGRVAITADESTGTASMELSSLRSEDTAVYYCARXXXXXXXXXXXXXXWGRGTMVTVSS
-        cdr_regions: "25:34,49:58,98:111"
-        fixed_residues: "0:24,35:48,59:97,112:122"
+        cdr_regions: "26:35,50:59,99:112"
+        fixed_residues: "1:25,36:49,60:98,113:123"
         chain_type: VH
       L:
         sequence: SSELTQDPAVSVALGQTVRVTCXXXXXXXXXXXWYQQKPGQAPVLVIYXXXXXXXGIPDRFSGSSSGNTASLTITGAQAEDEADYYCXXXXXXXXXXXFGGGTELTVL
-        cdr_regions: "22:32,48:54,87:97"
-        fixed_residues: "0:21,33:47,55:86,98:107"
+        cdr_regions: "23:33,49:55,88:98"
+        fixed_residues: "1:22,34:48,56:87,99:108"
         chain_type: VL
 ```
 
@@ -68,8 +68,8 @@ initial_binders:
     chains:
       D:
         sequence: EVQLVESGGGLVQPGGSLRLSCAASXXXXXXXXXXWFRQAPGQEREFVAXXXXXXXXXXYADSVRGRFTNSRDNSKNTLYLQMNSLRAEDTAVYYCAAXXXXXXXXXXXXXXXXXWGQGTLVTVSS
-        cdr_regions: "25:34,49:58,98:114"
-        fixed_residues: "0:24,35:48,59:97,115:125"
+        cdr_regions: "26:35,50:59,99:115"
+        fixed_residues: "1:25,36:49,60:98,116:126"
         chain_type: VHH
 ```
 
@@ -83,11 +83,11 @@ initial_binders:
     chains:
       D:
         sequence: EVQLVESGGGLVQPGGSLRLSCAASXXXXXXXXXXWFRQAPGKGRELVAXXXXXXXXXXYPDSVEGRFTISRDNAKRMVYLQMNSLRAEDTAVYYCAAXXXXXXXXXXXXXXXXXXXWGQGTQVTVSS
-        cdr_regions: "25:34,49:58,98:116"
-        fixed_residues: "0:24,35:48,59:97,117:127"
+        cdr_regions: "26:35,50:59,99:117"
+        fixed_residues: "1:25,36:49,60:98,118:128"
         chain_type: VHH
 ```
 
 ## Provenance
 
-The sequences and region annotations in this reference were selected from the user-provided framework tables. Their original coordinates were one-based inclusive and were converted here to zero-based inclusive YAML ranges. Preserve the source names so downstream records retain scaffold provenance.
+The sequences and region annotations in this reference were selected from the user-provided framework tables. Their original one-based inclusive coordinates are retained as YAML ranges. Preserve the source names so downstream records retain scaffold provenance.

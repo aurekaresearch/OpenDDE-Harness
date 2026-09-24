@@ -101,7 +101,7 @@ def test_design_changes_are_after_fixed_constraints_and_output_rules():
     assert "=== TARGET ===" not in first
     assert "mutable_positions_formatted" not in fields
     assert "=== OUTPUT RULES ===" not in first
-    assert "[chain_id, zero_based_position, new_residue]" in DESIGN_SYSTEM_PROMPT
+    assert "[chain_id, one_based_position, new_residue]" in DESIGN_SYSTEM_PROMPT
     assert fields["design_skill_route"] in prefix
     assert fields["num_sequences"] in prefix
     assert fields["num_mutations_instruction"] in prefix
@@ -132,7 +132,7 @@ def test_antibody_rules_are_static_and_not_repeated_in_cycle_template():
         "Candidates must produce distinct sequences",
         "Learned skills are advisory",
         "soluble_mpnn_parameters",
-        "[chain_id, zero_based_position, new_residue]",
+        "[chain_id, one_based_position, new_residue]",
         "Python-selected parent",
     ):
         assert rule in DESIGN_SYSTEM_PROMPT

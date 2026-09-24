@@ -24,7 +24,31 @@ from opendde_harness.plugin.protein_design.core.external import (
     short_reason,
     unavailable_message,
 )
+from opendde_harness.plugin.protein_design.core.residue_positions import (
+    external_mutations,
+    external_positions,
+    internal_positions,
+)
 from opendde_harness.plugin.protein_design.servers.client import ProteinDesignComputeError
+
+
+def _tool_result_positions(value: Any) -> Any:
+    """Project known sequence-coordinate fields, preserving structural residue IDs."""
+    if isinstance(value, list):
+        return [_tool_result_positions(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {}
+    for key, item in value.items():
+        if key in {"mutations", "anchor_mutations"} and isinstance(item, list):
+            result[key] = external_mutations(item)
+        elif key in {"cdr_regions", "mutable_positions", "fixed_residues"} and isinstance(item, dict):
+            result[key] = external_positions(item)
+        elif key == "sequence_position" and item is not None:
+            result[key] = int(item) + 1
+        else:
+            result[key] = _tool_result_positions(item)
+    return result
 
 
 class ProteinDesignToolError(RuntimeError):
@@ -91,7 +115,29 @@ class ProteinDesignToolRegistry:
         ) -> dict[str, Any]:
             target = context.compute or compute
             payload = scoped_arguments(context, arguments)
+            if model is Esm2GuidedProposalRequest and "mutable_positions" in payload:
+                payload["mutable_positions"] = internal_positions(payload["mutable_positions"])
+            elif model is EpitopeAnalysisRequest:
+                payload["cdr_regions"] = internal_positions(payload.get("cdr_regions", {}))
+                payload["hotspots"] = [
+                    {**item, "position": internal_positions(item["position"])} for item in payload.get("hotspots", [])
+                ]
+            elif model is SolubleMPNNRequest:
+                payload["mutable_positions"] = [
+                    f"{item.rsplit(':', 1)[0]}:{internal_positions(item.rsplit(':', 1)[1])}"
+                    for item in payload.get("mutable_positions", [])
+                ]
+                payload["anchor_mutations"] = [
+                    {**item, "position": internal_positions(item["position"])}
+                    for item in payload.get("anchor_mutations", [])
+                ]
+                parameters = dict(payload.get("parameters") or {})
+                if "design_positions" in parameters:
+                    parameters["design_positions"] = internal_positions(parameters["design_positions"])
+                payload["parameters"] = parameters
             if model is EvolutionTreeRequest:
+                if "cdr_regions" in payload:
+                    payload["cdr_regions"] = internal_positions(payload["cdr_regions"])
                 payload["candidates_json_path"] = str(context.metadata.get("candidates_json_path") or "in-memory")
                 payload["objective_key"] = (
                     context.metadata.get("objective_key") or payload.get("objective_key") or "loss"
@@ -106,7 +152,7 @@ class ProteinDesignToolRegistry:
                     if key in context.metadata:
                         payload[key] = context.metadata[key]
             value = await getattr(target, method)(model.model_validate(payload))
-            return cls._as_dict(value)
+            return _tool_result_positions(cls._as_dict(value))
 
         async def optional_call(
             context: ToolContext,
@@ -160,10 +206,15 @@ class ProteinDesignToolRegistry:
                     return await model_call(context, arguments, model, method)
                 return await optional_call(context, arguments, model, method, optional_service)
 
+            schema = model.model_json_schema()
+            if model in {Esm2GuidedProposalRequest, SolubleMPNNRequest, EpitopeAnalysisRequest, EvolutionTreeRequest}:
+                description += " Residue positions are one-based sequence positions, not PDB residue IDs."
+            if model is EpitopeAnalysisRequest:
+                schema["$defs"]["HotspotCoordinate"]["properties"]["position"]["minimum"] = 1
             return ToolDefinition(
                 name=name,
                 description=description,
-                parameters=model.model_json_schema(),
+                parameters=schema,
                 handler=handler,
             )
 

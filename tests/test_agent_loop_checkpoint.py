@@ -28,6 +28,49 @@ def _needs_git() -> None:
         pytest.skip("git is not on PATH")
 
 
+async def test_shadow_metadata_is_outside_workspace_and_tracks_real_changes(tmp_path):
+    from opendde_harness.config.paths import get_workspace_storage
+
+    _needs_git()
+    (tmp_path / "answer.py").write_text("x = 1\n")
+    service = CheckpointService(tmp_path)
+    first, changes = await service.commit_turn("first")
+    assert first and changes == ["answer.py"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["answer.py"]
+    assert service._git_dir.is_relative_to(get_workspace_storage(tmp_path).checkpoint)
+    (tmp_path / "answer.py").write_text("x = 2\n")
+    second, changes = await service.commit_turn("second")
+    assert second != first and changes == ["answer.py"]
+
+
+def test_checkpoint_refuses_instance_root_inside_worktree(tmp_path, monkeypatch):
+    from opendde_harness.config import loader
+
+    monkeypatch.setattr(loader, "_current_config_path", tmp_path / "internal" / "config.json")
+    with pytest.raises(ValueError, match="outside"):
+        CheckpointService(tmp_path)
+
+
+def test_legacy_default_checkpoint_setting_uses_migrated_shadow(tmp_path):
+    from opendde_harness.config.paths import get_workspace_storage
+
+    service = CheckpointService(tmp_path, shadow_dir=".opendde_harness/shadow.git")
+    assert service._git_dir == get_workspace_storage(tmp_path).checkpoint / "shadow.git"
+
+
+@pytest.mark.parametrize("destination", ["workspace", "other-scope"])
+def test_checkpoint_symlink_cannot_escape_its_scope(tmp_path, destination):
+    from opendde_harness.config.paths import get_workspace_storage
+
+    storage = get_workspace_storage(tmp_path)
+    target = tmp_path / "cache" if destination == "workspace" else storage.root / "state" / "other" / "checkpoint"
+    target.mkdir(parents=True)
+    storage.checkpoint.parent.mkdir(parents=True)
+    storage.checkpoint.symlink_to(target, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink|scope|outside"):
+        CheckpointService(tmp_path)
+
+
 async def test_the_snapshot_leaves_the_harnesss_own_state_untracked(tmp_path) -> None:
     """The journal, the lock beside it and the extraction queue are ours.
 

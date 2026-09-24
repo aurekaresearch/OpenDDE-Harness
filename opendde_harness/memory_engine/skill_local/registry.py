@@ -63,6 +63,8 @@ class SkillRegistry:
         extra_dirs: "list[tuple[Path, str, bool]] | None" = None,
         scan_max_depth: int = 5,
         plugin_skills_dirs: "list[Path] | None" = None,
+        *,
+        skills_dir: Path | None = None,
     ):
         """
         Args:
@@ -76,7 +78,10 @@ class SkillRegistry:
                 plugins' ``skills_dirs`` contributions.
         """
         self.workspace = workspace
-        self.workspace_skills = workspace / "skills"
+        from opendde_harness.config.paths import assert_storage_ready, get_workspace_storage
+
+        assert_storage_ready(get_workspace_storage(workspace))
+        self.workspace_skills = skills_dir if skills_dir is not None else get_workspace_storage(workspace).skills
         self._scan_max_depth = scan_max_depth
         try:
             self.workspace_skills.mkdir(parents=True, exist_ok=True)
