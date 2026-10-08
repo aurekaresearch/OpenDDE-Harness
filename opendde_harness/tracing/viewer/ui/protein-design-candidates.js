@@ -481,7 +481,7 @@
     const sequence = candidate.sequence || 'Sequence unavailable'
     const decision = candidate.postFilterDecision
     const decisionLabel = decision
-      ? `#${decision.rank || '-'} · ${decision.passFilter ? 'Selected' : decision.hardEligible ? 'Not selected' : 'Hard rejected'}`
+      ? `${decision.rank ? `#${decision.rank} · ` : ''}${decision.passFilter ? 'Selected' : !decision.hardEligible ? 'Hard rejected' : decision.selectionStatus === 'not_shortlisted' ? 'Not shortlisted' : 'Not selected'}`
       : ''
     const decisionDetail = decision
       ? [

@@ -265,7 +265,8 @@ function projectPostFilter(summary, readArtifact) {
       )
       return {
         candidateId,
-        rank: Number(decision?.rank || 0),
+        rank: finiteNumber(decision?.rank),
+        selectionStatus: String(decision?.selection_status || ''),
         objective: finiteNumber(decision?.objective),
         sequence: typeof candidate.sequence === 'string' ? candidate.sequence : '',
         metrics,

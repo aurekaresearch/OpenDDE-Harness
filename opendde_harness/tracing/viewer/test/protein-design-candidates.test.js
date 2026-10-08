@@ -115,6 +115,37 @@ test('post-filter reuses candidate rows and refolded metrics without mutating de
   assert.match(html, /data-table-metrics=".*&quot;plddt&quot;:0.8/)
 })
 
+test('post-filter distinguishes unreviewed shortlist exclusions from agent decisions', () => {
+  const run = {
+    taskId: 'run',
+    cycles: [],
+    postFilter: {
+      decisions: [
+        {
+          candidateId: 'a',
+          rank: null,
+          passFilter: false,
+          hardEligible: true,
+          selectionStatus: 'not_shortlisted',
+          sequence: 'AAA'
+        },
+        {
+          candidateId: 'b',
+          rank: null,
+          passFilter: false,
+          hardEligible: true,
+          selectionStatus: 'not_selected',
+          sequence: 'BBB'
+        }
+      ]
+    }
+  }
+  const html = renderProteinDesignDashboard({ run: resultRun(run, 'post-filter') })
+  assert.match(html, /Not shortlisted/)
+  assert.match(html, /Not selected/)
+  assert.doesNotMatch(html, /Hard rejected|#0/)
+})
+
 test('post-filter does not reuse design candidates when decisions are absent', () => {
   const run = { cycles: [{ cycle: 1, candidates: [{ candidateId: 'design-only' }] }] }
   const projected = resultRun(run, 'post-filter')

@@ -19,7 +19,7 @@ from opendde_harness.context_engine.history_trimmer import HistoryTrimmer
 from opendde_harness.context_engine.segments.render import render_router_skills
 from opendde_harness.memory_engine.skill_forge.loader import SkillLoader
 from opendde_harness.plugin.protein_design.agents.context import WorkflowInstructions
-from opendde_harness.plugin.protein_design.agents.profiles import AgentProfile
+from opendde_harness.plugin.protein_design.agents.profiles import AgentProfile, AgentRole
 from opendde_harness.plugin.protein_design.agents.skills import SkillDocument
 from opendde_harness.plugin.protein_design.core.progress import (
     DesignProgressEvent,
@@ -358,6 +358,8 @@ class OpenDDEHarnessStructuredSession:
                     ]
                 continue
             try:
+                if truncated and profile.role == AgentRole.POST_FILTER:
+                    raise ValueError("PostFilter output was truncated. Return complete, concise Top-K JSON only.")
                 value = json.loads(repair_json(content))
                 validated = cast(T, schema.model_validate(value))
                 selected_skill = getattr(validated, "skill_id", None)

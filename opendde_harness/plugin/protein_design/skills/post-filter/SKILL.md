@@ -1,8 +1,8 @@
 ---
 name: post-filter
 description: |
-  Rank all usable post-refold candidates from the complete search trajectory
-  through holistic evidence-based judgment and explain the final order.
+  Select a concise Top-K from a bounded post-refold shortlist
+  through holistic evidence-based judgment.
 ---
 
 # Post-Refold Selection
@@ -11,8 +11,9 @@ description: |
 
 You own the final ranking. Candidates originate from the complete search
 trajectory, including candidates no longer in the population. Python excludes
-only unusable refold results and validates your output; it does not calculate
-weighted scores, preselect by objective, or reorder for diversity.
+unusable refold results, then builds a bounded shortlist by round-robin metric
+leaders and sequence diversity. This is a context budget, not a quality gate
+or final ranking. Python validates your selection without rescoring or reordering it.
 
 Weigh interface and fold confidence, target-aligned binder pose RMSD, CDR
 engagement, hotspot support, sequence compatibility, measured developability,
@@ -33,10 +34,14 @@ their underlying measurements; avoid double-counting.
 
 ## Output
 
-- `strategy_summary`: explain the evidence and tradeoffs behind the order.
-- `decisions`: every supplied candidate exactly once, with `candidate_id`,
-  unique contiguous `rank` starting at 1, `rationale`, `strengths`, and `risks`.
-- `risk_notes`: evidence-backed batch-wide risks; use an empty list if none.
+- `strategy_summary`: explain the evidence and tradeoffs within 600 characters.
+- `decisions`: exactly `top_k` distinct supplied candidates, with `candidate_id`,
+  unique contiguous `rank` from 1 to `top_k`, `rationale` (at most 240 characters),
+  and at most two `strengths` and two `risks` (160 characters per item).
+- `risk_notes`: at most eight evidence-backed batch-wide risks, 240 characters
+  per note; use an empty list if none.
 
-Python takes the first `top_k` candidates from your order. Your ranking must
-cover the full supplied batch even when fewer candidates will be selected.
+Do not rank or explain unselected candidates. Never choose an ID not supplied
+in the shortlist. Excerpts marked truncated are incomplete evidence, not defects.
+Python preserves all original candidates and records who was not shortlisted
+separately from hard eligibility failures.

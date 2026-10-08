@@ -32,6 +32,7 @@ from opendde_harness.plugin.protein_design.core.population import (
     ParentSampler,
     WorkingParentTracker,
 )
+from opendde_harness.plugin.protein_design.core.post_filter import shortlist_audit, shortlist_candidates
 from opendde_harness.plugin.protein_design.core.post_mpnn import prepare_post_mpnn
 from opendde_harness.plugin.protein_design.core.progress import (
     DesignProgressEvent,
@@ -991,6 +992,8 @@ class DesignOrchestrator:
         stop_event: asyncio.Event,
         run_span: Any,
     ) -> tuple[list[Candidate], dict[str, Any]]:
+        if stop_event.is_set():
+            raise RuntimeError("Task stopped before terminal selection")
         self._event("final_visualization")
         if run_state.total_scored_candidates == 0:
             raise RuntimeError("protein-design search produced no successfully scored candidates")
@@ -1066,10 +1069,18 @@ class DesignOrchestrator:
             ]
         eligible_ids = {candidate.candidate_id for candidate in eligible}
         rejected = [candidate for candidate in terminal if candidate.candidate_id not in eligible_ids]
+        shortlist: list[Candidate] | None = None
         if config.post_filter_enabled and eligible:
             self._event("post_filter")
             try:
-                post_filter = await self._phases.post_filter_run(config, eligible, analysis)
+                if stop_event.is_set():
+                    raise RuntimeError("Task stopped before post-filter")
+                shortlist = shortlist_candidates(
+                    eligible, top_k=config.post_filter_top_k, minimize=config.minimize, design_type=config.design_type
+                )
+                post_filter = await self._phases.post_filter_run(config, shortlist, analysis)
+                if stop_event.is_set():
+                    raise RuntimeError("Task stopped during post-filter")
                 final_selection = self._post_filter_policy_selection(
                     post_filter.model_dump(mode="json"),
                     eligible=eligible,
@@ -1079,6 +1090,8 @@ class DesignOrchestrator:
                     post_refold_error=post_refold_error,
                 )
             except Exception as exc:
+                if stop_event.is_set():
+                    raise
                 post_filter_error = str(exc) or type(exc).__name__
                 final_selection = self._objective_final_selection(
                     eligible=eligible,
@@ -1104,6 +1117,10 @@ class DesignOrchestrator:
                 config=config,
                 strategy_summary="Python objective ordering; post-filter disabled.",
             )
+        if stop_event.is_set():
+            raise RuntimeError("Task stopped during terminal selection")
+        if shortlist is not None:
+            final_selection["shortlist"] = shortlist_audit(eligible, shortlist)
         final_selection.update(
             {
                 "post_filter_enabled": bool(config.post_filter_enabled),
@@ -1123,6 +1140,8 @@ class DesignOrchestrator:
             )
             final_selection["target_chain_ids"] = list(config.target_chain_ids)
             final_selection["binder_chain_ids"] = list(config.binder_chains)
+        if stop_event.is_set():
+            raise RuntimeError("Task stopped while exporting terminal structures")
         attach_artifact(
             run_span,
             "protein_design.final_selection",
@@ -1259,7 +1278,7 @@ class DesignOrchestrator:
     ) -> dict[str, Any]:
         return cls._final_selection_payload(
             strategy_summary="Final selection failed; search candidates are preserved without fallback ranking.",
-            decisions=[],
+            decisions=[cls._hard_rejection_decision(candidate, None) for candidate in terminal],
             terminal=terminal,
             eligible=eligible,
             post_refold_error=post_refold_error,
@@ -1268,7 +1287,7 @@ class DesignOrchestrator:
         )
 
     @staticmethod
-    def _hard_rejection_decision(candidate: Candidate, rank: int) -> dict[str, Any]:
+    def _hard_rejection_decision(candidate: Candidate, rank: int | None) -> dict[str, Any]:
         reason = candidate.metadata.get("post_refold_error") or candidate.metadata.get("error")
         return {
             "candidate_id": candidate.candidate_id,
@@ -1279,6 +1298,7 @@ class DesignOrchestrator:
             "risks": [reason or "not_post_filter_eligible"],
             "objective": candidate.objective,
             "hard_eligible": False,
+            "selection_status": "hard_rejected",
         }
 
     @classmethod
@@ -1312,7 +1332,7 @@ class DesignOrchestrator:
             for rank, candidate in enumerate(ordered, start=1)
         ]
         decisions.extend(
-            cls._hard_rejection_decision(candidate, len(decisions) + index)
+            cls._hard_rejection_decision(candidate, len(ordered) + index)
             for index, candidate in enumerate(rejected, start=1)
         )
         return cls._final_selection_payload(
@@ -1338,8 +1358,12 @@ class DesignOrchestrator:
     ) -> dict[str, Any]:
         output = PostFilterAgentOutput.model_validate(value)
         by_id = {candidate.candidate_id: candidate for candidate in eligible}
+        shortlist = shortlist_candidates(
+            eligible, top_k=config.post_filter_top_k, minimize=config.minimize, design_type=config.design_type
+        )
+        shortlisted_ids = {item.candidate_id for item in shortlist}
         decisions = output.decisions
-        output.validate_ranking(set(by_id))
+        output.validate_ranking(shortlisted_ids, top_k=config.post_filter_top_k)
         ranked = sorted(decisions, key=lambda item: item.rank)
         result = [
             {
@@ -1347,13 +1371,29 @@ class DesignOrchestrator:
                 "pass_filter": item.rank <= config.post_filter_top_k,
                 "objective": by_id[item.candidate_id].objective,
                 "hard_eligible": True,
+                "selection_status": "selected",
             }
             for item in ranked
         ]
+        selected_ids = {item.candidate_id for item in ranked}
         result.extend(
-            cls._hard_rejection_decision(candidate, len(ranked) + index)
-            for index, candidate in enumerate(rejected, start=1)
+            {
+                "candidate_id": candidate.candidate_id,
+                "rank": None,
+                "pass_filter": False,
+                "objective": candidate.objective,
+                "hard_eligible": True,
+                "selection_status": "not_selected" if candidate.candidate_id in shortlisted_ids else "not_shortlisted",
+                "rationale": "Not selected by the agent from the shortlist."
+                if candidate.candidate_id in shortlisted_ids
+                else "Outside the bounded multi-metric/diversity shortlist; not assessed by the agent.",
+                "strengths": [],
+                "risks": [],
+            }
+            for candidate in eligible
+            if candidate.candidate_id not in selected_ids
         )
+        result.extend(cls._hard_rejection_decision(candidate, None) for candidate in rejected)
         payload = cls._final_selection_payload(
             strategy_summary=output.strategy_summary,
             decisions=result,
@@ -1364,6 +1404,7 @@ class DesignOrchestrator:
             mode="agent",
         )
         payload["risk_notes"] = output.risk_notes
+        payload["shortlist"] = shortlist_audit(eligible, shortlist)
         return payload
 
     @classmethod

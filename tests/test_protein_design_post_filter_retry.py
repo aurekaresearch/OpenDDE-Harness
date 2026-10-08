@@ -52,7 +52,7 @@ def run(provider):
         target="test",
         objective_key="loss",
         minimize=True,
-        post_filter_top_k=1,
+        post_filter_top_k=2,
         cdr_regions={},
         cycles=1,
         reflection_interval=10,

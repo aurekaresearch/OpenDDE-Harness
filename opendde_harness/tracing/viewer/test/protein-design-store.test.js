@@ -529,6 +529,25 @@ test('keeps an unfinished agent activity visible while it is running', () => {
   assert.deepEqual(projected.run.events, [event])
 })
 
+test('post-filter preserves unranked shortlist status rather than creating rank zero', () => {
+  const artifact = {
+    mode: 'agent',
+    post_filter_enabled: true,
+    post_filter_executed: true,
+    candidates: [{ candidate_id: 'c1', sequence: 'ACDE' }],
+    decisions: [
+      { candidate_id: 'c1', rank: null, hard_eligible: true, pass_filter: false, selection_status: 'not_shortlisted' }
+    ]
+  }
+  const projected = projectProteinDesignRuns({
+    spans: [runSpan('task-1', { finalSelectionArtifactPath: '/final.json' })],
+    selectedRunId: 'task-1',
+    readArtifact: () => artifact
+  })
+  assert.equal(projected.run.postFilter.decisions[0].rank, null)
+  assert.equal(projected.run.postFilter.decisions[0].selectionStatus, 'not_shortlisted')
+})
+
 test('post-filter failures are failed, never fallback, and obsolete scores are ignored', () => {
   for (const failure of [
     { mode: 'failed', post_filter_error: 'agent unavailable' },
