@@ -317,10 +317,29 @@ change selected terms only.
 Terminal refolding currently uses unique, gate-passing, finitely scored trajectory
 parents ordered by the objective, capped at `4 * top_k`. SolubleMPNN samples 40
 variants per parent and selects up to the required four distinct valid variants
-for refolding. Failed or insufficient groups remain failures. Agent rankings must
-cover eligible candidates with contiguous ranks. If the post-filter agent fails,
-the implementation can fall back to deterministic objective ordering; inspect
-`final_selection` errors and mode rather than assuming agent ranking succeeded.
+for refolding. Failed or insufficient groups remain failures.
+
+Post-filter input is bounded to `max(80, top_k)` eligible candidates. The shortlist
+round-robins leaders in interface/fold confidence, pose RMSD, sequence likelihood,
+the configured objective, and (for antibodies) CDR/framework contact fractions.
+An ID-ordered queue provides coverage for sparse evidence. It prefers sequences
+below 90% positional identity to those already admitted, then fills remaining
+slots without the diversity preference. This is a deterministic context-reduction
+heuristic, not a validated biological quality score or a guarantee of global Top-K.
+Missing metrics remain unknown. All candidates and full evidence remain in the
+artifact; the model sees concise projections and explicitly marked excerpts.
+
+The agent returns only `min(top_k, eligible_count)` decisions, with distinct
+shortlisted IDs and contiguous ranks starting at 1. Rationales and explanation
+lists have length limits. Larger explicit `top_k` values still increase context
+and output costs; the default is 20. `final_selection.shortlist` records shortlist
+membership and method. Eligible candidates not selected have null rank and status
+`not_selected` or `not_shortlisted`; neither means hard eligibility failure.
+
+If the post-filter agent fails, selection falls back to deterministic objective
+ordering over all eligible candidates, not only the shortlist. Inspect
+`final_selection` errors and mode rather than assuming agent selection succeeded.
+Truncated model responses are never accepted as complete PostFilter selections.
 
 ## Fold fields
 

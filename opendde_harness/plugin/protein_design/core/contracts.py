@@ -6,7 +6,7 @@ import math
 from collections import Counter
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -405,31 +405,32 @@ class QualityBatchOutput(ContractModel):
 class PostFilterDecision(ContractModel):
     candidate_id: str = Field(min_length=1)
     rank: int = Field(ge=1, strict=True)
-    rationale: str = Field(min_length=1)
-    strengths: list[str] = Field(default_factory=list)
-    risks: list[str] = Field(default_factory=list)
+    rationale: str = Field(min_length=1, max_length=240)
+    strengths: list[Annotated[str, Field(max_length=160)]] = Field(default_factory=list, max_length=2)
+    risks: list[Annotated[str, Field(max_length=160)]] = Field(default_factory=list, max_length=2)
 
 
 class PostFilterAgentOutput(ContractModel):
-    strategy_summary: str = Field(min_length=1)
+    strategy_summary: str = Field(min_length=1, max_length=600)
     decisions: list[PostFilterDecision] = Field(min_length=1)
-    risk_notes: list[str] = Field(default_factory=list, max_length=8)
+    risk_notes: list[Annotated[str, Field(max_length=240)]] = Field(default_factory=list, max_length=8)
 
-    def validate_ranking(self, candidate_ids: set[str]) -> None:
+    def validate_ranking(self, candidate_ids: set[str], *, top_k: int | None = None) -> None:
+        expected = len(candidate_ids) if top_k is None else min(top_k, len(candidate_ids))
         counts = Counter(item.candidate_id for item in self.decisions)
-        missing = sorted(candidate_ids - counts.keys())
+        missing = sorted(candidate_ids - counts.keys()) if expected == len(candidate_ids) else []
         unexpected = sorted(counts.keys() - candidate_ids)
         duplicates = sorted(candidate_id for candidate_id, count in counts.items() if count > 1)
-        if missing or unexpected or duplicates:
+        if missing or unexpected or duplicates or len(self.decisions) != expected:
             raise ValueError(
-                "PostFilter Agent must rank every eligible candidate exactly once; "
+                f"PostFilter Agent must return exactly {expected} distinct supplied candidates; "
                 f"missing IDs: {missing}; unexpected IDs: {unexpected}; duplicate IDs: {duplicates}. "
                 "Return the complete corrected ranking, not only the changed entries."
             )
-        if sorted(item.rank for item in self.decisions) != list(range(1, len(candidate_ids) + 1)):
+        if sorted(item.rank for item in self.decisions) != list(range(1, expected + 1)):
             raise ValueError(
                 "PostFilter Agent ranks must be unique and contiguous from 1 "
-                f"through {len(candidate_ids)}; received ranks: {[item.rank for item in self.decisions]}. "
+                f"through {expected}; received ranks: {[item.rank for item in self.decisions]}. "
                 "Return the complete corrected ranking."
             )
 

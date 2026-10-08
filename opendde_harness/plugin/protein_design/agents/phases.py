@@ -21,6 +21,7 @@ from opendde_harness.plugin.protein_design.agents.policy import (
 from opendde_harness.plugin.protein_design.agents.profiles import AgentRole, profile_for
 from opendde_harness.plugin.protein_design.agents.prompt_context import (
     bounded_design_memories,
+    compact_gate,
     compact_gate_feedback,
     context_json,
     design_population,
@@ -44,6 +45,7 @@ from opendde_harness.plugin.protein_design.core.contracts import (
     WorkflowConfig,
 )
 from opendde_harness.plugin.protein_design.core.design_cases import recurring_offender_ids
+from opendde_harness.plugin.protein_design.core.post_filter import shortlist_candidates
 from opendde_harness.plugin.protein_design.prompts import (
     ANALYZE_REPORT_PROMPT,
     DESIGN_PROMPT,
@@ -53,6 +55,25 @@ from opendde_harness.plugin.protein_design.prompts import (
 )
 from opendde_harness.plugin.protein_design.prompts.antibody_design import DESIGN_TASK_CONTEXT
 from opendde_harness.plugin.protein_design.tools.agent import ToolContext
+
+
+def _finite_post_filter_values(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, Mapping):
+        return {str(key): _finite_post_filter_values(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite_post_filter_values(item) for item in value]
+    return value
+
+
+def _post_filter_excerpt(value: Any) -> Any:
+    """Keep bulky raw evidence on disk; explicitly label incomplete excerpts."""
+    value = _finite_post_filter_values(value)
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    if len(text) <= 400:
+        return value
+    return {"excerpt": text[:360], "truncated": True}
 
 
 def _forced_design_skill(config: WorkflowConfig, cycle: int) -> str | None:
@@ -556,13 +577,17 @@ class ProteinDesignPhases:
         candidates: list[Candidate],
         analysis: AnalyzeAgentOutput,
     ) -> PostFilterAgentOutput:
+        candidates = shortlist_candidates(
+            candidates, top_k=config.post_filter_top_k, minimize=config.minimize, design_type=config.design_type
+        )
+        top_k = min(config.post_filter_top_k, len(candidates))
         recurring_offenders = recurring_offender_ids(config.metadata.get("recurring_offenders"))
         prompt = json.dumps(
             {
                 "target": config.target,
                 "objective_key": config.objective_key,
                 "minimize": config.minimize,
-                "analysis": analysis.model_dump(mode="json"),
+                "analysis": analysis.downstream_header[:2000],
                 "cdr_regions": prompt_positions(config.cdr_regions),
                 "metric_definitions": {
                     "iptm": "Interface confidence, 0-1; higher is generally better, not measured affinity.",
@@ -576,8 +601,8 @@ class ProteinDesignPhases:
                     "loglikelihood": "Sequence-model compatibility; higher is generally better for comparable sequences.",
                     "objective": "Search objective only; direction is given by minimize. Do not let it dictate final order.",
                 },
-                "top_k": min(config.post_filter_top_k, len(candidates)),
-                "rank_count": len(candidates),
+                "top_k": top_k,
+                "rank_count": top_k,
                 "candidate_evidence": [self._post_filter_evidence(item, recurring_offenders) for item in candidates],
             },
             ensure_ascii=False,
@@ -586,8 +611,8 @@ class ProteinDesignPhases:
         if config.design_type == "minibinder":
             prompt = minibinder_prompt(
                 config,
-                top_k=min(config.post_filter_top_k, len(candidates)),
-                rank_count=len(candidates),
+                top_k=top_k,
+                rank_count=top_k,
                 candidate_evidence=[
                     self._post_filter_evidence(item, recurring_offenders, design_type=config.design_type)
                     for item in candidates
@@ -598,7 +623,7 @@ class ProteinDesignPhases:
         return await self._session.run(
             profile,
             prompt,
-            output_validator=lambda output: output.validate_ranking(candidate_ids),
+            output_validator=lambda output: output.validate_ranking(candidate_ids, top_k=top_k),
             skills=self._catalog.select(profile.default_skills),
             tool_context=ToolContext(
                 compute=self._compute,
@@ -643,29 +668,27 @@ class ProteinDesignPhases:
             "candidate_id": candidate.candidate_id,
             "sequence": candidate.sequence,
             "objective": candidate.objective,
-            "objective_components": dict(components),
+            "objective_components": _post_filter_excerpt(components),
             "refold_metrics": supplied,
-            "binder_rmsd_evidence": metadata.get("binder_rmsd_evidence", {"available": False}),
-            "gate_evidence": dict(gate),
+            "binder_rmsd_evidence": _post_filter_excerpt(metadata.get("binder_rmsd_evidence", {"available": False})),
+            "gate_evidence": _post_filter_excerpt(compact_gate(gate, minibinder=design_type == "minibinder")),
             "gate_passed": metadata.get("gate_passed", metrics.get("gate_passed")),
-            "chains": metadata.get("chains", {}),
             "interface": {
                 "cdr_contact_fraction": metrics.get("cdr_contact_fraction"),
                 "framework_contact_fraction": metrics.get("framework_contact_fraction"),
-                "contacted_hotspots": gate.get("contacted_hotspots", []),
-                "missed_hotspots": gate.get("missed_hotspots", []),
+                "contacted_hotspots": _post_filter_excerpt(gate.get("contacted_hotspots", [])),
+                "missed_hotspots": _post_filter_excerpt(gate.get("missed_hotspots", [])),
                 "cdr3_target_contacts": gate.get("cdr3_total_target_contacts"),
-                "recurring_offenders": recurring_offenders,
+                "recurring_offenders": _post_filter_excerpt(recurring_offenders),
             },
             "developability": {
-                "objective": metadata.get("developability_evidence", {}),
-                "quality_agent": metadata.get("quality_check", {}),
+                "objective": _post_filter_excerpt(metadata.get("developability_evidence", {})),
+                "quality_agent": _post_filter_excerpt(metadata.get("quality_check", {})),
             },
             "lineage": {
                 "parent_id": metadata.get("parent_id"),
                 "skill_id": metadata.get("skill_id"),
             },
-            "structure_path": candidate.structure_path,
             "missing_fields": [name for name, value in supplied.items() if value is None],
         }
         if design_type == "minibinder":
@@ -682,7 +705,9 @@ class ProteinDesignPhases:
                 }
             )
             evidence["not_applicable"] = ["cdr_contact_fraction", "framework_contact_fraction", "cdr3_target_contacts"]
-        return evidence
+        # JSON permits NaN by default, but it is not measured evidence. Normalize
+        # all nested values, not only the named refold metrics.
+        return _finite_post_filter_values(evidence)
 
     @staticmethod
     def _tool_metadata(config: WorkflowConfig, **values: Any) -> dict[str, Any]:
