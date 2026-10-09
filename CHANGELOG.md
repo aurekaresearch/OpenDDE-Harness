@@ -4,6 +4,139 @@ User-facing changes to OpenDDE Harness are documented here.
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-10-09
+
+OpenDDE Harness 0.0.5 adds fixed-length minibinder design, improves final
+candidate selection, and separates internal runtime storage from the execution
+workspace. It also standardizes user-facing residue numbering and improves
+multi-GPU scheduling and design observability.
+
+### Upgrading
+
+This release includes configuration and result-schema changes. Review existing
+workflows before restarting production tasks.
+
+- Residue positions are now one-based and inclusive. Update legacy zero-based
+  YAML positions, including CDR regions, designable/fixed residues, and target
+  hotspots; for example, `"25:34"` becomes `"26:35"` when referring to the same
+  residues. These are sequence positions, not PDB/mmCIF author residue IDs.
+  Internal array indices and compute contracts remain zero-based; do not blindly
+  convert internal payloads. Legacy inputs that do not contain zero can still be
+  accepted with a different meaning, so validation alone is not a migration
+  check.
+- Internal storage no longer lives in the execution workspace. Assistant
+  instructions, custom skills, sessions, exports, memory runtime state, and
+  shadow checkpoints are stored under the active configuration file's parent
+  directory, and workspace-specific state is scoped by the resolved workspace
+  path. User project files and project `AGENTS.md` stay in place. Startup warns
+  about legacy data but does not migrate it automatically.
+- Multi-GPU folding defaults to candidate parallelism. A fold GPU list now
+  identifies the candidate-worker pool. Set `compute.placement.cp_degree`
+  explicitly above `1` to use context parallelism; the fold GPU list must then
+  match that degree.
+- Post-filter consumers must handle unranked candidates. Eligible candidates
+  outside the final selection can have `rank: null` and `selection_status`
+  `not_selected` or `not_shortlisted`. Neither status means a hard eligibility
+  failure.
+
+Preview legacy workspace migration before starting the updated client or
+initializing assistant templates:
+
+```bash
+ddeharness workspace migrate --workspace /path/to/workspace --config /path/to/config.json
+```
+
+Stop clients, Python workers, and memory services before applying it:
+
+```bash
+ddeharness workspace migrate --workspace /path/to/workspace --config /path/to/config.json --apply
+```
+
+Migration preserves backups and supports guarded rollback. Process verification
+currently requires Linux; other platforms fail closed. Historical memory notes
+are archived for review, not automatically imported into the external memory
+service. See
+[workspace storage and migration](https://github.com/aurekaresearch/OpenDDE-Harness/blob/v0.0.5/docs/workspace-storage.md)
+for recovery and rollback details.
+
+### Added
+
+- Minibinder design and optimization: select `design.type: minibinder` for a
+  fixed-length, single-chain binder with explicit mutable positions. Supports
+  complete sequences and mutable `X` placeholders, full redesign, point
+  mutation, and inverse folding. Fixed residues and point-mutation budgets are
+  enforced. The mode keeps the sequence length fixed, generates no backbone
+  coordinates, requires a general-protein checkpoint with local or docker
+  folding, and needs a successful parent structure for inverse folding. See
+  [protein-design YAML](https://github.com/aurekaresearch/OpenDDE-Harness/blob/v0.0.5/docs/protein-design-yaml.md)
+  for the full field reference and mode constraints.
+- Minibinder-specific scoring and validation: dedicated confidence/contact loss,
+  interface and hotspot gates, prompts, memory separation, and dashboard labels.
+  Antibody-only CDR/framework penalties and developability checks are not
+  applied; unsupported QC properties remain unknown. Minibinder loss values are
+  on their own scale and are not comparable with antibody-mode losses.
+- Design-mode-aware checkpoint preparation: prepare antibody, minibinder, or
+  both checkpoints with
+  `ddeharness compute prepare --mode local --design-mode antibody|minibinder|both`.
+  Published download sizes and SHA256 values are verified, and task readiness
+  checks validate checkpoint availability, readability, and nonzero size on the
+  compute host; these checks do not establish scientific suitability. Explicit
+  checkpoint overrides are preserved for folding and refolding.
+- Task status from the CLI: use
+  `ddeharness protein-design status --task-id <task-id>`, add `--json` for the
+  saved snapshot, or omit the task ID to list local tasks.
+- Per-agent LLM usage in the design dashboard: inspect input/output tokens,
+  cache reads/writes, and cache-hit rate. Missing usage remains unknown, and
+  partial totals are explicitly marked.
+
+### Changed
+
+- Bounded PostFilter selection builds a deterministic multi-metric,
+  sequence-diversity-aware shortlist of up to `max(80, top_k)` eligible
+  candidates. The agent returns only the requested Top-K decisions with bounded
+  explanations, while full candidate evidence remains in the artifact. The
+  shortlist reduces model input rather than scoring biological quality, and it
+  does not guarantee a globally optimal Top-K; large explicit `top_k` values
+  still raise input and output costs.
+- Final results are auditable: shortlist membership is retained, and selected,
+  unselected, non-shortlisted, and hard-rejected candidates are distinguished.
+  Final refolded candidates share the candidate exploration interface, including
+  available metrics and structures.
+- Candidate-parallel GPU execution distributes fold batches across resident
+  single-GPU workers in one compute container, uses available subsets of the
+  configured pool, and avoids leasing excess devices when fewer candidates need
+  processing. Conflicting fold/ESM/MPNN leases remain coordinated.
+- Workflow context and skill loading use stable role-specific system prompts,
+  shared context-budget checks, and request-scoped skill catalogs. Built-in and
+  advisory skills are loaded on demand and validated against the allowed
+  catalog.
+- Memory isolation keeps external long-term memory as the sole recall source
+  when enabled, avoids duplicate local injection, and skips recall and
+  extraction when memory is disabled. Memory-library naming is confined to the
+  adapter boundary.
+
+### Fixed
+
+- Invalid PostFilter rankings are retried, and truncated selections are rejected
+  instead of accepting incomplete JSON as a finished result.
+- When the PostFilter agent fails, selection falls back to deterministic
+  objective ordering across all eligible candidates while preserving the error
+  and selection mode for inspection.
+- Failed-refold candidate decisions are preserved, fallback ranking is
+  corrected, and cancellation is honored through final selection and export.
+- Residue-position conversion at user and LLM boundaries is corrected, and
+  sequence hotspots are mapped to structure residue IDs for contact analysis.
+- SolubleMPNN clients are reused independently of sampling seeds, with seeds
+  passed to individual sampling requests.
+- Redundant code-fence markers are removed from terminal Markdown rendering.
+
+### Included changes
+
+- [#7 — fix: unify post-filter results and retry invalid candidate rankings](https://github.com/aurekaresearch/OpenDDE-Harness/pull/7)
+- [#9 — feat(plugin): add minibinder workflows and optimize design context](https://github.com/aurekaresearch/OpenDDE-Harness/pull/9)
+- [#10 — feat(protein_design): align residue numbering and separate workspace storage](https://github.com/aurekaresearch/OpenDDE-Harness/pull/10)
+- [#12 — fix(protein_design): bound post-filter selection](https://github.com/aurekaresearch/OpenDDE-Harness/pull/12)
+
 ## [0.0.4] - 2026-09-13
 
 OpenDDE Harness 0.0.4 introduces a pi-tui terminal interface, a shared pi-ai
@@ -281,7 +414,8 @@ This is an early preview, and you may encounter bugs. Please
 [open an issue](https://github.com/aurekaresearch/OpenDDE-Harness/issues) with your
 feedback, reproduction steps, and `ddeharness doctor --json` output when relevant.
 
-[Unreleased]: https://github.com/aurekaresearch/OpenDDE-Harness/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/aurekaresearch/OpenDDE-Harness/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/aurekaresearch/OpenDDE-Harness/releases/tag/v0.0.5
 [0.0.4]: https://github.com/aurekaresearch/OpenDDE-Harness/releases/tag/v0.0.4
 [0.0.3]: https://github.com/aurekaresearch/OpenDDE-Harness/releases/tag/v0.0.3
 [0.0.2]: https://github.com/aurekaresearch/OpenDDE-Harness/releases/tag/v0.0.2
