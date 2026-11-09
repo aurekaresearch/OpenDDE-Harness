@@ -3,6 +3,11 @@ from typing import Dict, Optional, Union
 
 import numpy as np
 
+from opendde_harness.plugin.protein_design.servers.backends.confidence_artifacts import (
+    is_compact_full_data,
+    load_full_data,
+)
+
 # TM-score calculation constants
 TM_SCORE_POWER = 2.0
 MIN_CHAIN_LENGTH = 27
@@ -206,7 +211,12 @@ def compute_ipsae(
         if confidence_json_path.endswith(".json"):
             af3 = True
         elif confidence_json_path.endswith(".npz"):
-            boltz1 = True
+            # Compact OpenDDE full_data npz carries the Protenix keys; any other
+            # npz is a Boltz-1 confidence file.
+            if is_compact_full_data(confidence_json_path):
+                af3 = True
+            else:
+                boltz1 = True
 
     if not (af2 or af3 or boltz1):
         raise ValueError(f"Unknown file combination: {output_cif_path}, {confidence_json_path}")
@@ -275,7 +285,7 @@ def compute_ipsae(
     # 3. Load PAE Matrix
     pae_matrix = None
     if af3:
-        data = load_first_json_object(confidence_json_path)
+        data = load_full_data(confidence_json_path)
         # AlphaFold3 uses 'pae', Protenix uses 'token_pair_pae'
         if "pae" in data:
             # AlphaFold3 official format

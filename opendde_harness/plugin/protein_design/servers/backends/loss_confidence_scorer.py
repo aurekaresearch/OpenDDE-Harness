@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from opendde_harness.plugin.protein_design.servers.backends.confidence_artifacts import load_full_data
 from opendde_harness.plugin.protein_design.servers.backends.loss_objective import calculate_loss_objective
 from opendde_harness.plugin.protein_design.servers.backends.structure_contacts import (
     iter_protein_residues,
@@ -44,8 +45,11 @@ def _load_first_json_object(path: str | Path) -> Mapping[str, Any]:
     confidence payload after an otherwise complete JSON object. The first
     decoded object
     is authoritative; malformed or incomplete leading JSON still fails.
+    Compact ``.npz`` full_data artifacts are decoded to the same values.
     """
     source = Path(path)
+    if source.suffix == ".npz":
+        return load_full_data(source)
     text = source.read_text(encoding="utf-8")
     stripped = text.lstrip()
     try:

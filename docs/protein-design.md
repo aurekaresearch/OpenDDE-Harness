@@ -214,7 +214,10 @@ timeout. Restart or recreate an existing compute service to load updated code.
 
 API requests default to `need_atom_confidence: true`. The downloaded ZIP includes
 the matching `full_data_sample_*.json` with atom pLDDT, token PAE, and contact
-tensors. API and local mode use the same 10-component weighted `loss`, minimized
+tensors. By default (`fold.full_data_format: npz`) each of these is re-encoded
+after parsing as a lossless `full_data_sample_*.npz`; loss scoring and ipSAE read
+either form and see identical values. Set `full_data_format: json` to keep the
+original files. API and local mode use the same 10-component weighted `loss`, minimized
 by the design workflow. Do not disable atom confidence when optimizing loss;
 missing confidence artifacts cause scoring to fail, not fall back to ipTM.
 
