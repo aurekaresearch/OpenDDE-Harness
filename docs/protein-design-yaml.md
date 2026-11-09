@@ -360,6 +360,7 @@ and local A3M paths. Local GPU/image settings do not allocate remote API GPUs.
 | `diffusion_samples` | 1 | Samples per prediction seed. API parameter `n_samples`. |
 | `diffusion_steps` | 200 | Diffusion steps. API parameter `n_step`. |
 | `need_atom_confidence` | `true` | Request atom/tensor confidence used for loss scoring. Required for API loss optimization. |
+| `full_data_format` | `npz` | Storage for `full_data_sample_*` confidence artifacts. `npz` re-encodes each JSON as lossless compressed npz after the fold is parsed (13-15x smaller for a 352-token complex; decoded values equal the JSON values exactly); `json` keeps OpenDDE's original files. |
 | `use_msa` | `true` | Local MSA features. API service always manages MSA. |
 | `enable_msa_search` | `false` | Local fallback MSA/template search; prefer preparing target A3M files explicitly before launch. |
 | `use_templates` | `false` | Local template use. Does not disable the API service pipeline. |

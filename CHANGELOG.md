@@ -4,6 +4,13 @@ User-facing changes to OpenDDE Harness are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Fold `full_data_sample_*` confidence artifacts are now re-encoded as lossless
+  compressed `.npz` after each fold is parsed (13-15x smaller on a 352-token
+  complex). ipSAE and loss scoring read either form and see identical values.
+  Set `fold.full_data_format: json` to keep OpenDDE's original JSON files.
+
 ## [0.0.5] - 2026-10-09
 
 OpenDDE Harness 0.0.5 adds fixed-length minibinder design, improves final

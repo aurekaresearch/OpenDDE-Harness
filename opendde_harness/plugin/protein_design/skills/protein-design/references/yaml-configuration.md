@@ -282,7 +282,8 @@ local paths. The service performs its own MSA/template preparation, so local
 `pairedMsaPath` and `unpairedMsaPath` values are rejected in API mode.
 
 API requests default to `fold.need_atom_confidence: true`, producing matched
-`full_data_sample_*.json` artifacts with atom pLDDT, token PAE, and contact
+`full_data_sample_*.json` artifacts (stored as lossless `.npz` unless
+`fold.full_data_format: json`) with atom pLDDT, token PAE, and contact
 probabilities. Use `design.optimization_metric: loss` in both API and local mode
 for the same 10-component weighted objective. Disabling atom confidence with
 API loss optimization is rejected before launch; missing tensors fail scoring

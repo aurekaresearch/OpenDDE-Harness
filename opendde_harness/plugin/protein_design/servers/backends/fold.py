@@ -31,6 +31,10 @@ from typing import Any, Dict, List, Optional, Union
 from rich.console import Console
 
 from opendde_harness.plugin.protein_design.core.asset_paths import OPENDDE_COMMON_ASSETS
+from opendde_harness.plugin.protein_design.servers.backends.confidence_artifacts import (
+    FULL_DATA_FORMATS,
+    compact_full_data_dir,
+)
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -163,6 +167,9 @@ class FoldConfig:
     target_msa: Optional[Dict[str, Any]] = None
     ipsae_dist_cutoff: float = 10.0
     ipsae_pae_cutoff: float = 10.0
+    # "npz" re-encodes each full_data_sample JSON as lossless compressed npz after
+    # the fold is parsed; "json" keeps OpenDDE's original files.
+    full_data_format: str = "npz"
 
     # Execution settings
     execution_mode: Optional[str] = None
@@ -204,6 +211,9 @@ class FoldConfig:
         if isinstance(self.cp_degree, bool) or not isinstance(self.cp_degree, int) or self.cp_degree < 1:
             raise ValueError("fold.cp_degree must be a positive integer")
         self.seeds = resolve_fold_seeds(self.seeds)
+        self.full_data_format = str(self.full_data_format).strip().lower()
+        if self.full_data_format not in FULL_DATA_FORMATS:
+            raise ValueError("fold.full_data_format must be json or npz")
         mode = normalize_execution_mode(self.execution_mode)
         self.execution_mode = mode
         self.device = str(self.device or os.environ.get("OPENDDE_HARNESS_COMPUTE_DEVICE", "auto")).strip().lower()
@@ -1005,7 +1015,7 @@ class StructurePredictor:
         except RuntimeError:
             if self._uses_api_runtime():
                 raise
-            full_data_files = sorted(output_dir.glob("**/*full_data*.json"))
+            full_data_files = self._full_data_files(output_dir)
             if not valid_cif_files or not full_data_files:
                 raise
             cif = valid_cif_files[0]
@@ -1026,6 +1036,11 @@ class StructurePredictor:
                 "OpenDDE did not produce atom-level PAE confidence data; ipSAE is unavailable for %s",
                 output_dir,
             )
+        if full_data is not None and self.config.full_data_format == "npz":
+            # ipSAE above read the original JSON; the npz decodes to identical
+            # values, so later loss scoring sees the same numbers.
+            compacted = compact_full_data_dir(output_dir)
+            full_data = compacted.get(full_data, full_data)
 
         return FoldResult(
             sequences=sequences_only,
@@ -1179,6 +1194,11 @@ class StructurePredictor:
         match = re.search(r"_sample_(\d+)", path.name)
         return int(match.group(1)) if match else None
 
+    @staticmethod
+    def _full_data_files(result_dir: Path) -> List[Path]:
+        """Return full_data artifacts in either OpenDDE JSON or compact npz form."""
+        return sorted([*result_dir.glob("**/*full_data*.json"), *result_dir.glob("**/*full_data*.npz")])
+
     def _select_best_diffusion_sample(
         self, result_dir: Path, require_atom_site: bool = False
     ) -> tuple[Path, Path, Optional[Path], tuple[float, float, float, float]]:
@@ -1193,9 +1213,14 @@ class StructurePredictor:
             cif = summary.with_name(f"{prefix}_sample_{sample_index}.cif")
             if not cif.is_file() or (require_atom_site and not self._cif_has_atom_site_rows(cif)):
                 continue
-            full_data = summary.with_name(f"{prefix}_full_data_sample_{sample_index}.json")
-            if not full_data.is_file():
-                full_data = None
+            full_data = next(
+                (
+                    path
+                    for suffix in (".json", ".npz")
+                    if (path := summary.with_name(f"{prefix}_full_data_sample_{sample_index}{suffix}")).is_file()
+                ),
+                None,
+            )
             metrics = self._parse_confidence_json(summary)
             samples.append((cif, summary, full_data, metrics, sample_index))
 
@@ -1209,10 +1234,7 @@ class StructurePredictor:
             if not cif_files or not confidence_files:
                 raise RuntimeError(f"No complete structure/confidence sample found in {result_dir}")
             metrics = self._parse_confidence_json(confidence_files[0])
-            full_data = next(
-                iter(sorted(result_dir.glob("**/*full_data*.json"))),
-                None,
-            )
+            full_data = next(iter(self._full_data_files(result_dir)), None)
             logger.warning(
                 "Sample IDs could not be paired in %s; selected first sorted artifacts: structure=%s confidence=%s",
                 result_dir,

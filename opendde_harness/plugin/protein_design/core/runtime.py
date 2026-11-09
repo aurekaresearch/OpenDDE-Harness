@@ -101,6 +101,7 @@ class WorkflowConfigLoader:
             "enable_batch_inference",
             "enable_msa_search",
             "execution_mode",
+            "full_data_format",
             "gpus",
             "image",
             "ipsae_dist_cutoff",
