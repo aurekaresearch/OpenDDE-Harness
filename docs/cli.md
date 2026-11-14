@@ -110,3 +110,34 @@ For command-specific help:
 ddeharness protein-design --help
 ddeharness protein-design start --help
 ```
+
+## Rerun post-filter on saved results
+
+`ddeharness protein-design post-filter --task-id TASK_ID --output selection.json`
+reruns only the post-filter agent using `workflow.json` and the snapshot's
+`final_candidates` in the local task store. The task must no longer be running.
+Use `OPENDDE_HARNESS_PROTEIN_DESIGN_ROOT` to select a different task root.
+
+Optional flags:
+
+- `--top-k N`: override the saved selection count.
+- `--analysis analysis.json`: reuse a saved `AnalyzeAgentOutput` JSON object
+  containing `downstream_header`. If omitted, the prompt explicitly marks the
+  original analysis unavailable; analysis is not regenerated.
+- `--opendde-config config.json`: choose the LLM configuration.
+- `--json`: also print the selection JSON.
+
+The command preserves existing eligibility checks and bounded shortlisting.
+Candidates must already have successful terminal refolding evidence, a finite
+objective and a structure path. It does not generate candidates, refold, contact
+compute or memory services, or change the original task. Tasks without eligible
+refolded final candidates fail with an error. Agent failures are reported as
+errors without silently substituting objective ranking. The output contains
+selection decisions, shortlist audit, source task ID and analysis availability.
+Choose a new output path: existing files are never overwritten. LLM calls still
+require credentials and may incur costs.
+
+Design-loop feedback now includes compact candidate scores and gate summaries,
+plus the five most frequent recurring issues and an omitted count. Complete
+sequences, contact lists and other evidence remain in the candidate records.
+Unknown gate status remains unknown, including when gate evidence is absent.

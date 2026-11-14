@@ -10,7 +10,12 @@ from typing import Any
 import typer
 from rich.console import Console
 
-from opendde_harness.plugin.protein_design.core.contracts import TaskSnapshot, WorkflowConfig
+from opendde_harness.plugin.protein_design.core.contracts import (
+    AnalyzeAgentOutput,
+    Candidate,
+    TaskSnapshot,
+    WorkflowConfig,
+)
 from opendde_harness.plugin.protein_design.core.detached import DetachedDesignTaskController
 from opendde_harness.plugin.protein_design.core.preparation import (
     compute_summary,
@@ -259,3 +264,110 @@ def start_task(
     console.print(f"[bold]cycles:[/bold] {snapshot.total_cycles}")
     console.print(f"[bold]fold_backend:[/bold] {workflow.fold_backend}")
     console.print(f"[bold]compute_url:[/bold] {snapshot.compute_url or 'unresolved'}")
+
+
+async def _run_post_filter(
+    workflow: WorkflowConfig,
+    candidates: list[Candidate],
+    analysis: AnalyzeAgentOutput,
+    config_path: Path | None,
+    plugin_config: dict[str, Any],
+) -> dict[str, Any]:
+    from opendde_harness.cli._helpers import load_runtime_config, make_provider
+    from opendde_harness.plugin.protein_design.agents.phases import ProteinDesignPhases
+    from opendde_harness.plugin.protein_design.agents.session import OpenDDEHarnessStructuredSession
+    from opendde_harness.plugin.protein_design.core.memory import DesignMemory
+    from opendde_harness.plugin.protein_design.core.orchestrator import DesignOrchestrator
+    from opendde_harness.plugin.protein_design.servers.worker import design_model
+
+    if len({item.candidate_id for item in candidates}) != len(candidates):
+        raise ValueError("PostFilter candidate IDs must be unique")
+    eligible = [
+        item
+        for item in candidates
+        if item.metadata.get("post_refold_success") and DesignOrchestrator._post_filter_eligible(item)
+    ]
+    if not eligible:
+        raise ValueError("No eligible refolded final candidates; post-filter does not run refolding")
+    eligible_ids = {item.candidate_id for item in eligible}
+    runtime = load_runtime_config(str(config_path) if config_path else None)
+    runtime.agents.defaults.model = design_model(workflow, str(runtime.agents.defaults.model))
+    session = OpenDDEHarnessStructuredSession(
+        make_provider(runtime),
+        str(runtime.agents.defaults.model),
+        max_attempts=int(plugin_config.get("structured_output_attempts", 3)),
+    )
+    try:
+        phases = ProteinDesignPhases(session, None, DesignMemory(None, agent_id="post-filter"))
+        result = await phases.post_filter_run(workflow, eligible, analysis)
+        return DesignOrchestrator._post_filter_policy_selection(
+            result.model_dump(mode="json"),
+            eligible=eligible,
+            rejected=[item for item in candidates if item.candidate_id not in eligible_ids],
+            terminal=candidates,
+            config=workflow,
+            post_refold_error=None,
+        )
+    finally:
+        await session.close()
+
+
+@protein_design_app.command("post-filter")
+def post_filter_task(
+    task_id: str = typer.Option(..., "--task-id", help="Existing task containing refolded final candidates."),
+    output: Path = typer.Option(..., "--output", dir_okay=False, help="New JSON output file; never overwrites a file."),
+    analysis: Path | None = typer.Option(
+        None,
+        "--analysis",
+        exists=True,
+        dir_okay=False,
+        help="Saved AnalyzeAgentOutput JSON; omitted analysis is marked unavailable.",
+    ),
+    top_k: int | None = typer.Option(None, "--top-k", min=1, help="Override the saved selection count."),
+    opendde_harness_config: Path | None = typer.Option(None, "--opendde-config", exists=True, dir_okay=False),
+    json_output: bool = typer.Option(False, "--json", help="Also emit the selection as JSON."),
+) -> None:
+    """Rerun only the post-filter agent on saved final candidates, without compute or memory services."""
+    from opendde_harness.plugin.protein_design.core.detached import TaskFileStore
+
+    try:
+        if output.exists():
+            raise ValueError("Output already exists; choose a new file")
+        if not output.parent.is_dir():
+            raise ValueError("Output parent directory does not exist")
+        store = TaskFileStore()
+        workflow = store.read_workflow(task_id)
+        snapshot = store.read_snapshot(task_id, reconcile=False)
+        if snapshot.status.value in {"queued", "running"}:
+            raise ValueError("Wait for the task to stop before rerunning post-filter")
+        if top_k is not None:
+            workflow = workflow.model_copy(update={"post_filter_top_k": top_k})
+        saved_analysis = (
+            AnalyzeAgentOutput.model_validate_json(analysis.read_text(encoding="utf-8"))
+            if analysis
+            else AnalyzeAgentOutput(
+                downstream_header="Original analysis unavailable; use saved candidate evidence only."
+            )
+        )
+        plugin_config = _load_plugin_config(opendde_harness_config)
+        payload = asyncio.run(
+            _run_post_filter(
+                workflow,
+                snapshot.final_candidates,
+                saved_analysis,
+                opendde_harness_config,
+                plugin_config,
+            )
+        )
+        payload["source_task_id"] = task_id
+        payload["analysis_available"] = analysis is not None
+        serialized = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)
+        with output.open("x", encoding="utf-8") as handle:
+            handle.write(serialized + "\n")
+    except Exception as exc:
+        error_console.print(f"Protein-design post-filter failed: {exc}", markup=False)
+        raise typer.Exit(1) from exc
+    if json_output:
+        typer.echo(serialized)
+    else:
+        typer.echo(f"Saved post-filter selection to {output}")

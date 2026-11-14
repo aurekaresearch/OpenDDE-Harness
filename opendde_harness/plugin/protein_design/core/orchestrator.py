@@ -1788,52 +1788,74 @@ class DesignOrchestrator:
         selected_parent: dict[str, Any] | None,
         recurring_offenders: dict[str, int],
     ) -> str:
+        def gate_summary(candidate: Candidate) -> dict[str, Any]:
+            evidence = candidate.metadata.get("gate_evidence") or {}
+            passed = candidate.metadata.get("gate_passed")
+            if passed is None:
+                passed = candidate.metrics.get("gate_passed")
+            result = {"passed": bool(passed) if passed is not None else None}
+            for key in (
+                "reason",
+                "cdr3_gate_passed",
+                "cdr_contact_fraction_gate_passed",
+                "cdr_contact_fraction",
+                "cdr_contact_fraction_threshold",
+                "cdr3_epitope_contacts",
+                "num_contacted_hotspots",
+                "num_missed_hotspots",
+                "epitope_gate_skipped",
+                "epitope_gate_skip_reason",
+            ):
+                if key in evidence and evidence[key] is not None:
+                    value = evidence[key]
+                    result[key] = round(value, 4) if isinstance(value, float) else value
+            if "framework_contact_residue_ids" in evidence:
+                result["framework_contact_count"] = len(evidence["framework_contact_residue_ids"])
+            return result
+
+        def candidate_summary(candidate: Candidate | None) -> dict[str, Any] | None:
+            if candidate is None:
+                return None
+            return {"id": candidate.candidate_id, "objective": candidate.objective, "gate": gate_summary(candidate)}
+
         parent_objective = selected_parent.get("objective") if selected_parent is not None else None
         candidate_changes = {}
         for candidate in candidates:
             if candidate.objective is None or parent_objective is None:
-                status = "unknown"
-                delta = None
+                status, delta = "unknown", None
             else:
                 delta = float(candidate.objective) - float(parent_objective)
                 improved = delta < 0 if config.minimize else delta > 0
                 status = "improved" if improved else ("unchanged" if delta == 0 else "worsened")
             candidate_changes[candidate.candidate_id] = {
                 "objective": candidate.objective,
-                "parent_objective": parent_objective,
                 "delta": delta,
                 "status": status,
+                "gate": gate_summary(candidate),
             }
-        working_evidence = working_parent.metadata.get("gate_evidence", {}) if working_parent is not None else {}
+        offenders = sorted(recurring_offenders.items(), key=lambda item: (-item[1], item[0]))[:5]
         return json.dumps(
             {
                 "objective_key": config.objective_key,
                 "minimize": config.minimize,
-                "working_parent": (
-                    {
-                        "candidate": working_parent.model_dump(mode="json"),
-                        "violation_count": len(working_evidence.get("framework_contact_residue_ids", [])),
-                        "violations": working_evidence.get(
-                            "framework_contact_residue_ids",
-                            [],
-                        ),
-                    }
-                    if working_parent
-                    else None
-                ),
-                "population_size": len(population),
-                "population_best": (population[0].model_dump(mode="json") if population else None),
-                "candidate_gate_evidence": {
-                    candidate.candidate_id: {
-                        **(candidate.metadata.get("gate_evidence") or {}),
-                        "gate_passed": candidate.metadata.get("gate_passed", candidate.metrics.get("gate_passed")),
-                    }
-                    for candidate in candidates
+                "comparison_parent": {
+                    "id": selected_parent.get("candidate_id") if selected_parent else None,
+                    "objective": parent_objective,
                 },
+                "working_parent": candidate_summary(working_parent),
+                "population_size": len(population),
+                "population_best": candidate_summary(DesignOrchestrator._best(population, config)),
                 "candidate_changes": candidate_changes,
-                "recurring_offenders": recurring_offenders,
+                "recurring_offenders": dict(offenders),
+                "recurring_offenders_omitted": max(0, len(recurring_offenders) - len(offenders)),
+                "recurring_offender_position_semantics": "zero_based_chain_sequence",
+                "guidance": "Objective improvement does not override gate failure. "
+                "Framework contacts are observations, not an instruction to mutate fixed residues. "
+                "Unknown or skipped gates are not evidence of passing. "
+                "Full contact lists and structures remain in candidate records.",
             },
             ensure_ascii=False,
+            separators=(",", ":"),
         )
 
     @classmethod
